@@ -4,6 +4,8 @@
 
 - **Yerel Code**: Claude Code bu Mac'te, seçtiğiniz hesapla çalışır. Sohbet görünümünde açılır ve arayüzü Claude uygulamasına benzer: araç adımları toplu satırlar hâlinde, izin ve soru kartları, model ve efor seçimi, sağda ilerleme paneli. İsterseniz aynı oturumu **Terminal** düğmesiyle terminalde sürdürebilirsiniz.
 - **Web**: Her hesabın kendi claude.ai penceresi var. Çerezler ayrı tutulduğu için üç hesap aynı anda açık kalabilir.
+- **Model, efor ve kullanım**: Yazma kutusundaki "Opus 5.5 · Yüksek" düğmesinden model ve düşünme eforu seçilir. Yanındaki halka 5 saatlik oturum limitinin dolu kısmını gösterir; tıklayınca oturum, haftalık ve model bazlı limitler sıfırlanma zamanlarıyla açılır.
+- **Artifacts**: Claude'un panelde ürettiği HTML sayfaları, SVG'ler ve belgeler tek galeride toplanır. Claude bir `.html`/`.svg` yazınca kendiliğinden eklenir, sonraki düzenlemeler yeni sürüm olur; Claude `publish_artifact` aracıyla başka türleri de yayımlayabilir, kod bloklarındaki **Artifact** düğmesiyle siz de ekleyebilirsiniz. Galeride arama, yıldız, yeniden adlandırma, sürümler, önizleme/kod, indirme, tarayıcıda açma ve "Claude ile düzenle" var.
 
 Her hesap ayrı bir ayar klasörü kullanır (`~/.claude-is`, `~/.claude-max`, `~/.claude-pro`). Giriş bilgileri, geçmiş ve ayarlar bu yüzden birbirine karışmaz.
 
@@ -39,7 +41,8 @@ Bu komut paketleri kurar, uygulamayı oluşturur ve `~/Applications/Claude Panel
 |---|---|
 | ⌘1 / ⌘2 / ⌘3 | Hesap değiştir |
 | ⌘K | Yerel Code ↔ Web |
-| ⌘T / ⌘W | Yeni sekme (başlatıcı) / sekmeyi kapat |
+| ⌘N (ya da ⌘T) / ⌘W | Yeni sohbet / sekmeyi kapat |
+| ⇧⌘A | Artifacts |
 | ⌘⌥← / ⌘⌥→ | Önceki / sonraki sekme |
 | ⌘+ / ⌘- / ⌘0 | Yazı boyutu |
 | ⌘, | Hesap ayarları |

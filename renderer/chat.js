@@ -24,10 +24,24 @@ const TOOL_NAMES = {
   ExitPlanMode: 'Plan', AskUserQuestion: 'Soru', BashOutput: 'Komut çıktısı', KillShell: 'Komut durduruldu',
 };
 const TOOL_ICONS = {
-  Read: '📄', Edit: '✏️', MultiEdit: '✏️', Write: '📝', Bash: '›_', Grep: '🔎', Glob: '🗂', WebFetch: '🌐',
-  WebSearch: '🌐', Task: '🤖', Agent: '🤖', TodoWrite: '☑', Skill: '🧩', NotebookEdit: '📓',
-  AskUserQuestion: '❓', ExitPlanMode: '🗺',
+  Read: 'file', Edit: 'pencil', MultiEdit: 'pencil', Write: 'file', Bash: 'terminal', Grep: 'search', Glob: 'folder',
+  WebFetch: 'globe', WebSearch: 'search', Task: 'sparkle', Agent: 'sparkle', TodoWrite: 'check', Skill: 'layers',
+  NotebookEdit: 'file', AskUserQuestion: 'chat', ExitPlanMode: 'layers', mcp__panel__publish_artifact: 'artifacts',
 };
+const PUBLISH_TOOL = 'mcp__panel__publish_artifact';
+const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
+// MCP araçlarında kod taşıyan alanlar (Blender execute_blender_code, Figma figma_execute…) kod bloğu olarak çizilir
+const MCP_CODE_KEYS = ['code', 'script', 'python', 'javascript', 'js', 'sql'];
+const MCP_LANGS = [[/blender/i, 'python'], [/figma|pencil/i, 'javascript'], [/unity/i, 'csharp']];
+function mcpCodeField(name, input) {
+  if (!name.startsWith('mcp__') || name === PUBLISH_TOOL || !input) return null;
+  const key = MCP_CODE_KEYS.find((k) => typeof input[k] === 'string' && input[k].trim());
+  if (!key) return null;
+  const server = name.split('__')[1] || '';
+  const lang = { python: 'python', javascript: 'javascript', js: 'javascript', sql: 'sql' }[key]
+    || (MCP_LANGS.find(([re]) => re.test(server)) || [])[1] || '';
+  return { key, lang, code: input[key] };
+}
 // Grup özeti için kategoriler: [tekil/çoğul ifade]
 function toolCategory(name) {
   if (name === 'Bash' || name === 'BashOutput') return 'bash';
@@ -37,6 +51,7 @@ function toolCategory(name) {
   if (name === 'TodoWrite') return 'todo';
   if (name === 'Task' || name === 'Agent') return 'agent';
   if (name === 'WebFetch' || name === 'WebSearch') return 'web';
+  if (name === 'mcp__panel__publish_artifact') return 'artifact';
   if (name.startsWith('mcp__')) return 'mcp';
   return 'other';
 }
@@ -49,6 +64,7 @@ const CATEGORY_TEXT = {
   agent: (n) => `${n} alt ajan çalıştı`,
   web: (n) => `${n} web isteği`,
   mcp: (n) => `${n} MCP aracı`,
+  artifact: (n) => (n > 1 ? `${n} artifact yayımlandı` : 'artifact yayımlandı'),
   other: (n) => `${n} araç`,
 };
 
@@ -68,21 +84,28 @@ function md(text) {
 
 function mdInto(el, text) {
   el.innerHTML = md(text);
-  // Kod bloklarına dil etiketi ve kopyala düğmesi
-  for (const pre of el.querySelectorAll('pre')) {
-    if (pre.parentElement?.classList.contains('codeblock')) continue;
-    const code = pre.querySelector('code');
-    const lang = (code?.className.match(/language-([\w-]+)/) || [])[1] || '';
-    const copy = h('button', { class: 'code-copy', title: 'Kopyala', onclick: () => {
-      navigator.clipboard.writeText(code ? code.textContent : pre.textContent);
-      copy.textContent = 'Kopyalandı';
-      setTimeout(() => (copy.textContent = 'Kopyala'), 1200);
-    } }, 'Kopyala');
-    const wrap = h('div', { class: 'codeblock' }, h('div', { class: 'code-head' }, h('span', {}, lang || 'kod'), copy));
-    pre.replaceWith(wrap);
-    wrap.append(pre);
-  }
+  for (const pre of el.querySelectorAll('pre')) wrapCodeBlock(pre);
   return el;
+}
+
+// Kod bloklarına dil etiketi, Artifact ve Kopyala düğmeleri
+function wrapCodeBlock(pre) {
+  if (pre.parentElement?.classList.contains('codeblock')) return pre.parentElement;
+  const code = pre.querySelector('code');
+  const lang = (code?.className.match(/language-([\w-]+)/) || [])[1] || '';
+  const copy = h('button', { class: 'code-copy', title: 'Kopyala', onclick: () => {
+    navigator.clipboard.writeText(code ? code.textContent : pre.textContent);
+    copy.textContent = 'Kopyalandı';
+    setTimeout(() => (copy.textContent = 'Kopyala'), 1200);
+  } }, 'Kopyala');
+  const save = h('button', { class: 'code-copy', title: 'Artifacts\'e kaydet', onclick: () => {
+    const tab = save.closest('.chat-host')?.__tab;
+    saveCodeAsArtifact(tab, code ? code.textContent : pre.textContent, lang);
+  } }, icon('artifacts', 13), 'Artifact');
+  const wrap = h('div', { class: 'codeblock' }, h('div', { class: 'code-head' }, h('span', {}, lang || 'kod'), h('span', { class: 'spacer' }), save, copy));
+  if (pre.parentNode) pre.replaceWith(wrap);
+  wrap.append(pre);
+  return wrap;
 }
 
 function relPath(tab, p) {
@@ -92,6 +115,7 @@ function relPath(tab, p) {
 }
 
 function toolLabel(name) {
+  if (name === PUBLISH_TOOL) return 'Artifact yayımlandı';
   if (name.startsWith('mcp__')) {
     const [, server, ...rest] = name.split('__');
     return `${server} · ${rest.join('__')}`;
@@ -110,11 +134,14 @@ function toolSummary(tab, name, input = {}) {
     case 'WebSearch': return input.query || '';
     case 'Task': case 'Agent': return input.description || input.subagent_type || '';
     case 'Skill': return input.skill || input.command || '';
+    case PUBLISH_TOOL: return input.title || relPath(tab, input.file_path) || '';
     case 'TodoWrite': {
       const t = input.todos || [];
       return `${t.filter((x) => x.status === 'completed').length}/${t.length}`;
     }
     default: {
+      const cf = mcpCodeField(name, input);
+      if (cf) return cf.code.split('\n').map((l) => l.trim()).find((l) => l && !/^(#|\/\/|import\s|from\s\S+\s+import\s|const\s+\w+\s*=\s*require\()/.test(l)) || cf.code.trim().split('\n')[0];
       const first = Object.values(input).find((v) => typeof v === 'string');
       return first ? first.slice(0, 120) : '';
     }
@@ -156,16 +183,34 @@ function toolInputView(tab, name, input = {}) {
     case 'Read': return null;
     case 'TodoWrite': return todoList(input.todos);
     case 'Task': case 'Agent': return input.prompt ? mdInto(h('div', { class: 'md small-md' }), input.prompt) : null;
-    default: return Object.keys(input).length ? pre(JSON.stringify(input, null, 2)) : null;
+    default: {
+      const cf = mcpCodeField(name, input);
+      if (cf) {
+        const { [cf.key]: _code, ...rest } = input;
+        const block = wrapCodeBlock(h('pre', {}, h('code', { class: cf.lang ? 'language-' + cf.lang : '' }, cf.code)));
+        return h('div', { class: 'mcp-input' }, block, Object.keys(rest).length ? pre(JSON.stringify(rest, null, 2)) : null);
+      }
+      return Object.keys(input).length ? pre(JSON.stringify(input, null, 2)) : null;
+    }
   }
 }
 
 function resultText(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    return content.map((b) => (b.type === 'text' ? b.text : b.type === 'image' ? '[görsel]' : '')).join('\n');
+    return content.map((b) => (b.type === 'text' ? b.text : '')).filter(Boolean).join('\n');
   }
   return content == null ? '' : JSON.stringify(content, null, 2);
+}
+
+// Araç sonucundaki görseller: API biçimi { source: { media_type, data } } ya da ham MCP biçimi { mimeType, data }
+function resultImages(content) {
+  if (!Array.isArray(content)) return [];
+  return content.filter((b) => b?.type === 'image').map((b) => {
+    const type = b.source?.media_type || b.mimeType || 'image/png';
+    const data = b.source?.data || b.data;
+    return /^image\/[\w.+-]+$/.test(type) && typeof data === 'string' ? `data:${type};base64,${data}` : null;
+  }).filter(Boolean);
 }
 
 function selectEl(cls, title, options, onchange) {
@@ -175,7 +220,7 @@ function selectEl(cls, title, options, onchange) {
 
 // ---------- Sekme oluşturma ----------
 
-async function createChatTab(acctId, cwd, mode, resumeId) {
+async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   const a = acct(acctId);
   const pane = state.panes[acctId];
   if (!a || !pane) return;
@@ -193,10 +238,10 @@ async function createChatTab(acctId, cwd, mode, resumeId) {
   // --- Üst çubuk
   const titleEl = h('div', { class: 'ct-title' }, a.name, h('span', { class: 'ct-sep' }, '·'), h('span', { class: 'ct-folder' }, tilde(cwd).split('/').pop() || cwd));
   const statusEl = h('span', { class: 'ct-status' });
-  const sideBtn = h('button', { class: 'icon-btn', title: 'Yan paneli aç/kapat', onclick: () => toggleSide(tab) }, '▥');
+  const sideBtn = h('button', { class: 'icon-btn', title: 'Yan paneli aç/kapat', onclick: () => toggleSide(tab) }, icon('panel', 17));
   const top = h('div', { class: 'chat-top' },
     titleEl, statusEl, h('span', { class: 'spacer' }),
-    h('button', { class: 'top-btn', title: 'Bu oturumu terminalde aç', onclick: () => openInTerminal(tab) }, '›_ Terminal'),
+    h('button', { class: 'top-btn', title: 'Bu oturumu terminalde aç', onclick: () => openInTerminal(tab) }, icon('terminal', 15), 'Terminal'),
     sideBtn);
 
   // --- Mesaj listesi ve boş ekran
@@ -213,31 +258,32 @@ async function createChatTab(acctId, cwd, mode, resumeId) {
   const slashBox = h('div', { class: 'slash-box', hidden: true });
   const fileInput = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true,
     onchange: (e) => { [...e.target.files].forEach((f) => addImage(tab, f)); e.target.value = ''; } });
-  const sendBtn = h('button', { class: 'send-btn', title: 'Gönder (Enter)', onclick: () => submit(tab) }, '↑');
+  const sendBtn = h('button', { class: 'send-btn', title: 'Gönder (Enter)', onclick: () => submit(tab) }, icon('arrowUp', 17));
   const stopBtn = h('button', { class: 'stop-btn', title: 'Durdur (Esc)', hidden: true, onclick: () => interrupt(tab) }, h('span'));
   const modeSel = selectEl('meta-select', 'İzin modu (Shift+Tab)', MODES, (v) => changeMode(tab, v));
-  const modelSel = selectEl('meta-select', 'Model', [{ value: '', label: 'Varsayılan model' }], (v) => changeModel(tab, v));
-  const effortSel = selectEl('meta-select', 'Düşünme eforu', [{ value: '', label: 'Varsayılan efor' }, ...EFFORTS], (v) => changeEffort(tab, v));
+  const picker = modelPicker(acctId,
+    () => ({ model: tab.modelChoice || '', effort: tab.effort || '', resolved: tab.model, models: tab.models }),
+    (patch) => ('model' in patch ? changeModel(tab, patch.model) : changeEffort(tab, patch.effort)));
   const composer = h('div', { class: 'composer' },
     h('div', { class: 'composer-inner' },
       slashBox,
       h('div', { class: 'composer-box' },
         attach, input,
         h('div', { class: 'composer-bar' },
-          h('button', { class: 'plus-btn', title: 'Görsel ekle', onclick: () => fileInput.click() }, '+'),
+          h('button', { class: 'plus-btn', title: 'Görsel ekle', onclick: () => fileInput.click() }, icon('plus', 17)),
           fileInput,
           h('span', { class: 'spacer' }),
           stopBtn, sendBtn)),
       h('div', { class: 'composer-meta' },
-        h('span', { class: 'meta-folder', title: cwd }, '📁 ', tilde(cwd).split('/').pop() || cwd),
+        h('span', { class: 'meta-folder', title: cwd }, icon('folder', 14), tilde(cwd).split('/').pop() || cwd),
         modeSel,
         h('span', { class: 'spacer' }),
-        modelSel, effortSel)));
+        picker, usageButton(acctId))));
 
   // --- Yan panel
   const progressBody = h('div', { class: 'side-body' }, h('div', { class: 'side-empty' }, 'Claude görev listesi oluşturunca burada görünür.'));
   const progressCount = h('span', { class: 'side-count' });
-  const contextBody = h('div', { class: 'side-body' }, h('div', { class: 'side-row' }, '📁 ', tilde(cwd)));
+  const contextBody = h('div', { class: 'side-body' }, h('div', { class: 'side-row' }, icon('folder', 14), tilde(cwd)));
   const sessionBody = h('div', { class: 'side-body' }, h('div', { class: 'side-empty' }, '—'));
   const side = h('aside', { class: 'chat-side' },
     h('details', { class: 'side-sec', open: true }, h('summary', {}, 'İlerleme', progressCount), progressBody),
@@ -245,9 +291,11 @@ async function createChatTab(acctId, cwd, mode, resumeId) {
     h('details', { class: 'side-sec', open: true }, h('summary', {}, 'Oturum'), sessionBody));
 
   const main = h('div', { class: 'chat-main' }, top, scroller, composer);
-  const host = h('div', { class: 'term-host chat-host active' + (window.innerWidth > 1250 ? ' side-open' : '') }, main, side);
+  const artPane = h('div', { class: 'chat-art' });
+  const host = h('div', { class: 'term-host chat-host active' + (window.innerWidth > 1250 ? ' side-open' : '') }, main, artPane, side);
+  host.__tab = tab;
   Object.assign(tab, {
-    host, list, scroller, welcome, input, attach, slashBox, sendBtn, stopBtn, modelSel, modeSel, effortSel,
+    host, list, scroller, artPane, welcome, input, attach, slashBox, sendBtn, stopBtn, picker, modeSel,
     statusEl, progressBody, progressCount, contextBody, sessionBody,
   });
   syncSelects(tab);
@@ -302,6 +350,14 @@ async function createChatTab(acctId, cwd, mode, resumeId) {
   renderSidebar();
   focusCurrent();
   scrollDown(tab, true);
+  if (opts.send) { tab.input.value = opts.send; submit(tab); }
+  else if (opts.draft) setDraft(tab, opts.draft);
+}
+
+function setDraft(tab, text) {
+  tab.input.value = text;
+  tab.autosize?.();
+  requestAnimationFrame(() => { tab.input.focus(); tab.input.setSelectionRange(text.length, text.length); });
 }
 
 function toggleSide(tab) {
@@ -387,9 +443,12 @@ function currentGroup(tab) {
   const spinner = h('span', { class: 'grp-spin' });
   const body = h('div', { class: 'grp-body' });
   const el = h('details', { class: 'tool-group' }, h('summary', {}, spinner, summaryText, h('span', { class: 'grp-chev' }, '›')), body);
-  const group = { el, body, summaryText, spinner, counts: {}, running: new Set(), errors: 0, last: '' };
+  // Araçların döndürdüğü görseller grup kapalıyken de görünsün diye grubun hemen altına
+  const shots = h('div', { class: 'grp-shots' });
+  const group = { el, body, shots, summaryText, spinner, counts: {}, running: new Set(), errors: 0, last: '' };
   tab.group = group;
   append(tab, el);
+  append(tab, shots);
   return group;
 }
 
@@ -423,12 +482,12 @@ function toolCard(tab, block, parentCard) {
   body.append(sub);
   const el = h('details', { class: 'tool-row' },
     h('summary', {},
-      h('span', { class: 'tool-icon' }, TOOL_ICONS[name] || '🔧'),
+      h('span', { class: 'tool-icon' }, icon(TOOL_ICONS[name] || (name.startsWith('mcp__') ? 'layers' : 'settings'), 14)),
       h('span', { class: 'tool-name' }, toolLabel(name)),
       h('span', { class: 'tool-arg' }, toolSummary(tab, name, input)),
       status),
     body);
-  const card = { el, status, body, sub, name, group: null };
+  const card = { el, status, body, sub, name, input, group: null };
   tab.toolCards.set(id, card);
 
   if (parentCard) {
@@ -458,6 +517,21 @@ function toolResult(tab, block) {
     updateGroup(tab, card.group);
   }
   if (block.is_error) card.el.classList.add('error');
+  if (FILE_TOOLS.has(card.name) && !block.is_error && card.input?.file_path) {
+    const p = card.input.file_path.startsWith('/') ? card.input.file_path : `${tab.cwd}/${card.input.file_path}`;
+    card.body.append(h('div', { class: 'tool-extra' },
+      h('button', { class: 'mini', title: 'Bu dosyayı Artifacts galerisine ekle', onclick: () => addFileAsArtifact(tab, p) }, icon('artifacts', 13), 'Artifacts\'e ekle')));
+  }
+  const imgs = resultImages(block.content);
+  if (imgs.length) {
+    const target = card.group ? card.group.shots : card.body;
+    const stick = nearBottom(tab);
+    for (const src of imgs) {
+      const img = h('img', { src, title: toolLabel(card.name), onclick: () => img.classList.toggle('zoom') });
+      target.append(h('figure', { class: 'tool-shot' }, img, card.group ? h('figcaption', {}, toolLabel(card.name)) : null));
+    }
+    if (stick) scrollDown(tab, true);
+  }
   const text = resultText(block.content).trim();
   if (!text || card.name === 'TodoWrite') return;
   if (['Edit', 'MultiEdit', 'Write'].includes(card.name) && !block.is_error) return;
@@ -483,7 +557,7 @@ function updateProgress(tab, todos) {
 }
 
 function updateContext(tab, init) {
-  const rows = [h('div', { class: 'side-row' }, '📁 ', tilde(init.cwd || tab.cwd))];
+  const rows = [h('div', { class: 'side-row' }, icon('folder', 14), tilde(init.cwd || tab.cwd))];
   const mcp = init.mcp_servers || [];
   if (mcp.length) {
     rows.push(h('div', { class: 'side-label' }, 'MCP sunucuları'));
@@ -576,6 +650,7 @@ function handleChatMsg(chatId, msg) {
       finishGroups(tab);
       endGroup(tab);
       setBusy(tab, false);
+      refreshUsageSoon(tab.acctId);
       const secs = Math.round((msg.duration_ms || 0) / 1000);
       updateSession(tab, { lastTurn: secs >= 60 ? `${Math.floor(secs / 60)} dk ${secs % 60} sn` : `${secs} sn` });
       if (msg.is_error || msg.subtype !== 'success') {
@@ -596,6 +671,7 @@ function handleChatMsg(chatId, msg) {
       return;
     case 'rate_limit_event': {
       const info = msg.rate_limit_info || {};
+      refreshUsageSoon(tab.acctId);
       if (info.status && info.status !== 'allowed') note(tab, 'Kullanım limiti: ' + (info.status === 'allowed_warning' ? 'limite yaklaşıldı' : 'limite ulaşıldı'), 'warn');
       return;
     }
@@ -821,40 +897,18 @@ function handlePermissionDone(chatId, rid) {
 
 // ---------- Model, efor, mod ----------
 
-function savePrefs(tab) {
-  const prefs = { model: tab.modelChoice || '', effort: tab.effort || '', mode: tab.permissionMode || '' };
-  state.cfg.chatPrefs = { ...(state.cfg.chatPrefs || {}), [tab.acctId]: prefs };
-  window.panel.saveConfig({ chatPrefs: { [tab.acctId]: prefs } });
+function saveAcctPrefs(acctId, patch) {
+  const prefs = { model: '', effort: '', mode: '', ...(state.cfg.chatPrefs?.[acctId] || {}), ...patch };
+  state.cfg.chatPrefs = { ...(state.cfg.chatPrefs || {}), [acctId]: prefs };
+  window.panel.saveConfig({ chatPrefs: { [acctId]: prefs } });
 }
 
-function currentModelInfo(tab) {
-  const want = tab.modelChoice || '';
-  return tab.models.find((m) => m.value === want) || tab.models.find((m) => tab.model && (m.resolvedModel === tab.model || tab.model.includes(m.value)));
+function savePrefs(tab) {
+  saveAcctPrefs(tab.acctId, { model: tab.modelChoice || '', effort: tab.effort || '', mode: tab.permissionMode || '' });
 }
 
 function syncSelects(tab) {
-  const ms = tab.modelSel;
-  if (![...ms.options].some((o) => o.value === (tab.modelChoice || ''))) {
-    ms.append(h('option', { value: tab.modelChoice }, tab.modelChoice));
-  }
-  ms.value = tab.modelChoice || '';
-  if (!tab.modelChoice && tab.model) {
-    // Varsayılan model listede varsa onu seçili göster (aynı model iki kez görünmesin)
-    const match = tab.models.find((m) => m.value !== 'default' && (m.resolvedModel === tab.model || tab.model.includes(m.value)));
-    if (match) { ms.value = match.value; if (ms.options[0]?.value === '') ms.options[0].hidden = true; }
-    else if (ms.options[0]) ms.options[0].textContent = prettyModel(tab.model);
-  }
-
-  // Efor: modelin desteklediği seviyeler
-  const info = currentModelInfo(tab);
-  const levels = info?.supportedEffortLevels;
-  const es = tab.effortSel;
-  es.innerHTML = '';
-  es.append(h('option', { value: '' }, 'Varsayılan efor'));
-  for (const e of EFFORTS) if (!levels || levels.includes(e.value)) es.append(h('option', { value: e.value }, e.label));
-  es.value = tab.effort || '';
-  es.hidden = info && info.supportsEffort === false;
-
+  tab.picker.refresh();
   if (tab.permissionMode) tab.modeSel.value = tab.permissionMode;
 }
 
@@ -868,12 +922,7 @@ function handleModels(chatId, models) {
   const tab = chatsById.get(chatId);
   if (!tab || !Array.isArray(models)) return;
   tab.models = models;
-  const ms = tab.modelSel;
-  ms.innerHTML = '';
-  ms.append(h('option', { value: '' }, 'Varsayılan model'));
-  for (const m of models.filter((x) => x.value && x.value !== 'default')) {
-    ms.append(h('option', { value: m.value, title: m.description || '' }, m.displayName || m.value));
-  }
+  (acctInfo[tab.acctId] ||= {}).models = models;
   syncSelects(tab);
 }
 
@@ -889,6 +938,7 @@ async function changeModel(tab, model) {
 async function changeEffort(tab, level) {
   tab.effort = level;
   savePrefs(tab);
+  syncSelects(tab);
   if (!tab.chatId) return;
   const r = await window.panel.chatSetEffort(tab.chatId, level);
   if (r !== true) toast('Efor değiştirilemedi: ' + r);

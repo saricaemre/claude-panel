@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:" />
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: artifact:; frame-src artifact:; font-src 'self' data:" />
   <title>Claude Panel</title>
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
   <link rel="stylesheet" href="styles.css" />
@@ -16,15 +16,20 @@
         <span class="brand-mark">✳</span>
         <span>Claude Panel</span>
       </div>
+      <nav id="nav">
+        <button class="nav-item" id="navNew" title="Yeni sohbet (⌘N)">
+          <span class="nav-ic" data-icon="plus"></span><span>Yeni sohbet</span><kbd>⌘N</kbd>
+        </button>
+        <button class="nav-item" id="navArtifacts" title="Artifacts (⇧⌘A)">
+          <span class="nav-ic" data-icon="artifacts"></span><span>Artifacts</span><span class="nav-count" id="artCount"></span>
+        </button>
+      </nav>
       <div class="section-label">Hesaplar</div>
-      <nav id="accounts"></nav>
+      <div id="accounts"></div>
       <div class="sidebar-footer">
-        <button id="settingsBtn" class="ghost-btn" title="Hesap ayarları (⌘,)">⚙ Hesap ayarları</button>
-        <div class="hints">
-          <div><kbd>⌘1</kbd>–<kbd>⌘3</kbd> hesap değiştir</div>
-          <div><kbd>⌘K</kbd> Yerel Code ↔ Web</div>
-          <div><kbd>⌘T</kbd> yeni terminal · <kbd>⌘W</kbd> kapat</div>
-        </div>
+        <button id="settingsBtn" class="nav-item" title="Hesap ayarları (⌘,)">
+          <span class="nav-ic" data-icon="settings"></span><span>Hesap ayarları</span><kbd>⌘,</kbd>
+        </button>
       </div>
     </aside>
 
@@ -36,11 +41,13 @@
           <span class="muted" id="topNote"></span>
         </div>
         <div class="seg" id="viewSeg">
-          <button data-view="code" title="Claude Code bu Mac'te, terminalde çalışır">⌨ Yerel Code</button>
-          <button data-view="chat" title="claude.ai web: sohbet ve bulut oturumları">🌐 Web</button>
+          <button data-view="code" title="Claude Code bu Mac'te çalışır (⌘K ile geç)"><span data-icon="terminal"></span>Yerel Code</button>
+          <button data-view="chat" title="claude.ai web: sohbet ve bulut oturumları (⌘K ile geç)"><span data-icon="globe"></span>Web</button>
         </div>
       </header>
-      <section id="stage"></section>
+      <section id="stage">
+        <div id="artifactsPage"></div>
+      </section>
     </main>
   </div>
 
@@ -72,7 +79,10 @@
   <script src="../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
   <script src="../node_modules/marked/lib/marked.umd.js"></script>
   <script src="../node_modules/dompurify/dist/purify.js"></script>
+  <script src="icons.js"></script>
   <script src="chat.js"></script>
+  <script src="artifacts.js"></script>
+  <script src="usage.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

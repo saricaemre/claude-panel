@@ -9,6 +9,11 @@ const log = (...a) => fs.appendFileSync(LOG, a.join(' ') + '\n');
 log('ARGS', JSON.stringify(process.argv.slice(2)), 'CFG', process.env.CLAUDE_CONFIG_DIR, 'CWD', process.cwd());
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 const sid = '11111111-2222-3333-4444-555555555555';
+// Gerçek Claude Code gibi init mesajında verilen --model/--effort değerlerini bildir
+const argOf = (k) => (process.argv.find((x) => x.startsWith(`--${k}=`)) || '').split('=')[1];
+// Ayar klasöründe .fake-logged-out varsa süreç girişsiz açılmış sayılır (gerçek Claude Code girişi açılışta okur)
+const LOGGED_OUT = fs.existsSync(require('path').join(process.env.CLAUDE_CONFIG_DIR || '', '.fake-logged-out'));
+const MODEL_IDS ={ opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5' };
 let n = 0; const uuid = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pending = new Map();
@@ -31,11 +36,25 @@ rl.on('line', async (line) => {
       { value: 'opus', displayName: 'Opus 5.5', description: 'En güçlü', supportsEffort: true, supportedEffortLevels: ['low','medium','high','xhigh','max'] },
       { value: 'sonnet', displayName: 'Sonnet 5.5', description: 'Hızlı', supportsEffort: true, supportedEffortLevels: ['low','medium','high'] }], account: {} };
     if (sub === 'interrupt') interrupted = true;
+    if (sub === 'get_usage') {
+      const at = (h) => new Date(Date.now() + h * 3600e3).toISOString();
+      response = { session: { total_cost_usd: 0, total_api_duration_ms: 0, total_duration_ms: 0, total_lines_added: 0, total_lines_removed: 0, model_usage: {} },
+        subscription_type: 'max', rate_limits_available: true, behaviors: null,
+        rate_limits: { five_hour: { utilization: 7, resets_at: at(4.2) }, seven_day: { utilization: 12, resets_at: at(80) },
+          seven_day_opus: { utilization: 31, resets_at: at(80) } } };
+      if (LOGGED_OUT) Object.assign(response, { subscription_type: null, rate_limits_available: false, rate_limits: null });
+    }
     out({ type: 'control_response', response: { subtype: 'success', request_id: m.request_id, response } });
     return;
   }
   if (m.type === 'control_response') { const r = pending.get(m.response.request_id); pending.delete(m.response.request_id); r && r(m.response.response || m.response); return; }
-  if (m.type === 'user') { turn++; await runTurn(m); }
+  if (m.type === 'user') {
+    turn++;
+    const t = typeof m.message.content === 'string' ? m.message.content : '';
+    if (/rapor/i.test(t)) await artifactTurn();
+    else if (/blender/i.test(t)) await mcpTurn();
+    else await runTurn(m);
+  }
 });
 const asst = (content, id = 'msg_' + uuid()) => out({ type: 'assistant', message: { id, type: 'message', role: 'assistant', model: 'claude-opus-5-5', content }, parent_tool_use_id: null, uuid: uuid(), session_id: sid });
 const toolRes = (tool_use_id, content, is_error) => out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id, content, is_error }] }, parent_tool_use_id: null, uuid: uuid(), session_id: sid });
@@ -58,7 +77,7 @@ async function runTurn(m) {
   const cwd = process.cwd();
   if (turn === 1) {
     out({ type: 'system', subtype: 'hook_response', hook_id: 'h1', hook_name: 'SessionStart:startup', hook_event: 'SessionStart', output: '', stdout: 'Oturum başı doğrulaması: 13/13 kapı yeşil · sıradaki iş IS-279', stderr: '', outcome: 'success', uuid: uuid(), session_id: sid });
-    out({ type: 'system', subtype: 'init', cwd, session_id: sid, model: 'claude-opus-5-5', permissionMode: 'default', effort: 'high', tools: ['Read', 'Bash'], mcp_servers: [{ name: 'figma', status: 'connected' }], slash_commands: ['compact', 'review', 'tasarim', 'context'], skills: ['tasarim'], agents: ['gorsel-dogrulayici'], claude_code_version: '2.1.300', apiKeySource: 'none', output_style: 'default', plugins: [], uuid: uuid() });
+    out({ type: 'system', subtype: 'init', cwd, session_id: sid, model: MODEL_IDS[argOf('model')] || 'claude-opus-5-5', permissionMode: 'default', effort: argOf('effort') || 'high', tools: ['Read', 'Bash'], mcp_servers: [{ name: 'figma', status: 'connected' }, { name: 'blender', status: 'connected' }], slash_commands: ['compact', 'review', 'tasarim', 'context'], skills: ['tasarim'], agents: ['gorsel-dogrulayici'], claude_code_version: '2.1.300', apiKeySource: 'none', output_style: 'default', plugins: [], uuid: uuid() });
   }
   const text = typeof m.message.content === 'string' ? m.message.content : m.message.content.map((b) => b.text || '[görsel]').join(' ');
   await streamText(`Tamam, **${text.slice(0, 40)}** için önce projenin anlık hâline bakıyorum.`);
@@ -91,6 +110,54 @@ async function runTurn(m) {
   toolRes('t6', 'Cevap: ' + JSON.stringify(qa.updatedInput?.answers || {}));
   await streamText('Bitti. Özet:\n\n| Kapı | Sonuç |\n|---|---|\n| biome | ✓ |\n| tip | ✓ |\n\n```bash\npnpm dogrula\n```\n\nSıradaki iş: **IS-280**.');
   finish('success');
+}
+// Artifact turu: .html yazar, sonra düzenler (iki sürüm), ardından panelin MCP aracıyla bir belge yayımlar
+async function artifactTurn() {
+  const file = process.cwd() + '/rapor.html';
+  const v1 = '<!doctype html><html><head><title>Haftalık rapor</title></head><body style="font-family:sans-serif;background:#fdf6ee;padding:40px"><h1>Haftalık rapor</h1><p id="durum">Sürüm 1</p></body></html>';
+  fs.writeFileSync(file, v1);
+  asst([{ type: 'tool_use', id: 'w1', name: 'Write', input: { file_path: file, content: v1 } }]);
+  toolRes('w1', 'File created successfully');
+  await sleep(400);
+  fs.writeFileSync(file, v1.replace('Sürüm 1', 'Sürüm 2 hazır'));
+  asst([{ type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: file, old_string: 'Sürüm 1', new_string: 'Sürüm 2 hazır' } }]);
+  toolRes('e1', 'ok');
+  await sleep(200);
+  const args = { title: 'Kapı özeti', content: '# Kapı özeti\n\n- biome ✓\n- tip ✓', kind: 'md' };
+  asst([{ type: 'tool_use', id: 'm1', name: 'mcp__panel__publish_artifact', input: args }]);
+  const r = await ask({ subtype: 'mcp_message', server_name: 'panel', message: { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'publish_artifact', arguments: args } } });
+  log('MCP', JSON.stringify(r));
+  const result = r?.mcp_response?.result;
+  toolRes('m1', result?.content?.[0]?.text || 'MCP yanıtı yok', !result || result.isError);
+  await streamText('Raporu hazırladım ve **Artifacts**\'e ekledim.');
+  finish('success');
+}
+// Üçüncü taraf MCP turu (Blender): kod çalıştırır, sonra görsel döndüren bir araç çağırır.
+// Gerçek Claude Code MCP sunucusunu kendi içinde çalıştırır; panele yalnız tool_use ve görselli tool_result gelir.
+async function mcpTurn() {
+  const code = 'import bpy\n\n# Sahneye küp ekle\nbpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 1))\nbpy.context.object.name = "Kup"';
+  asst([{ type: 'tool_use', id: 'b1', name: 'mcp__blender__execute_blender_code', input: { code } }]);
+  toolRes('b1', [{ type: 'text', text: 'Executed code successfully' }]);
+  asst([{ type: 'tool_use', id: 'b2', name: 'mcp__blender__get_viewport_screenshot', input: { max_size: 800 } }]);
+  await sleep(150);
+  toolRes('b2', [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png(64, 40, [232, 140, 70]).toString('base64') } }]);
+  await streamText('Küp hazır, sahne görüntüsü yukarıda.');
+  finish('success');
+}
+// Tek renkli, geçerli bir PNG (görselin gerçekten çözülüp çizildiğini test etmek için)
+function png(w, h, [r, g, b]) {
+  const zlib = require('zlib');
+  const crc = (buf) => { let c = ~0; for (const x of buf) { c ^= x; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1)); } return ~c >>> 0; };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type), data]);
+    const c = Buffer.alloc(4); c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: w }, () => [r, g, b]).flat())]);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(Buffer.concat(Array(h).fill(row)))), chunk('IEND', Buffer.alloc(0))]);
 }
 function finish(subtype) {
   interrupted = false;

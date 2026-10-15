@@ -4,6 +4,10 @@ const fs = require('fs');
 const os = require('os');
 
 const chat = require('./chat-main');
+const artifacts = require('./artifacts');
+
+// Özel protokol app hazır olmadan kaydedilmeli
+artifacts.registerScheme();
 
 let pty;
 try {
@@ -86,12 +90,13 @@ function createPty({ accountId, cwd, mode, resumeId, cols, rows }) {
     delete env.CLAUDE_CONFIG_DIR; // boş bırakılırsa varsayılan ~/.claude kullanılır
   }
 
+  const claude = `claude --allowedTools ${shellQuote(chat.AUTO_ALLOW_TOOLS.join(','))}`;
   const commands = {
-    new: 'claude',
-    continue: 'claude --continue',
-    resume: 'claude --resume',
+    new: claude,
+    continue: `${claude} --continue`,
+    resume: `${claude} --resume`,
   };
-  if (mode === 'resume-id' && /^[0-9a-f-]{36}$/i.test(resumeId || '')) commands['resume-id'] = `claude --resume ${resumeId}`;
+  if (mode === 'resume-id' && /^[0-9a-f-]{36}$/i.test(resumeId || '')) commands['resume-id'] = `${claude} --resume ${resumeId}`;
   const cmd = commands[mode];
   // Giriş kabuğu (-l -i): .zprofile/.zshrc yüklenir, PATH ve alias'lar hazır olur.
   // Claude kapanınca aynı klasörde normal kabuk açık kalır.
@@ -208,6 +213,9 @@ function buildMenu() {
     {
       label: 'Panel',
       submenu: [
+        { label: 'Yeni sohbet', accelerator: 'CmdOrCtrl+N', click: () => sendCmd('newChat') },
+        { label: 'Artifacts', accelerator: 'CmdOrCtrl+Shift+A', click: () => sendCmd('artifacts') },
+        { type: 'separator' },
         ...accountItems,
         { type: 'separator' },
         { label: 'Code / Chat arasında geç', accelerator: 'CmdOrCtrl+K', click: () => sendCmd('toggle') },
@@ -260,6 +268,12 @@ function createWindow() {
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
+  // Artifact önizlemelerinden açılan linkler varsayılan tarayıcıda açılsın, yeni Electron penceresi açılmasın
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
   win.on('close', (e) => {
     const running = terms.size + chat.count();
     if (running > 0) {
@@ -305,10 +319,12 @@ app.on('web-contents-created', (_e, contents) => {
 });
 
 app.whenReady().then(() => {
+  artifacts.setup({ getWindow: () => win });
   chat.setup({
     getWindow: () => win,
     getAccount: (id) => loadConfig().accounts.find((a) => a.id === id),
     expandHome,
+    artifacts,
   });
   buildMenu();
   createWindow();

@@ -18,9 +18,12 @@ function h(tag, attrs = {}, ...children) {
 }
 
 const state = {
+  page: 'account', // 'account' | 'artifacts'
   info: { home: '', ptyOk: true },
   cfg: { accounts: [], recents: {} },
   active: null,
+  newFolder: {},   // acctId -> "Yeni sohbet" ekranında seçili klasör
+  newDraft: {},    // acctId -> yazılmış ama gönderilmemiş ilk mesaj
   view: {},        // acctId -> 'code' | 'chat'
   tabs: {},        // acctId -> [tab]
   activeTab: {},   // acctId -> tab | null  (null = başlatıcı)
@@ -61,39 +64,64 @@ function renderSidebar() {
     const running = tabs.filter((t) => !t.exited).length;
     const attention = tabs.some((t) => t.attention);
     const view = state.view[a.id] || 'code';
-    const isActive = state.active === a.id;
+    const isActive = state.page === 'account' && state.active === a.id;
 
-    const chip = (v, label) =>
+    const chip = (v, ic, label) =>
       h('button', {
         class: `chip ${isActive && view === v ? 'on' : ''}`,
         onclick: (e) => { e.stopPropagation(); selectAccount(a.id, v); },
-      }, label);
+      }, icon(ic, 13), label);
 
     nav.append(
-      h('div', { class: `acct ${isActive ? 'active' : ''}`, style: `--c:${a.color}`, onclick: () => selectAccount(a.id) },
+      h('div', { class: `acct ${isActive ? 'active' : ''}`, style: `--c:${a.color}`, onclick: () => selectAccount(a.id), title: tilde(a.configDir || '~/.claude') },
         h('div', { class: 'acct-row' },
           h('div', { class: 'avatar' }, (a.name || '?').trim().charAt(0).toLocaleUpperCase('tr')),
           h('div', { class: 'acct-meta' },
             h('div', { class: 'acct-name' }, a.name),
             h('div', { class: 'acct-note' }, a.note || tilde(a.configDir || '~/.claude'))),
           attention ? h('span', { class: 'pulse', title: 'Claude sizi bekliyor' }) : null,
-          running ? h('span', { class: 'badge', title: `${running} açık terminal` }, running) : null,
+          running ? h('span', { class: 'badge', title: `${running} açık oturum` }, running) : null,
           i < 9 ? h('span', { class: 'acct-kbd' }, `⌘${i + 1}`) : null),
-        h('div', { class: 'acct-views' }, chip('code', 'Yerel Code'), chip('chat', 'Web')))
+        h('div', { class: 'acct-views' }, chip('code', 'terminal', 'Yerel Code'), chip('chat', 'globe', 'Web')))
     );
   });
 }
 
+function renderNav() {
+  const onArtifacts = state.page === 'artifacts';
+  const onNew = !onArtifacts && state.view[state.active] === 'code' && !state.activeTab[state.active];
+  $('#navArtifacts').classList.toggle('on', onArtifacts);
+  $('#navNew').classList.toggle('on', onNew);
+  $('#artCount').textContent = art.items.length || '';
+}
+
 function renderTopbar() {
+  if (state.page === 'artifacts') {
+    $('#topDot').hidden = true;
+    $('#topName').textContent = 'Artifacts';
+    const open = art.openId && artById(art.openId);
+    $('#topNote').textContent = open ? open.title : `${art.items.length} artifact`;
+    $('#viewSeg').hidden = true;
+    return;
+  }
   const a = acct(state.active);
   if (!a) return;
+  $('#topDot').hidden = false;
+  $('#viewSeg').hidden = false;
   $('#topDot').style.background = a.color;
   $('#topName').textContent = a.name;
   const view = state.view[a.id];
   $('#topNote').textContent = view === 'code'
-    ? `Yerel Claude Code (bu Mac) · ${tilde(a.configDir || '~/.claude')}`
-    : 'claude.ai web (sohbet + bulut)';
+    ? `Yerel Claude Code · ${tilde(a.configDir || '~/.claude')}`
+    : 'claude.ai · sohbet ve bulut oturumları';
   for (const b of $('#viewSeg').children) b.classList.toggle('on', b.dataset.view === view);
+}
+
+// Statik HTML'deki data-icon yer tutucularını ikonlarla doldur
+function hydrateIcons(root = document) {
+  for (const el of root.querySelectorAll('[data-icon]')) {
+    if (!el.firstChild) el.append(icon(el.dataset.icon, el.classList.contains('nav-ic') ? 18 : 15));
+  }
 }
 
 // ---------- Hesap panelleri ----------
@@ -102,7 +130,7 @@ function ensurePane(a) {
   if (state.panes[a.id]) return state.panes[a.id];
 
   const tabsEl = h('div', { class: 'tabs' });
-  const addBtn = h('button', { class: 'tab-add', title: 'Yeni terminal (⌘T)', onclick: () => showLauncher(a.id) }, '+');
+  const addBtn = h('button', { class: 'tab-add', title: 'Yeni sohbet (⌘N)', onclick: () => showLauncher(a.id) }, icon('plus', 16));
   const launcher = h('div', { class: 'launcher' });
   const termArea = h('div', { class: 'term-area' }, launcher);
   const code = h('div', { class: 'code-pane' }, h('div', { class: 'tabbar' }, tabsEl, addBtn), termArea);
@@ -124,6 +152,9 @@ function ensurePane(a) {
 
 function selectAccount(id, view) {
   if (!acct(id)) return;
+  const changed = state.active !== id;
+  state.page = 'account';
+  document.body.dataset.page = 'account';
   state.active = id;
   if (view) state.view[id] = view;
   for (const [aid, p] of Object.entries(state.panes)) {
@@ -131,10 +162,17 @@ function selectAccount(id, view) {
     p.root.dataset.view = state.view[aid];
   }
   if (state.view[id] === 'chat') ensureWebview(id);
+  if (!acctInfo[id]?.at && !acctInfo[id]?.loading) loadAccountInfo(id); // model listesi + kullanım
   renderSidebar();
+  renderNav();
   renderTopbar();
   focusCurrent();
-  window.panel.saveConfig({ lastAccount: id });
+  if (changed) window.panel.saveConfig({ lastAccount: id });
+}
+
+function newChat() {
+  showLauncher(state.active);
+  requestAnimationFrame(() => state.panes[state.active]?.launcher.querySelector('.new-input')?.focus());
 }
 
 function setView(view) {
@@ -144,6 +182,7 @@ function setView(view) {
 function focusCurrent() {
   const id = state.active;
   requestAnimationFrame(() => {
+    if (state.page !== 'account') return;
     if (state.view[id] === 'code') {
       const t = state.activeTab[id];
       if (t) {
@@ -157,13 +196,28 @@ function focusCurrent() {
   });
 }
 
-// ---------- Başlatıcı ----------
+// ---------- Yeni sohbet ekranı (başlatıcı) ----------
+
+function greeting() {
+  const hr = new Date().getHours();
+  if (hr >= 5 && hr < 12) return 'Günaydın';
+  if (hr >= 12 && hr < 18) return 'İyi günler';
+  if (hr >= 18 && hr < 23) return 'İyi akşamlar';
+  return 'İyi geceler';
+}
+
+function newFolderOf(acctId) {
+  const recents = state.cfg.recents?.[acctId] || [];
+  const f = state.newFolder[acctId];
+  return f && recents.includes(f) ? f : recents[0] || null;
+}
 
 function renderLauncher(acctId) {
   const a = acct(acctId);
   const pane = state.panes[acctId];
   if (!a || !pane) return;
   const recents = state.cfg.recents?.[acctId] || [];
+  const folder = newFolderOf(acctId);
 
   const pathLabel = (p) => {
     const t = tilde(p);
@@ -171,16 +225,71 @@ function renderLauncher(acctId) {
     return [h('span', {}, t.slice(0, i + 1)), h('b', {}, t.slice(i + 1) || t)];
   };
 
+  // --- Yazma kutusu: ilk mesajı yazıp Enter'a basınca sohbet o klasörde başlar
+  const input = h('textarea', {
+    class: 'new-input', rows: 2, spellcheck: 'false',
+    placeholder: folder ? 'Claude\'a bir görev verin… (Enter ile başlar)' : 'Önce aşağıdan bir klasör seçin',
+    oninput: (e) => { state.newDraft[acctId] = e.target.value; autosize(); },
+    onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); startNew(); } },
+  });
+  input.value = state.newDraft[acctId] || '';
+  const autosize = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 240) + 'px'; };
+  requestAnimationFrame(autosize);
+
+  const folderBtn = h('button', {
+    class: 'pill-btn', title: folder || 'Klasör seç',
+    onclick: () => openMenu(folderBtn, [
+      ...recents.map((d) => ({ icon: d === folder ? 'check' : 'folder', label: tilde(d), onclick: () => { state.newFolder[acctId] = d; renderLauncher(acctId); input.focus(); } })),
+      recents.length ? '-' : null,
+      { icon: 'plus', label: 'Başka klasör seç…', onclick: () => pickFolderForNew(acctId) },
+    ]),
+  }, icon('folder', 15), h('span', {}, folder ? tilde(folder).split('/').pop() || folder : 'Klasör seç'), icon('chevronDown', 13));
+
+  const startNew = async () => {
+    const dir = newFolderOf(acctId) || (await pickFolderForNew(acctId));
+    if (!dir) return;
+    const text = input.value.trim();
+    state.newDraft[acctId] = '';
+    input.value = '';
+    await rememberFolder(acctId, dir);
+    createChatTab(acctId, dir, 'new', null, text ? { send: text } : {});
+  };
+
+  // Yeni sohbetin modeli ve eforu: hesabın kayıtlı tercihi (sohbet başlarken SDK'ya verilir)
+  const prefs = () => state.cfg.chatPrefs?.[acctId] || {};
+  const picker = modelPicker(acctId,
+    () => ({ model: prefs().model || '', effort: prefs().effort || '' }),
+    (patch) => { saveAcctPrefs(acctId, patch); picker.refresh(); });
+
+  const composer = h('div', { class: 'new-composer' },
+    input,
+    h('div', { class: 'composer-bar' },
+      folderBtn,
+      h('button', { class: 'pill-btn ghost', title: 'Bu klasördeki son oturuma devam et', disabled: !folder,
+        onclick: () => folder && createChatTab(acctId, folder, 'continue') }, icon('history', 15), h('span', {}, 'Devam et')),
+      h('button', { class: 'pill-btn ghost icon-only', title: 'Claude Code\'u bu klasörde terminalde aç', disabled: !folder,
+        onclick: () => folder && launch(acctId, folder, 'new') }, icon('terminal', 15)),
+      connectorsButton(acctId, () => newFolderOf(acctId)),
+      h('span', { class: 'spacer' }),
+      picker,
+      usageButton(acctId),
+      h('button', { class: 'send-btn', title: 'Başlat (Enter)', onclick: startNew }, icon('arrowUp', 17))));
+
   const rows = recents.length
     ? recents.map((dir) =>
-        h('div', { class: 'recent-row' },
+        h('div', { class: 'recent-row' + (dir === folder ? ' sel' : '') },
+          h('span', { class: 'recent-ic' }, icon('folder', 16)),
           h('div', { class: 'recent-path', title: dir }, pathLabel(dir)),
-          h('button', { class: 'mini main', title: 'Yeni Claude oturumu (sohbet görünümü)', onclick: () => createChatTab(acctId, dir, 'new') }, 'Yeni'),
-          h('button', { class: 'mini', title: 'Bu klasördeki son oturuma devam et', onclick: () => createChatTab(acctId, dir, 'continue') }, 'Devam et'),
-          h('button', { class: 'mini', title: 'Geçmiş oturumlardan seç', onclick: () => showSessionPicker(acctId, dir) }, 'Geçmiş'),
-          h('button', { class: 'mini', title: 'Claude Code\'u terminalde aç', onclick: () => launch(acctId, dir, 'new') }, 'Terminal'),
-          h('button', { class: 'icon-btn', title: 'Listeden kaldır', onclick: () => removeRecent(acctId, dir) }, '✕')))
-    : [h('div', { class: 'empty-recent' }, 'Henüz klasör yok. Bir klasör seçtiğinizde burada listelenir.')];
+          h('div', { class: 'recent-actions' },
+            h('button', { class: 'mini main', title: 'Yeni Claude oturumu (sohbet görünümü)', onclick: () => createChatTab(acctId, dir, 'new') }, 'Yeni'),
+            h('button', { class: 'mini', title: 'Bu klasördeki son oturuma devam et', onclick: () => createChatTab(acctId, dir, 'continue') }, 'Devam et'),
+            h('button', { class: 'mini', title: 'Geçmiş oturumlardan seç', onclick: () => showSessionPicker(acctId, dir) }, 'Geçmiş'),
+            h('button', { class: 'mini', title: 'Claude Code\'u terminalde aç', onclick: () => launch(acctId, dir, 'new') }, 'Terminal'),
+            h('button', { class: 'icon-btn', title: 'Listeden kaldır', onclick: () => removeRecent(acctId, dir) }, icon('close', 14)))))
+    : [h('div', { class: 'empty-recent' }, 'Henüz klasör yok. ', h('button', { class: 'link-btn', onclick: () => pickFolderForNew(acctId) }, 'Bir klasör seçin'), '; burada listelenir.')];
+
+  // Son artifact'ler (bu hesabın ürettikleri)
+  const recentArts = art.items.filter((x) => x.source?.accountId === acctId).slice(0, 4);
 
   pane.launcher.innerHTML = '';
   pane.launcher.style.setProperty('--c', a.color);
@@ -191,31 +300,35 @@ function renderLauncher(acctId) {
             'Terminal modülü (node-pty) yüklenemedi. Panel klasöründe terminalden ',
             h('code', {}, 'npm install'), ' çalıştırıp paneli yeniden açın.')
         : null,
-      h('h1', {}, `${a.name} · Claude Code`),
-      h('p', { class: 'lead' },
-        'Claude Code bu Mac\'te, ', h('b', {}, a.name), ' hesabıyla çalışır (ayar klasörü ',
-        h('code', {}, tilde(a.configDir || '~/.claude')), '). Bir proje klasörü seçin; sohbet penceresinde başlasın.'),
-      h('div', { class: 'launch-actions' },
-        h('button', { class: 'primary-btn', onclick: () => pickAndLaunch(acctId, 'new') }, 'Klasör seç ve başlat'),
-        h('button', { class: 'ghost-btn', onclick: () => pickAndLaunch(acctId, 'continue') }, 'Klasör seç ve devam et'),
-        h('button', { class: 'ghost-btn', onclick: () => pickAndLaunch(acctId, 'terminal') }, 'Terminalde aç')),
+      h('div', { class: 'new-hero' },
+        h('div', { class: 'new-eyebrow' }, h('span', { class: 'dot', style: `background:${a.color}` }), `${a.name} · Yerel Claude Code`),
+        h('h1', { class: 'new-title' }, h('span', { class: 'new-mark' }, '✳'), `${greeting()}, ne üzerinde çalışalım?`)),
+      composer,
+      h('div', { class: 'new-hint' },
+        folder ? ['Klasör ', h('code', {}, tilde(folder)), ' · ayar klasörü ', h('code', {}, tilde(a.configDir || '~/.claude'))] : 'Klasör seçilmedi'),
       h('div', { class: 'recent-title' }, 'Son klasörler'),
       h('div', { class: 'recent' }, rows),
+      recentArts.length
+        ? [h('div', { class: 'recent-title with-link' }, 'Son artifact\'ler',
+            h('button', { class: 'link-btn', onclick: () => showArtifacts(null) }, 'Tümünü gör')),
+           h('div', { class: 'mini-arts' }, recentArts.map((x) =>
+             h('button', { class: 'mini-art', onclick: () => openArtifact(x.id) },
+               thumbEl(x, 'mini-thumb'),
+               h('span', { class: 'mini-art-title' }, x.title))))]
+        : null,
       h('div', { class: 'tip' },
-        h('b', {}, 'Giriş: '), 'Sohbet görünümü, bu hesabın Claude Code girişini kullanır. Henüz giriş yapmadıysanız bir kez ',
-        h('b', {}, 'Terminalde aç'), ' ile açıp ', h('code', {}, '/login'), ' yapın; sonra hep sohbet görünümünü kullanabilirsiniz.'))
+        h('b', {}, 'Giriş: '), 'Sohbet görünümü bu hesabın Claude Code girişini kullanır. Henüz giriş yapmadıysanız bir kez ',
+        h('b', {}, 'Terminal'), ' ile açıp ', h('code', {}, '/login'), ' yapın.'))
   );
 }
 
-async function pickAndLaunch(acctId, mode) {
+async function pickFolderForNew(acctId) {
   const recents = state.cfg.recents?.[acctId] || [];
   const dir = await window.panel.pickFolder(recents[0] || '~');
-  if (!dir) return;
-  if (mode === 'terminal') launch(acctId, dir, 'new');
-  else {
-    await rememberFolder(acctId, dir);
-    createChatTab(acctId, dir, mode);
-  }
+  if (!dir) return null;
+  state.newFolder[acctId] = dir;
+  await rememberFolder(acctId, dir);
+  return dir;
 }
 
 async function rememberFolder(acctId, dir) {
@@ -233,9 +346,11 @@ async function removeRecent(acctId, dir) {
 }
 
 function showLauncher(acctId) {
-  if (state.active !== acctId || state.view[acctId] !== 'code') selectAccount(acctId, 'code');
+  if (state.page !== 'account' || state.active !== acctId || state.view[acctId] !== 'code') selectAccount(acctId, 'code');
   state.activeTab[acctId] = null;
+  renderLauncher(acctId);
   renderTabs(acctId);
+  renderNav();
 }
 
 // ---------- Terminaller ----------
@@ -327,15 +442,15 @@ function renderTabs(acctId) {
 
   for (const t of state.tabs[acctId]) {
     const modeTag = t.kind === 'chat' ? '' : ({ continue: ' ↻', resume: ' ⟲', 'resume-id': ' ⟲', shell: ' $' }[t.mode] || '');
-    const kindIcon = t.kind === 'chat' ? '💬 ' : '⌨ ';
     t.el = h('div', {
       class: `tab ${t === active ? 'active' : ''} ${t.activity ? 'activity' : ''} ${t.attention ? 'attention' : ''} ${t.exited ? 'exited' : ''} ${t.busy ? 'busy' : ''}`,
       onclick: () => activateTab(acctId, t),
       onauxclick: (e) => { if (e.button === 1) closeTab(t); },
     },
       h('span', { class: 'state' }),
-      h('span', { class: 'tab-label', title: `${tilde(t.cwd)}${t.termTitle ? '\n' + t.termTitle : ''}` }, kindIcon + t.title + modeTag),
-      h('button', { class: 'tab-close', title: 'Kapat (⌘W)', onclick: (e) => { e.stopPropagation(); closeTab(t); } }, '×'));
+      h('span', { class: 'tab-kind' }, icon(t.kind === 'chat' ? 'chat' : 'terminal', 14)),
+      h('span', { class: 'tab-label', title: `${tilde(t.cwd)}${t.termTitle ? '\n' + t.termTitle : ''}` }, t.title + modeTag),
+      h('button', { class: 'tab-close', title: 'Kapat (⌘W)', onclick: (e) => { e.stopPropagation(); closeTab(t); } }, icon('close', 12)));
     pane.tabsEl.append(t.el);
   }
 
@@ -343,6 +458,7 @@ function renderTabs(acctId) {
   pane.launcher.classList.toggle('active', !active);
   pane.addBtn.classList.toggle('on', !active);
   if (active) active.el?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  if (acctId === state.active) renderNav();
 }
 
 function activateTab(acctId, tab) {
@@ -358,6 +474,7 @@ function closeTab(tab, force) {
   if (tab.kind === 'chat') {
     if (!force && tab.busy && !confirm(`"${tab.title}" sohbetinde Claude hâlâ çalışıyor. Kapatılsın mı? (Sonra "Devam et" ile dönebilirsiniz.)`)) return;
     if (tab.chatId) { window.panel.chatClose(tab.chatId); chatsById.delete(tab.chatId); }
+    closeArtifactInChat(tab);
   } else {
     if (!force && !tab.exited && !confirm(`"${tab.title}" terminali kapatılsın mı? İçindeki Claude oturumu sonlanır (sonra "Devam et" ile dönebilirsiniz).`)) return;
     window.panel.ptyKill(tab.ptyId);
@@ -445,10 +562,10 @@ function ensureWebview(acctId) {
   const pane = state.panes[acctId];
   if (!pane || pane.webview) return;
 
-  const btn = (label, title, fn) => h('button', { class: 'icon-btn', title, onclick: fn }, label);
-  const back = btn('←', 'Geri', () => wv.canGoBack() && wv.goBack());
-  const fwd = btn('→', 'İleri', () => wv.canGoForward() && wv.goForward());
-  const reload = btn('↻', 'Yenile', () => wv.reload());
+  const btn = (ic, title, fn) => h('button', { class: 'icon-btn', title, onclick: fn }, icon(ic, 16));
+  const back = btn('back', 'Geri', () => wv.canGoBack() && wv.goBack());
+  const fwd = btn('forward', 'İleri', () => wv.canGoForward() && wv.goForward());
+  const reload = btn('refresh', 'Yenile', () => wv.reload());
   // Adres alanı: e-postadaki giriş linkini buraya yapıştırıp Enter'a basabilirsiniz.
   const url = h('input', {
     class: 'chat-url', type: 'text', spellcheck: 'false', value: 'claude.ai/new',
@@ -466,8 +583,8 @@ function ensureWebview(acctId) {
     },
     onfocus: (e) => { e.target.value = wv.getURL(); e.target.select(); },
   });
-  const newChat = h('button', { class: 'mini', onclick: () => wv.loadURL('https://claude.ai/new') }, '+ Yeni sohbet');
-  const ext = btn('↗', 'Varsayılan tarayıcıda aç', () => window.panel.openExternal(wv.getURL()));
+  const newWeb = h('button', { class: 'mini', onclick: () => wv.loadURL('https://claude.ai/new') }, icon('plus', 13), 'Yeni sohbet');
+  const ext = btn('external', 'Varsayılan tarayıcıda aç', () => window.panel.openExternal(wv.getURL()));
 
   const wv = document.createElement('webview');
   wv.setAttribute('partition', `persist:chat-${acctId}`);
@@ -478,7 +595,7 @@ function ensureWebview(acctId) {
   // Bu sayfaya gelindiğinde paneldeki yerel Code bölümüne yönlendiren bir uyarı göster.
   let bannerDismissed = false;
   const banner = h('div', { class: 'code-banner', hidden: true },
-    h('span', { class: 'code-banner-icon' }, '⌨'),
+    h('span', { class: 'code-banner-icon' }, icon('terminal', 18)),
     h('div', { class: 'code-banner-text' },
       h('b', {}, 'Bu sayfa web sürümü; "Local" burada çalışmaz. '),
       'Mac\'inizde, bu hesapla çalışan Claude Code için panelin ', h('b', {}, 'Yerel Code'), ' bölümünü kullanın.'),
@@ -503,7 +620,7 @@ function ensureWebview(acctId) {
   });
 
   pane.chat.append(
-    h('div', { class: 'chat-toolbar' }, back, fwd, reload, url, newChat, ext),
+    h('div', { class: 'chat-toolbar' }, back, fwd, reload, url, newWeb, ext),
     h('div', { class: 'chat-loading' }),
     banner,
     wv
@@ -599,11 +716,18 @@ function setFont(delta) {
 
 window.panel.onMenu((cmd, arg) => {
   if (!$('#modal').hidden && cmd !== 'settings') return;
+  closeMenu();
+  if (state.page === 'artifacts' && ['toggle', 'view', 'closeTab', 'nextTab', 'font'].includes(cmd)) {
+    if (cmd === 'toggle' || cmd === 'view') selectAccount(state.active, cmd === 'view' ? arg : undefined);
+    return;
+  }
   switch (cmd) {
+    case 'newChat': newChat(); break;
+    case 'artifacts': state.page === 'artifacts' && !art.openId ? selectAccount(state.active) : showArtifacts(null); break;
     case 'account': selectAccount(arg); break;
     case 'toggle': setView(state.view[state.active] === 'code' ? 'chat' : 'code'); break;
     case 'view': setView(arg); break;
-    case 'newTab': showLauncher(state.active); break;
+    case 'newTab': newChat(); break;
     case 'closeTab':
       if (state.view[state.active] === 'code') closeTab(state.activeTab[state.active]);
       break;
@@ -632,11 +756,19 @@ async function init() {
     const v = e.target.closest('button')?.dataset.view;
     if (v) setView(v);
   });
+  hydrateIcons();
+  $('#navNew').onclick = newChat;
+  $('#navArtifacts').onclick = () => showArtifacts(null);
   $('#settingsBtn').onclick = openSettings;
   $('#modalClose').onclick = closeSettings;
   $('#modalCancel').onclick = closeSettings;
   $('#modal').addEventListener('mousedown', (e) => { if (e.target.id === 'modal') closeSettings(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#modal').hidden) closeSettings(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (openMenu.el) closeMenu();
+    else if (!$('#modal').hidden) closeSettings();
+    else if (state.page === 'artifacts' && art.openId && !document.querySelector('.modal:not([hidden])')) { art.openId = null; renderArtifactsPage({ animate: true }); renderTopbar(); }
+  });
   window.addEventListener('focus', () => {
     const t = state.activeTab[state.active];
     if (t && isVisible(t)) clearFlags(t);
@@ -644,6 +776,7 @@ async function init() {
 
   const start = acct(state.cfg.lastAccount) ? state.cfg.lastAccount : accounts()[0].id;
   selectAccount(start);
+  loadArtifacts();
 }
 
 init();
