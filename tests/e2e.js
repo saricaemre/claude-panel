@@ -3,6 +3,7 @@
 // Ekran görüntüleri: tests/out/
 const { _electron: electron } = require('playwright-core');
 const assert = require('node:assert/strict');
+const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -23,7 +24,9 @@ fs.mkdirSync(OUT, { recursive: true });
 fs.chmodSync(FAKE, 0o755);
 // Artifact protokolü güvenlik testi: kaynak klasörde gizli dosya, varlık ve klasör dışına çıkan symlink
 fs.writeFileSync(path.join(PROJECT, '.env'), 'GIZLI=1');
+fs.writeFileSync(path.join(PROJECT, 'gizli.json'), '{"anahtar":"GIZLI-123"}');
 fs.writeFileSync(path.join(PROJECT, 'stil.css'), 'h1 { color: red }');
+fs.writeFileSync(path.join(PROJECT, 'logo.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'));
 fs.writeFileSync(path.join(HOME, 'gizli.css'), 'gizli');
 fs.symlinkSync(path.join(HOME, 'gizli.css'), path.join(PROJECT, 'kacak.css'));
 // Terminal testi: argümanlarını yazan sahte `claude` komutu, giriş kabuğunda PATH'in başında
@@ -292,6 +295,17 @@ const step = (name) => console.log('• ' + name);
     await page.locator(shot).scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(OUT, '6c-mcp-kod.png') });
 
+    step('Güvenlik: yanıttaki form, düğme ve stil temizlenir');
+    await page.fill(C + '.composer-input', 'tuzak sayfayı göster');
+    await page.press(C + '.composer-input', 'Enter');
+    await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('görev kutucuğu')
+      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+    assert.deepEqual(await page.$eval(C + '.msg-assistant:has-text("Devam etmek için")', (el) => ({
+      tehlikeli: [...el.querySelectorAll('form, button, style, [style], [action]')].map((x) => x.outerHTML.slice(0, 80)),
+      kutucuk: el.querySelectorAll('input[type="checkbox"]').length,
+    })), { tehlikeli: [], kutucuk: 1 }, 'yanıttaki tehlikeli HTML temizlenmedi');
+    assert.match(await page.getAttribute('meta[http-equiv="Content-Security-Policy"]', 'content'), /form-action 'none'/);
+
     step('Bağlayıcılar: aynı klasörde açık sohbet varsa kapatma o oturuma da hemen gider (mcp_toggle)');
     await page.click('#navNew');
     await page.click(N + '.connectors-btn');
@@ -318,14 +332,43 @@ const step = (name) => console.log('• ' + name);
     await page.waitForFunction(() => [...document.querySelectorAll('.art-card .art-thumb img')].filter((i) => i.naturalWidth > 0).length === 2, null, { timeout: 30000 });
     await page.screenshot({ path: path.join(OUT, '7-artifacts.png') });
 
-    step('artifact:// yalnız kaynak klasördeki varlıkları sunar (.env ve symlink kaçışı yok)');
+    step('artifact:// yalnız kaynak klasördeki varlıkları sunar (.env, .json ve symlink kaçışı yok)');
     const rid = await page.getAttribute('.art-card:has-text("Haftalık rapor")', 'data-id');
     const status = (sub) => app.evaluate(({ net }, u) => net.fetch(u).then((r) => r.status), `artifact://view/${rid}/2/${sub}`);
     assert.equal(await status(''), 200);
     assert.equal(await status('stil.css'), 200);
     assert.equal(await status('.env'), 404, '.env sunuldu');
+    assert.equal(await status('gizli.json'), 404, '.json sunuldu');
     assert.equal(await status('kacak.css'), 404, 'symlink ile klasör dışına çıkıldı');
     assert.equal(await status('..%2Fgizli.css'), 404, '.. ile klasör dışına çıkıldı');
+
+    step('Küçük resim: sayfa betiği yalnız kendi varlıklarını alır; başka artifact\'e ve ağa ulaşamaz');
+    // Sondaj sayfası denetimi kendisi yapar, sonucu arka plan rengine yazar (yeşil: hepsi engellendi, görsel yüklendi)
+    const hits = [];
+    const srv = http.createServer((req, res) => { hits.push(req.url); res.end('ok'); });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const probe = path.join(PROJECT, 'sondaj.html');
+    fs.writeFileSync(probe, `<!doctype html><body style="margin:0;background:#fff"><img id="logo" src="logo.png"><script>
+      const dene = (u) => fetch(u).then((r) => (r.ok ? 'okundu' : 'engel'), () => 'engel');
+      const gorsel = new Promise((r) => (logo.complete ? r(logo.naturalWidth) : (logo.onload = logo.onerror = () => r(logo.naturalWidth))));
+      Promise.all([dene('gizli.json'), dene('artifact://view/${rid}/2/'), dene('artifact://thumb/${rid}/2/'),
+        dene('http://127.0.0.1:${srv.address().port}/sizinti'), gorsel]).then((s) => {
+        const iyi = s.slice(0, 4).every((x) => x === 'engel') && s[4] === 1 && self.origin === 'null';
+        document.body.style.background = iyi ? '#00c800' : '#c80000';
+      });
+    </script></body>`);
+    const added = await page.evaluate((f) => window.panel.artifactsAddFile(f, { accountId: 'max' }), probe);
+    assert.ok(added.ok, 'sondaj eklenemedi: ' + added.error);
+    const thumbDone = () => JSON.parse(fs.readFileSync(path.join(USER_DATA, 'artifacts', 'index.json'), 'utf8')).items.find((a) => a.id === added.id)?.versions[0].thumb;
+    for (let i = 0; i < 100 && !thumbDone(); i++) await page.waitForTimeout(200);
+    assert.ok(thumbDone(), 'sondajın küçük resmi çizilmedi');
+    const px = await app.evaluate(({ nativeImage }, p) => [...nativeImage.createFromPath(p).crop({ x: 300, y: 300, width: 1, height: 1 }).toBitmap()],
+      path.join(USER_DATA, 'artifacts', added.id, 'thumb-v1.png'));
+    srv.close();
+    assert.deepEqual(hits, [], 'küçük resim sayfası ağa ulaştı');
+    assert.ok(px[1] > 150 && px[0] < 80 && px[2] < 80, 'küçük resimde sayfa betiği engellenmesi gerekeni okudu (piksel yeşil değil): ' + px);
+    await page.evaluate((id) => window.panel.artifactsRemove(id), added.id);
+    await page.waitForFunction(() => document.querySelectorAll('.art-card').length === 2);
 
     step('Görüntüleyici: sürüm değiştir, kod görünümü, yeniden adlandır');
     await page.click('.art-card:has-text("Haftalık rapor")');
@@ -373,6 +416,13 @@ const step = (name) => console.log('• ' + name);
     await page.click('.acct.active .chip >> text=Web');
     await page.waitForSelector(P + '.chat-pane webview');
     assert.equal(await page.getAttribute(P + '.chat-pane webview', 'partition'), 'persist:chat-max');
+
+    // En sonda: engellenen gezinmeden sonra Playwright tıklamalarda gezinmenin bitmesini bekleyip takılıyor
+    step('Güvenlik: ana pencere dış sayfaya gidemez (form, bırakılan link, location)');
+    await page.evaluate(() => { window.__ayniSayfa = true; location.href = 'https://saldirgan.invalid/'; });
+    await page.waitForTimeout(800);
+    assert.ok(page.url().endsWith('/renderer/index.html'), 'ana pencere dış sayfaya gitti: ' + page.url());
+    assert.deepEqual(await page.evaluate(() => [window.__ayniSayfa, typeof window.panel?.ptyCreate]), [true, 'function'], 'sayfa değişti ya da köprü gitti');
 
     assert.deepEqual(errors, [], 'arayüz hataları');
     console.log('\n✓ Tüm testler geçti. Ekran görüntüleri: tests/out/');

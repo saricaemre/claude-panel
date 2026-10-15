@@ -5,6 +5,38 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 
 ---
 
+## 2026-10-15 · İki güvenlik açığı kapatıldı
+
+**İstek:** Mevcut işi commit'le (`panel-gelistirmeleri` dalı, `6fd0d75`), sonra incelemede bulunan iki açığı kapat ve her biri için e2e adımı ekle.
+
+**1. Sohbetten pencere kaçırma**
+- `main.js`: ana pencerede `will-navigate` yalnız kendi `index.html`'ine izin veriyor. Form, bırakılan link ya da `location` ile dış sayfaya gidilmiyor; dolayısıyla `window.panel` dışarıya verilmiyor.
+- `renderer/index.html`: CSP'ye `form-action 'none'; base-uri 'none'` eklendi.
+- `renderer/chat.js`: DOMPurify'a `PURIFY` ayarı verildi. `form`, `button`, `style`, `link`, `meta`, `base` etiketleri ve `style`, `action`, `formaction` özellikleri atılıyor. Görev listesi kutucukları (`input`) kalıyor.
+
+**2. Küçük resim sızıntısı**
+- **Ölçüm:** Electron bu özel şemada CORS uygulamıyor ve `Sec-Fetch`/`Origin` başlığı göndermiyor. Sayfa kökensiz (`sandbox`) olsa da `fetch` ile `artifact://` içeriğini okuyabiliyor. Görüntüleyici iframe'i dahil; `CLAUDE.md`'deki eski varsayım yanlıştı.
+- `.json` varlık listesinden çıkarıldı.
+- Sayfalar `CSP: sandbox` başlığıyla sunuluyor; izinler görüntüleyici iframe'iyle aynı.
+- Küçük resimler ayrı, bellekte bir oturumda (`artifact-thumbs`) çiziliyor. Yalnız o an çizilen artifact sunuluyor, ağ istekleri kesiliyor. Yalnız bilinen CDN'lerden betik, stil ve yazı tipi geçiyor; grafik kütüphanesi kullanan sayfalar boş kalmasın diye.
+
+**Kararlar**
+- Görüntüleyicide başka bir artifact'i okumak için kimliğini bilmek gerekiyor (48 bit rastgele). Bu açık bırakıldı ve §7'ye yazıldı. Asıl risk, kimse açmadan çalışan küçük resimdi.
+- Blender/figma-console'un izin sormaması (otomatik inceleme işaretledi) Emre'nin isteğiydi; dokunulmadı, §7'ye bedeli yazıldı.
+
+**Doğrulama**
+- `npm run check`, `npm test` yeşil (27 adım). Yeni adımlar:
+  - Yanıttaki form/düğme/stil temizleniyor, görev kutucuğu kalıyor.
+  - Ana pencere dış sayfaya gidemiyor; sayfa ve köprü yerinde (en son adım).
+  - `.json` için 404.
+  - Küçük resimde sondaj sayfası şunları deniyor: yandaki `.json`, başka artifact, başka küçük resim, yerel sunucu. Hepsi engellenince ve kendi görseli yüklenince arka planı yeşile boyuyor; test piksele ve sunucuya gelen isteklere bakıyor.
+- Yedi bozma denemesinin yedisi de kırmızıya döndü: temizleyici ayarı, `will-navigate`, `json` izni, küçük resmin ana oturumda çizilmesi, ağ engeli, `sandbox` başlığı, küçük resim oturumunun her artifact'i sunması.
+- Ekran görüntüleri: görüntüleyici ve sohbet değişmedi.
+
+**Bekleyen:** Kurulu uygulama hâlâ eski kodu çalıştırıyor; `kur.sh` için panel kapatılmalı. Grafikli (CDN'li) bir artifact'in küçük resmi gerçek ağla denenmeli.
+
+---
+
 ## 2026-10-15 · Genel sağlık incelemesi (kod değişmedi)
 
 **İstek:** Panel sağlıklı çalışıyor mu, iyileştirilecek ne var?

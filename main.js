@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Menu, session, Notification 
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const url = require('url');
 
 const chat = require('./chat-main');
 const artifacts = require('./artifacts');
@@ -266,7 +267,16 @@ function createWindow() {
     },
   });
 
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  const PAGE = path.join(__dirname, 'renderer', 'index.html');
+  win.loadFile(PAGE);
+
+  // Ana pencere kendi sayfasından ayrılmaz (sohbetteki bir form, sürüklenip bırakılan bir link vb.).
+  // Ayrılsaydı açılan sayfa da preload'un window.panel köprüsünü (terminal, dosyalar) alırdı.
+  win.webContents.on('will-navigate', (e, target) => {
+    let own = false;
+    try { own = new URL(target).protocol === 'file:' && url.fileURLToPath(target) === PAGE; } catch {}
+    if (!own) e.preventDefault();
+  });
 
   // Artifact önizlemelerinden açılan linkler varsayılan tarayıcıda açılsın, yeni Electron penceresi açılmasın
   win.webContents.setWindowOpenHandler(({ url }) => {

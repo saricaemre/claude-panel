@@ -4,7 +4,7 @@
 //   artifact://view/<id>/<n>/          → sayfa (html/svg olduğu gibi; md ve kod biçimlenmiş HTML olarak)
 //   artifact://view/<id>/<n>/<yol>     → kaynak dosyanın klasöründeki görsel, css vb. (göreli bağlantılar)
 //   artifact://thumb/<id>/<n>/         → küçük resim
-const { app, ipcMain, protocol, BrowserWindow, dialog, shell } = require('electron');
+const { app, ipcMain, protocol, session, BrowserWindow, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -173,13 +173,19 @@ function renderPage(a, content) {
 // Kaynak klasörden yalnız sayfa varlıkları sunulur (.env, .json, anahtar dosyaları vb. asla)
 const MIME = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
-  css: 'text/css', js: 'text/javascript', mjs: 'text/javascript', json: 'application/json', woff2: 'font/woff2',
+  css: 'text/css', js: 'text/javascript', mjs: 'text/javascript', woff2: 'font/woff2',
   woff: 'font/woff', ttf: 'font/ttf', otf: 'font/otf', avif: 'image/avif', ico: 'image/x-icon', mp4: 'video/mp4',
   webm: 'video/webm', mp3: 'audio/mpeg', wav: 'audio/wav',
 };
 
+// Sayfa hangi pencerede açılırsa açılsın (görüntüleyici iframe'i, küçük resim penceresi) kökensiz bir kum havuzunda çalışır:
+// betikleri çalışır ama artifact:// içeriğini (yandaki dosyalar, başka artifact'ler) fetch ile okuyamaz.
+// İzinler görüntüleyici iframe'inin sandbox özelliğiyle aynı (renderer/artifacts.js), allow-same-origin hariç.
+const PAGE_SANDBOX = 'sandbox allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads';
+
+const notFound = () => new Response('Bulunamadı', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+
 function handleProtocol(req) {
-  const notFound = () => new Response('Bulunamadı', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
   try {
     const u = new URL(req.url);
     const [, id, nStr, ...rest] = decodeURIComponent(u.pathname).split('/');
@@ -210,13 +216,45 @@ function handleProtocol(req) {
     const content = read(id, n);
     if (content == null) return notFound();
     const page = renderPage(a, content);
-    return new Response(page.body, { headers: { 'content-type': page.type, 'cache-control': 'no-cache' } });
+    return new Response(page.body, { headers: { 'content-type': page.type, 'cache-control': 'no-cache', 'content-security-policy': PAGE_SANDBOX } });
   } catch {
     return notFound();
   }
 }
 
 // ---------- Küçük resimler (görünmez pencerede çizilip yakalanır) ----------
+
+// Küçük resim kimse açmadan, kendiliğinden çizilir. Bu yüzden ayrı, bellekte bir oturumda çizilir:
+// sayfa yalnız kendi içeriğini ve klasöründeki varlıkları alır, başka artifact'e ve ağa ulaşamaz
+// (yoksa Claude'un yazdığı bir sayfa okuduğunu izinsiz dışarı gönderebilirdi). Electron bu şemada CORS
+// uygulamadığı için sınır sunucu tarafında çizilir. İstisna: bilinen CDN'lerden betik, stil, yazı tipi (grafik kütüphaneleri).
+const THUMB_CDN = new Set(['cdnjs.cloudflare.com', 'cdn.jsdelivr.net', 'unpkg.com', 'cdn.tailwindcss.com', 'code.jquery.com', 'fonts.googleapis.com', 'fonts.gstatic.com']);
+const THUMB_CDN_TYPES = new Set(['script', 'stylesheet', 'font']);
+let thumbSession = null;
+let thumbJob = null; // o an çizilen [id, n]
+
+function getThumbSession() {
+  if (thumbSession) return thumbSession;
+  thumbSession = session.fromPartition('artifact-thumbs');
+  thumbSession.protocol.handle('artifact', (req) => {
+    try {
+      const u = new URL(req.url);
+      const [, id, nStr] = decodeURIComponent(u.pathname).split('/');
+      if (u.host !== 'view' || !thumbJob || id !== thumbJob[0] || Number(nStr) !== thumbJob[1]) return notFound();
+    } catch { return notFound(); }
+    return handleProtocol(req);
+  });
+  thumbSession.webRequest.onBeforeRequest((d, cb) => {
+    let ok = false;
+    try {
+      const u = new URL(d.url);
+      ok = ['artifact:', 'data:', 'blob:'].includes(u.protocol)
+        || (u.protocol === 'https:' && d.method === 'GET' && THUMB_CDN.has(u.hostname) && THUMB_CDN_TYPES.has(d.resourceType));
+    } catch {}
+    cb({ cancel: !ok });
+  });
+  return thumbSession;
+}
 
 const thumbQueue = [];
 let thumbBusy = false;
@@ -240,8 +278,9 @@ async function makeThumb(id, n) {
   if (!find(id)) return;
   const w = new BrowserWindow({
     show: false, width: 1200, height: 760,
-    webPreferences: { offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false },
+    webPreferences: { session: getThumbSession(), offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
+  thumbJob = [id, n];
   try {
     w.webContents.setAudioMuted(true);
     w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -256,6 +295,7 @@ async function makeThumb(id, n) {
     save();
     changed();
   } finally {
+    thumbJob = null;
     w.destroy();
   }
 }

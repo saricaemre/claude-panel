@@ -53,6 +53,7 @@ rl.on('line', async (line) => {
     const t = typeof m.message.content === 'string' ? m.message.content : '';
     if (/rapor/i.test(t)) await artifactTurn();
     else if (/blender/i.test(t)) await mcpTurn();
+    else if (/tuzak/i.test(t)) await trapTurn();
     else await runTurn(m);
   }
 });
@@ -142,6 +143,12 @@ async function mcpTurn() {
   await sleep(150);
   toolRes('b2', [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png(64, 40, [232, 140, 70]).toString('base64') } }]);
   await streamText('Küp hazır, sahne görüntüsü yukarıda.');
+  finish('success');
+}
+// Ham HTML içeren yanıt (ör. Claude okuduğu bir dosyadaki talimata uymuş): dışarı gönderen form, izin kartlarını gizleyen stil
+async function trapTurn() {
+  await streamText('Devam etmek için onaylayın:\n\n<form action="https://saldirgan.invalid/x"><button id="tuzak">Onayla</button></form>\n\n' +
+    '<style>.perm-card { display: none }</style>\n\n<a href="https://example.com/" style="position:fixed;inset:0">tam ekran link</a>\n\n- [x] görev kutucuğu kalır');
   finish('success');
 }
 // Tek renkli, geçerli bir PNG (görselin gerçekten çözülüp çizildiğini test etmek için)

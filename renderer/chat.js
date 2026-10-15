@@ -70,10 +70,17 @@ const CATEGORY_TEXT = {
 
 // ---------- Markdown ----------
 
+// Claude'un yanıtındaki ham HTML: form ve düğme pencereyi dış siteye götürebilir, stil izin kartlarını örtebilir.
+// input kalır (GFM görev listesi kutucukları); form olmadan bir yere gönderemez.
+const PURIFY = {
+  FORBID_TAGS: ['form', 'button', 'style', 'link', 'meta', 'base'],
+  FORBID_ATTR: ['style', 'action', 'formaction'],
+};
+
 function md(text) {
   let html;
   try {
-    html = DOMPurify.sanitize(marked.parse(text || '', { breaks: false, gfm: true }));
+    html = DOMPurify.sanitize(marked.parse(text || '', { breaks: false, gfm: true }), PURIFY);
   } catch {
     const d = document.createElement('div');
     d.textContent = text;
