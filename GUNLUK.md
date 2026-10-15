@@ -33,7 +33,13 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 - Yedi bozma denemesinin yedisi de kırmızıya döndü: temizleyici ayarı, `will-navigate`, `json` izni, küçük resmin ana oturumda çizilmesi, ağ engeli, `sandbox` başlığı, küçük resim oturumunun her artifact'i sunması.
 - Ekran görüntüleri: görüntüleyici ve sohbet değişmedi.
 
-**Bekleyen:** Kurulu uygulama hâlâ eski kodu çalıştırıyor; `kur.sh` için panel kapatılmalı. Grafikli (CDN'li) bir artifact'in küçük resmi gerçek ağla denenmeli.
+**Kurulum:** Emre paneli kapattı, `bash kur.sh` koşuldu. Kurulan 10 kaynak dosya depodakiyle birebir aynı. Beş düzeltme kurulu dosyalarda var, `json` izni yok. Uygulama 20:44:46'da açıldı, arayüz süreci ayakta. `npm audit` (geliştirme dahil) 6 açık gösteriyor; "high" olanı doğrudan `electron` paketinden (38 güvenlik desteği dışında).
+
+**Bekleyen**
+- Otomatik inceleme iki eksik buldu:
+  - Küçük resim oturumunda WebRTC (TURN kullanıcı adı) `webRequest`'ten geçmiyor, yani ağ tam kapalı değil.
+  - Markdown'da `class` kalıyor; panelin kendi sınıflarıyla sahte kart ya da ekranı örten katman çizilebilir.
+- Grafikli (CDN'li) bir artifact'in küçük resmi gerçek ağla denenmeli.
 
 ---
 
