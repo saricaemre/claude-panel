@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:" />
+  <title>Claude Panel</title>
+  <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="drag"></div>
+      <div class="brand">
+        <span class="brand-mark">✳</span>
+        <span>Claude Panel</span>
+      </div>
+      <div class="section-label">Hesaplar</div>
+      <nav id="accounts"></nav>
+      <div class="sidebar-footer">
+        <button id="settingsBtn" class="ghost-btn" title="Hesap ayarları (⌘,)">⚙ Hesap ayarları</button>
+        <div class="hints">
+          <div><kbd>⌘1</kbd>–<kbd>⌘3</kbd> hesap değiştir</div>
+          <div><kbd>⌘K</kbd> Yerel Code ↔ Web</div>
+          <div><kbd>⌘T</kbd> yeni terminal · <kbd>⌘W</kbd> kapat</div>
+        </div>
+      </div>
+    </aside>
+
+    <main id="main">
+      <header id="topbar">
+        <div class="acct-title">
+          <span class="dot" id="topDot"></span>
+          <span id="topName"></span>
+          <span class="muted" id="topNote"></span>
+        </div>
+        <div class="seg" id="viewSeg">
+          <button data-view="code" title="Claude Code bu Mac'te, terminalde çalışır">⌨ Yerel Code</button>
+          <button data-view="chat" title="claude.ai web: sohbet ve bulut oturumları">🌐 Web</button>
+        </div>
+      </header>
+      <section id="stage"></section>
+    </main>
+  </div>
+
+  <div id="modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Hesap ayarları</h2>
+        <button class="icon-btn" id="modalClose" title="Kapat">✕</button>
+      </div>
+      <p class="muted small">
+        Her hesabın kendi <b>ayar klasörü</b> var; Claude Code girişi ve geçmişi orada tutulur.
+        Bir hesabın klasörünü boş bırakırsanız varsayılan <code>~/.claude</code> kullanılır
+        (yani şu an terminalde açık olan hesabınız). Chat oturumları her hesap için ayrıca saklanır.
+      </p>
+      <div id="acctForm"></div>
+      <div class="modal-actions">
+        <button class="ghost-btn" id="addAcct">+ Hesap ekle</button>
+        <span class="spacer"></span>
+        <button class="ghost-btn" id="modalCancel">Vazgeç</button>
+        <button class="primary-btn" id="modalSave">Kaydet</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" hidden></div>
+
+  <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+  <script src="../node_modules/marked/lib/marked.umd.js"></script>
+  <script src="../node_modules/dompurify/dist/purify.js"></script>
+  <script src="chat.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
