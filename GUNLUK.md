@@ -5,6 +5,22 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 
 ---
 
+## 2026-10-15 · Otomatik incelemenin iki ek bulgusu kapatıldı
+
+**İstek:** Küçük resimdeki WebRTC kanalını ve Markdown'da kalan `class`'ı kapat; her biri için e2e adımı ekle ve bozunca kırmızıya döndüğünü gör.
+
+**Yapılan**
+- `renderer/chat.js`: `PURIFY` artık `id`'yi de atıyor. Bir DOMPurify kancası `class`'ta yalnız `language-*` sınıfını bırakıyor. Marked başka sınıf üretmiyor; sahte `perm-card` ya da `codeblock` gibi panel sınıfları gidiyor, kod bloğunun dil etiketi kalıyor.
+- `artifacts.js`: küçük resim oturumu `setProxy` ile erişilemeyen `127.0.0.1:1`'e yönleniyor. `<-loopback>` sayesinde yerel adresler de proxy'ye gidiyor; CDN'ler doğrudan. Pencerede `setWebRTCIPHandlingPolicy('disable_non_proxied_udp')` var.
+- `tests/check.js`: `.claude` klasörü atlanıyor. Electron oturumunun worktree'si orada ve kontrol dosyaları iki kez sayıyordu (14 yerine 28).
+
+**Doğrulama**
+- `npm run check` (14 dosya), `npm test` yeşil (27 adım).
+- Temizleme adımı sahte kartın ve `id`'nin gittiğine, `js` dil etiketinin kaldığına bakıyor. Kanca kaldırılınca kırmızı.
+- Küçük resim adımında sondaj sayfası yerel TURN (TCP, UDP) ve STUN'a bağlanmayı deniyor; test dinleyicilere bir şey gelmediğine bakıyor. Üç bozma da kırmızıya döndü: ikisi birden, yalnız proxy, yalnız UDP kuralı.
+
+**Bekleyen:** Kurulum (`kur.sh`) Emre'yle birlikte yapılacak. Electron yükseltme oturumu aynı dosyalara (`artifacts.js`, `tests/e2e.js`) dokunuyor; birleştirirken çakışma çıkabilir. DNS ön çözümleme gibi yan kanallar denenmedi.
+
 ## 2026-10-15 · İki güvenlik açığı kapatıldı
 
 **İstek:** Mevcut işi commit'le (`panel-gelistirmeleri` dalı, `6fd0d75`), sonra incelemede bulunan iki açığı kapat ve her biri için e2e adımı ekle.

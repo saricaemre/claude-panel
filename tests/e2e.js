@@ -295,15 +295,19 @@ const step = (name) => console.log('• ' + name);
     await page.locator(shot).scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(OUT, '6c-mcp-kod.png') });
 
-    step('Güvenlik: yanıttaki form, düğme ve stil temizlenir');
+    step('Güvenlik: yanıttaki form, düğme, stil ve panel sınıfları temizlenir; kod dili kalır');
     await page.fill(C + '.composer-input', 'tuzak sayfayı göster');
     await page.press(C + '.composer-input', 'Enter');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('görev kutucuğu')
       && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
     assert.deepEqual(await page.$eval(C + '.msg-assistant:has-text("Devam etmek için")', (el) => ({
-      tehlikeli: [...el.querySelectorAll('form, button, style, [style], [action]')].map((x) => x.outerHTML.slice(0, 80)),
+      tehlikeli: [...el.querySelectorAll('form, button:not(.code-copy), style, [style], [action]')].map((x) => x.outerHTML.slice(0, 80)),
       kutucuk: el.querySelectorAll('input[type="checkbox"]').length,
     })), { tehlikeli: [], kutucuk: 1 }, 'yanıttaki tehlikeli HTML temizlenmedi');
+    assert.deepEqual(await page.$eval(C + '.msg-assistant:has-text("Devam etmek için")', (el) => ({
+      sahte: [...el.querySelectorAll('.perm-card, [id]')].map((x) => x.outerHTML.slice(0, 80)),
+      kodDili: el.querySelector('.codeblock .code-head span')?.textContent,
+    })), { sahte: [], kodDili: 'js' }, 'panelin sınıfı/id\'si yanıtta kaldı ya da kod dili kayboldu');
     assert.match(await page.getAttribute('meta[http-equiv="Content-Security-Policy"]', 'content'), /form-action 'none'/);
 
     step('Bağlayıcılar: aynı klasörde açık sohbet varsa kapatma o oturuma da hemen gider (mcp_toggle)');
@@ -342,13 +346,25 @@ const step = (name) => console.log('• ' + name);
     assert.equal(await status('kacak.css'), 404, 'symlink ile klasör dışına çıkıldı');
     assert.equal(await status('..%2Fgizli.css'), 404, '.. ile klasör dışına çıkıldı');
 
-    step('Küçük resim: sayfa betiği yalnız kendi varlıklarını alır; başka artifact\'e ve ağa ulaşamaz');
+    step('Küçük resim: sayfa betiği yalnız kendi varlıklarını alır; başka artifact\'e, ağa ve WebRTC ile dışarıya ulaşamaz');
     // Sondaj sayfası denetimi kendisi yapar, sonucu arka plan rengine yazar (yeşil: hepsi engellendi, görsel yüklendi)
     const hits = [];
     const srv = http.createServer((req, res) => { hits.push(req.url); res.end('ok'); });
     await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    // WebRTC webRequest'ten geçmez: TURN (TCP, UDP) ve STUN (UDP) denemeleri buraya düşerse sızıntı var
+    const rtcHits = [];
+    const turnTcp = require('net').createServer((s) => { rtcHits.push('tcp'); s.destroy(); });
+    await new Promise((r) => turnTcp.listen(0, '127.0.0.1', r));
+    const turnUdp = require('dgram').createSocket('udp4').on('message', () => rtcHits.push('udp'));
+    await new Promise((r) => turnUdp.bind(0, '127.0.0.1', r));
     const probe = path.join(PROJECT, 'sondaj.html');
     fs.writeFileSync(probe, `<!doctype html><body style="margin:0;background:#fff"><img id="logo" src="logo.png"><script>
+      try {
+        const pc = new RTCPeerConnection({ iceServers: [{ urls: ['turn:127.0.0.1:${turnTcp.address().port}?transport=tcp',
+          'turn:127.0.0.1:${turnUdp.address().port}?transport=udp', 'stun:127.0.0.1:${turnUdp.address().port}'], username: 'sizinti', credential: 'x' }] });
+        pc.createDataChannel('d');
+        pc.createOffer().then((o) => pc.setLocalDescription(o));
+      } catch {}
       const dene = (u) => fetch(u).then((r) => (r.ok ? 'okundu' : 'engel'), () => 'engel');
       const gorsel = new Promise((r) => (logo.complete ? r(logo.naturalWidth) : (logo.onload = logo.onerror = () => r(logo.naturalWidth))));
       Promise.all([dene('gizli.json'), dene('artifact://view/${rid}/2/'), dene('artifact://thumb/${rid}/2/'),
@@ -364,8 +380,10 @@ const step = (name) => console.log('• ' + name);
     assert.ok(thumbDone(), 'sondajın küçük resmi çizilmedi');
     const px = await app.evaluate(({ nativeImage }, p) => [...nativeImage.createFromPath(p).crop({ x: 300, y: 300, width: 1, height: 1 }).toBitmap()],
       path.join(USER_DATA, 'artifacts', added.id, 'thumb-v1.png'));
-    srv.close();
+    await page.waitForTimeout(500);
+    srv.close(); turnTcp.close(); turnUdp.close();
     assert.deepEqual(hits, [], 'küçük resim sayfası ağa ulaştı');
+    assert.deepEqual([...new Set(rtcHits)], [], 'küçük resim sayfası WebRTC ile dışarıya ulaştı');
     assert.ok(px[1] > 150 && px[0] < 80 && px[2] < 80, 'küçük resimde sayfa betiği engellenmesi gerekeni okudu (piksel yeşil değil): ' + px);
     await page.evaluate((id) => window.panel.artifactsRemove(id), added.id);
     await page.waitForFunction(() => document.querySelectorAll('.art-card').length === 2);

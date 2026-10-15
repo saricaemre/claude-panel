@@ -72,10 +72,16 @@ const CATEGORY_TEXT = {
 
 // Claude'un yanıtındaki ham HTML: form ve düğme pencereyi dış siteye götürebilir, stil izin kartlarını örtebilir.
 // input kalır (GFM görev listesi kutucukları); form olmadan bir yere gönderemez.
+// Panelin kendi sınıfları ve id'leri de atılır (sahte izin kartı, ekranı örten katman); yalnız kod dili (language-*) kalır.
 const PURIFY = {
   FORBID_TAGS: ['form', 'button', 'style', 'link', 'meta', 'base'],
-  FORBID_ATTR: ['style', 'action', 'formaction'],
+  FORBID_ATTR: ['style', 'action', 'formaction', 'id'],
 };
+DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
+  if (data.attrName !== 'class') return;
+  data.attrValue = data.attrValue.split(/\s+/).filter((c) => /^language-[\w-]+$/.test(c)).join(' ');
+  if (!data.attrValue) data.keepAttr = false;
+});
 
 function md(text) {
   let html;

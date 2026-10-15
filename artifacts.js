@@ -231,11 +231,17 @@ function handleProtocol(req) {
 const THUMB_CDN = new Set(['cdnjs.cloudflare.com', 'cdn.jsdelivr.net', 'unpkg.com', 'cdn.tailwindcss.com', 'code.jquery.com', 'fonts.googleapis.com', 'fonts.gstatic.com']);
 const THUMB_CDN_TYPES = new Set(['script', 'stylesheet', 'font']);
 let thumbSession = null;
+let thumbReady = null;
 let thumbJob = null; // o an çizilen [id, n]
+
+// WebRTC (STUN/TURN) webRequest'ten geçmez. Bu yüzden oturumun bütün bağlantıları erişilemeyen bir proxy'ye
+// yönlenir (yerel adresler dahil); yalnız CDN'ler doğrudan gider. Pencerede ayrıca proxy'siz UDP kapalı.
+const DEAD_PROXY = 'http://127.0.0.1:1';
 
 function getThumbSession() {
   if (thumbSession) return thumbSession;
   thumbSession = session.fromPartition('artifact-thumbs');
+  thumbReady = thumbSession.setProxy({ proxyRules: DEAD_PROXY, proxyBypassRules: ['<-loopback>', ...THUMB_CDN].join(',') }).catch(() => {});
   thumbSession.protocol.handle('artifact', (req) => {
     try {
       const u = new URL(req.url);
@@ -282,6 +288,8 @@ async function makeThumb(id, n) {
   });
   thumbJob = [id, n];
   try {
+    await thumbReady;
+    w.webContents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
     w.webContents.setAudioMuted(true);
     w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     await Promise.race([w.loadURL(`artifact://view/${id}/${n}/`).catch(() => {}), sleep(8000)]);
