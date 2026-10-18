@@ -6,6 +6,21 @@ const url = require('url');
 
 const chat = require('./chat-main');
 const artifacts = require('./artifacts');
+const simulator = require('./simulator');
+const browser = require('./browser');
+const terminals = require('./terminals');
+const changes = require('./changes');
+const sessions = require('./sessions');
+const environments = require('./environments');
+const opener = require('./opener');
+const prwatch = require('./prwatch');
+const octopus = require('./octopus');
+const hafiza = require('./hafiza');
+const defter = require('./defter');
+const sinav = require('./sinav');
+const dogus = require('./dogus');
+const danis = require('./danis');
+const alma = require('./alma');
 
 // Özel protokol app hazır olmadan kaydedilmeli
 artifacts.registerScheme();
@@ -25,29 +40,48 @@ if (process.env.CLAUDE_PANEL_USER_DATA) app.setPath('userData', process.env.CLAU
 
 const CONFIG_PATH = () => path.join(app.getPath('userData'), 'config.json');
 
+// Sıfırdan kurulumda tek hesap: Claude Code'un varsayılan ayar klasörü (~/.claude; configDir boş). Başka hesaplar Hesap ayarlarından eklenir.
 const DEFAULT_CONFIG = {
-  accounts: [
-    { id: 'is', name: 'İş', note: 'İş hesabı', color: '#3f9b84', configDir: '~/.claude-is' },
-    { id: 'max', name: 'Max', note: 'Max üyelik', color: '#d97757', configDir: '~/.claude-max' },
-    { id: 'pro', name: 'Pro', note: 'Pro üyelik', color: '#7c7ce0', configDir: '~/.claude-pro' },
-  ],
+  accounts: [{ id: 'claude', name: 'Claude', note: '', color: '#d97757', configDir: '' }],
   recents: {},
-  lastAccount: 'is',
+  environments: [],
+  lastAccount: 'claude',
 };
 
+// Ayar dosyasında hesap yoksa (ilk açılış) ya da ilk açılış sihirbazı yarım kaldıysa firstRun: arayüz sihirbazı açar (renderer/kurulum.js)
 function loadConfig() {
   try {
     const raw = JSON.parse(fs.readFileSync(CONFIG_PATH(), 'utf8'));
-    return { ...DEFAULT_CONFIG, ...raw, accounts: raw.accounts?.length ? raw.accounts : DEFAULT_CONFIG.accounts };
+    const firstRun = !raw.accounts?.length || raw.welcome === 'pending';
+    return { ...DEFAULT_CONFIG, ...raw, accounts: raw.accounts?.length ? raw.accounts : DEFAULT_CONFIG.accounts, firstRun };
   } catch {
-    return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    return { ...JSON.parse(JSON.stringify(DEFAULT_CONFIG)), firstRun: true };
   }
 }
 
 function saveConfig(cfg) {
+  const { firstRun, ...data } = cfg;
   fs.mkdirSync(path.dirname(CONFIG_PATH()), { recursive: true });
-  fs.writeFileSync(CONFIG_PATH(), JSON.stringify(cfg, null, 2));
+  // Ortam değişkenleri düz metin durur: dosya yalnız kullanıcıya açık
+  fs.writeFileSync(CONFIG_PATH(), JSON.stringify(data, null, 2), { mode: 0o600 });
+  try { fs.chmodSync(CONFIG_PATH(), 0o600); } catch {}
 }
+
+// SDK'nın platform paketindeki Claude Code ikilisi (paketleme --no-asar: çalıştırılabilir). Testlerde sahte CLI.
+function bundledClaude() {
+  if (process.env.CLAUDE_PANEL_CLAUDE_BIN) return process.env.CLAUDE_PANEL_CLAUDE_BIN;
+  try {
+    const dir = path.dirname(require.resolve(`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}/package.json`));
+    return fs.existsSync(path.join(dir, 'claude')) ? path.join(dir, 'claude') : null;
+  } catch { return null; }
+}
+
+// İzin sormadan çalışan MCP sunucuları (config.json → autoAllowMcp; arayüzü yok, elle yazılır). Yalnız sunucu adı biçimindekiler alınır.
+const cleanMcpNames = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && /^[\w.-]{1,64}$/.test(x)) : []);
+
+// Maliyet eşikleri (K7): danışmada bu tahminin üstü onay kartıyla, sınavda bu tahminin altı onaysız. Boş = varsayılan.
+const THRESHOLD_MAX = 2000000;
+const cleanThreshold = (v) => { const n = Math.round(+v); return Number.isFinite(n) && n >= 0 && n <= THRESHOLD_MAX ? n : null; };
 
 function expandHome(p) {
   if (!p) return p;
@@ -66,7 +100,7 @@ function shellQuote(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
-function createPty({ accountId, cwd, mode, resumeId, cols, rows }) {
+function createPty({ accountId, cwd, mode, resumeId, envId, cols, rows }) {
   if (!pty) throw new Error('node-pty yüklenemedi. Klasörde "npm install" çalıştırın.');
   const cfg = loadConfig();
   const account = cfg.accounts.find((a) => a.id === accountId);
@@ -83,6 +117,13 @@ function createPty({ accountId, cwd, mode, resumeId, cols, rows }) {
   if (!env.LANG) env.LANG = 'en_US.UTF-8';
   if (!env.LC_CTYPE) env.LC_CTYPE = 'UTF-8';
 
+  // Seçili ortam: değişkenler süreç ortamına, kurulum betiği kabukta Claude'dan önce (environments.js)
+  const profile = envId ? (cfg.environments || []).find((e) => e.id === envId) : null;
+  if (profile) environments.applyVars(env, profile.vars);
+  const setup = profile?.setup?.trim() ? profile.setup : '';
+  if (setup) env.CLAUDE_PANEL_SETUP = setup;
+  else delete env.CLAUDE_PANEL_SETUP;
+
   const configDir = expandHome(account.configDir);
   if (configDir) {
     fs.mkdirSync(configDir, { recursive: true });
@@ -91,18 +132,29 @@ function createPty({ accountId, cwd, mode, resumeId, cols, rows }) {
     delete env.CLAUDE_CONFIG_DIR; // boş bırakılırsa varsayılan ~/.claude kullanılır
   }
 
-  const claude = `claude --allowedTools ${shellQuote(chat.AUTO_ALLOW_TOOLS.join(','))}`;
+  const allow = chat.autoAllowTools();
+  const claude = allow.length ? `claude --allowedTools ${shellQuote(allow.join(','))}` : 'claude';
+  // Claude Code'un komut satırı kurulu değilse (temiz Mac) SDK'nın içindeki ikili çalışır: sihirbazın "Terminalde giriş yap"ı da
+  const bundled = bundledClaude();
+  const prelude = bundled ? `command -v claude >/dev/null 2>&1 || claude() { ${shellQuote(bundled)} "$@"; }; ` : '';
   const commands = {
     new: claude,
     continue: `${claude} --continue`,
     resume: `${claude} --resume`,
+    login: `${claude} /login`, // ilk açılış sihirbazı: hesabın girişi
   };
   if (mode === 'resume-id' && /^[0-9a-f-]{36}$/i.test(resumeId || '')) commands['resume-id'] = `${claude} --resume ${resumeId}`;
   const cmd = commands[mode];
+  // Kurulum betiği giriş kabuğunda görünür biçimde çalışır; hata verirse Claude açılmaz, kabuk açık kalır.
+  // Betik ortam değişkeniyle gelir (komut satırında görünmesin), çalışmadan önce silinir; export'ları sonraki kabuğa geçer.
+  const run = (cmd ? prelude : '') + (setup
+    ? '__k="$CLAUDE_PANEL_SETUP"; unset CLAUDE_PANEL_SETUP; if eval "$__k"; then unset __k;' + (cmd ? ` ${cmd};` : '') +
+      ` else printf '\\n[Claude Panel] Ortam kurulum betiği hata verdi (çıkış %s)${cmd ? '; Claude başlatılmadı' : ''}.\\n' $?; fi; `
+    : cmd ? `${cmd}; ` : '');
   // Giriş kabuğu (-l -i): .zprofile/.zshrc yüklenir, PATH ve alias'lar hazır olur.
   // Claude kapanınca aynı klasörde normal kabuk açık kalır.
-  const args = cmd
-    ? ['-l', '-i', '-c', `${cmd}; exec ${shellQuote(userShell)} -l -i`]
+  const args = run
+    ? ['-l', '-i', '-c', `${run}exec ${shellQuote(userShell)} -l -i`]
     : ['-l', '-i'];
 
   const proc = pty.spawn(userShell, args, {
@@ -117,14 +169,17 @@ function createPty({ accountId, cwd, mode, resumeId, cols, rows }) {
   terms.set(id, { proc, accountId });
 
   proc.onData((data) => {
+    terminals.noteData(id);
     if (win && !win.isDestroyed()) win.webContents.send('pty:data', id, data);
   });
   proc.onExit(({ exitCode }) => {
     terms.delete(id);
+    terminals.noteExit(id);
     if (win && !win.isDestroyed()) win.webContents.send('pty:exit', id, exitCode);
   });
 
-  // Son kullanılan klasörler
+  // Son kullanılan klasörler (giriş terminali ev klasöründe açılır, listeye girmez)
+  if (mode === 'login') return { id, cwd: dir, title: 'Giriş' };
   cfg.recents = cfg.recents || {};
   const list = (cfg.recents[accountId] || []).filter((d) => d !== dir);
   list.unshift(dir);
@@ -140,6 +195,8 @@ function killAll() {
   }
   terms.clear();
   chat.closeAll();
+  simulator.detach(false);
+  hafiza.shutdown();
 }
 
 // ---------- IPC ----------
@@ -153,9 +210,26 @@ ipcMain.handle('config:save', (_e, patch) => {
   if (patch.fontSize) cfg.fontSize = patch.fontSize;
   if (patch.recents) cfg.recents = patch.recents;
   if (patch.chatPrefs) cfg.chatPrefs = { ...(cfg.chatPrefs || {}), ...patch.chatPrefs };
+  if (Array.isArray(patch.environments)) cfg.environments = environments.sanitize(patch.environments);
+  if (typeof patch.keepAwake === 'boolean') cfg.keepAwake = patch.keepAwake;
+  if (typeof patch.editor === 'string') cfg.editor = patch.editor;
+  if (patch.autoCompact === 'ask' || patch.autoCompact === 'allow') cfg.autoCompact = patch.autoCompact;
+  if (patch.welcome === 'pending' || patch.welcome === 'done') cfg.welcome = patch.welcome;
+  if (patch.thresholds && typeof patch.thresholds === 'object') {
+    const t = { ...(cfg.thresholds || {}) };
+    for (const k of ['danis', 'sinav']) {
+      if (!(k in patch.thresholds)) continue;
+      const n = patch.thresholds[k] === '' || patch.thresholds[k] == null ? null : cleanThreshold(patch.thresholds[k]);
+      if (n == null) delete t[k]; else t[k] = n;
+    }
+    cfg.thresholds = t;
+  }
   saveConfig(cfg);
-  return cfg;
+  if (typeof patch.keepAwake === 'boolean') chat.updateAwake();
+  return loadConfig();
 });
+// Ortam düzenleyicisi kaydetmeden önce değişken satırlarını denetletir (biçim kuralları tek yerde: environments.js)
+ipcMain.handle('env:check', (_e, text) => environments.parseVars(text).errors);
 ipcMain.handle('app:info', () => ({ home: os.homedir(), ptyOk: !!pty, platform: process.platform }));
 
 ipcMain.handle('dialog:pickFolder', async (_e, defaultPath) => {
@@ -188,12 +262,27 @@ ipcMain.on('open:external', (_e, url) => {
 });
 ipcMain.on('open:folder', (_e, dir) => shell.openPath(expandHome(dir)));
 
+// Electron 42+ macOS bildirimini UNNotification ile gösterir; imzasız (ad-hoc) uygulamada reddedilir (ölçüldü).
+// Reddedilince Dock simgesi zıplar ve okunmamış sayısını gösterir; pencereye dönünce sayı silinir.
+let dockUnseen = 0;
+function dockAlert() {
+  if (!app.dock) return;
+  app.dock.setBadge(String(++dockUnseen));
+  app.dock.bounce('informational');
+}
+function clearDockAlert() {
+  if (!dockUnseen) return;
+  dockUnseen = 0;
+  app.dock?.setBadge('');
+}
+
 ipcMain.on('notify', (_e, { title, body }) => {
-  if (Notification.isSupported() && win && !win.isFocused()) {
-    const n = new Notification({ title, body, silent: false });
-    n.on('click', () => { win.show(); win.focus(); });
-    n.show();
-  }
+  if (!win || win.isFocused()) return;
+  if (!Notification.isSupported()) return dockAlert();
+  const n = new Notification({ title, body, silent: false });
+  n.on('click', () => { win.show(); win.focus(); });
+  n.on('failed', dockAlert);
+  n.show();
 });
 
 // ---------- Pencere ----------
@@ -216,6 +305,9 @@ function buildMenu() {
       submenu: [
         { label: 'Yeni sohbet', accelerator: 'CmdOrCtrl+N', click: () => sendCmd('newChat') },
         { label: 'Artifacts', accelerator: 'CmdOrCtrl+Shift+A', click: () => sendCmd('artifacts') },
+        { label: 'iOS Simülatörü', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendCmd('simulator') },
+        { label: 'Tarayıcı', accelerator: 'CmdOrCtrl+Shift+B', click: () => sendCmd('browser') },
+        { label: 'Değişiklikler', accelerator: 'CmdOrCtrl+Shift+D', click: () => sendCmd('changes') },
         { type: 'separator' },
         ...accountItems,
         { type: 'separator' },
@@ -244,6 +336,7 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu' },
+    { role: 'help', submenu: [{ label: 'Octopus nasıl çalışır?', click: () => sendCmd('octopusIntro') }] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -255,7 +348,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 560,
     title: 'Claude Panel',
-    backgroundColor: '#262624',
+    backgroundColor: '#252422',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: { x: 16, y: 18 },
     webPreferences: {
@@ -278,11 +371,25 @@ function createWindow() {
     if (!own) e.preventDefault();
   });
 
+  // Gömülü sayfalar (claude.ai Web görünümü, tarayıcı bölmesi) panelin köprüsünü ve Node'u asla almaz;
+  // yalnız bilinen çerez bölmeleri ve http(s)/about:blank başlangıç adresi kabul edilir
+  win.webContents.on('will-attach-webview', (e, prefs, params) => {
+    delete prefs.preload;
+    prefs.nodeIntegration = false;
+    prefs.nodeIntegrationInSubFrames = false;
+    prefs.contextIsolation = true;
+    const part = /^persist:(chat|browser)-[A-Za-z0-9_.-]+$/.exec(params.partition || '');
+    if (!part || (params.src && !/^(https?:|about:blank$)/.test(params.src))) return e.preventDefault();
+    if (part[1] === 'browser') prefs.sandbox = true;
+  });
+
   // Artifact önizlemelerinden açılan linkler varsayılan tarayıcıda açılsın, yeni Electron penceresi açılmasın
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
+
+  win.on('focus', clearDockAlert);
 
   win.on('close', (e) => {
     const running = terms.size + chat.count();
@@ -309,6 +416,8 @@ app.userAgentFallback = app.userAgentFallback
 
 app.on('web-contents-created', (_e, contents) => {
   if (contents.getType() !== 'webview') return;
+  // Tarayıcı bölmesi kendi kurallarıyla (browser.js): izinler kapalı, indirme yok, açılır pencere aynı bölmede
+  if (browser.isBrowserSession(contents.session)) return browser.configureContents(contents);
 
   // claude.ai içinden açılan dış linkler varsayılan tarayıcıda açılsın
   contents.setWindowOpenHandler(({ url }) => {
@@ -333,9 +442,29 @@ app.whenReady().then(() => {
   chat.setup({
     getWindow: () => win,
     getAccount: (id) => loadConfig().accounts.find((a) => a.id === id),
+    getEnvironment: (id) => (id ? (loadConfig().environments || []).find((e) => e.id === id) : null),
     expandHome,
     artifacts,
+    getKeepAwake: () => loadConfig().keepAwake !== false,
+    getAutoCompact: () => (loadConfig().autoCompact === 'allow' ? 'allow' : 'ask'),
+    getAutoAllow: () => cleanMcpNames(loadConfig().autoAllowMcp),
   });
+  simulator.setup({ getWindow: () => win, loginEnv: chat.loginEnv });
+  browser.setup({ getWindow: () => win });
+  terminals.setup({ getWindow: () => win });
+  changes.setup({ getWindow: () => win });
+  sessions.setup({ getWindow: () => win });
+  prwatch.setup({ getWindow: () => win });
+  octopus.setup({ getWindow: () => win });
+  defter.setup({ getWindow: () => win });
+  sinav.setup({ getWindow: () => win });
+  dogus.setup({ getWindow: () => win });
+  hafiza.setup({ getAccounts: () => loadConfig().accounts, getExtra: () => loadConfig().memoryProjects || [], expandHome,
+    projectKey: (cwd) => chat.projectKey(expandHome(cwd) || os.homedir()) });
+  alma.setup({ projectKey: chat.projectKey, expandHome, listSessions: chat.listSessions, getConfig: loadConfig, saveConfig });
+  danis.configure({ getThreshold: () => loadConfig().thresholds?.danis ?? null });
+  sinav.configure({ getThreshold: () => loadConfig().thresholds?.sinav ?? null });
+  opener.setup({ getEditor: () => loadConfig().editor || '' });
   buildMenu();
   createWindow();
   ipcMain.on('menu:rebuild', buildMenu);

@@ -1,8 +1,9 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('panel', {
   getConfig: () => ipcRenderer.invoke('config:get'),
   saveConfig: (patch) => ipcRenderer.invoke('config:save', patch),
+  envCheck: (text) => ipcRenderer.invoke('env:check', text),
   info: () => ipcRenderer.invoke('app:info'),
   pickFolder: (defaultPath) => ipcRenderer.invoke('dialog:pickFolder', defaultPath),
   rebuildMenu: () => ipcRenderer.send('menu:rebuild'),
@@ -13,9 +14,14 @@ contextBridge.exposeInMainWorld('panel', {
   ptyKill: (id) => ipcRenderer.send('pty:kill', id),
   onPtyData: (cb) => ipcRenderer.on('pty:data', (_e, id, data) => cb(id, data)),
   onPtyExit: (cb) => ipcRenderer.on('pty:exit', (_e, id, code) => cb(id, code)),
+  // Claude'un terminal aracı (terminals.js): ana süreç sorar, arayüz xterm arabelleğinden yanıtlar
+  onTermQuery: (cb) => ipcRenderer.on('term:query', (_e, id, op, args) => cb(id, op, args)),
+  termReply: (id, reply) => ipcRenderer.send('term:reply', id, reply),
 
   chatStart: (opts) => ipcRenderer.invoke('chat:start', opts),
-  chatSend: (id, text, images) => ipcRenderer.send('chat:send', id, text, images),
+  chatSend: (id, content) => ipcRenderer.send('chat:send', id, content),
+  // Seçilen/bırakılan dosyanın diskteki yolu (Electron 32+'da File.path yok); panodan gelen görselde boş
+  filePath: (file) => { try { return webUtils.getPathForFile(file) || ''; } catch { return ''; } },
   chatPermissionReply: (id, rid, reply) => ipcRenderer.send('chat:permissionReply', id, rid, reply),
   chatInterrupt: (id) => ipcRenderer.invoke('chat:interrupt', id),
   chatSetModel: (id, model) => ipcRenderer.invoke('chat:setModel', id, model),
@@ -23,7 +29,8 @@ contextBridge.exposeInMainWorld('panel', {
   chatSetEffort: (id, level) => ipcRenderer.invoke('chat:setEffort', id, level),
   chatClose: (id) => ipcRenderer.send('chat:close', id),
   accountInfo: (accountId, force) => ipcRenderer.invoke('account:info', accountId, force),
-  mcpList: (accountId, cwd) => ipcRenderer.invoke('mcp:list', accountId, cwd),
+  accountLogin: (accountId) => ipcRenderer.invoke('account:login', accountId), // ilk açılış: giriş yapılmış mı (token harcamaz)
+  mcpList: (accountId, cwd, withStatus) => ipcRenderer.invoke('mcp:list', accountId, cwd, withStatus),
   mcpToggle: (accountId, cwd, name, enabled) => ipcRenderer.invoke('mcp:toggle', accountId, cwd, name, enabled),
   pluginsList: (accountId, cwd) => ipcRenderer.invoke('plugins:list', accountId, cwd),
   pluginsToggle: (accountId, id, enabled) => ipcRenderer.invoke('plugins:toggle', accountId, id, enabled),
@@ -34,6 +41,19 @@ contextBridge.exposeInMainWorld('panel', {
   onChatPermission: (cb) => ipcRenderer.on('chat:permission', (_e, id, req) => cb(id, req)),
   onChatPermissionDone: (cb) => ipcRenderer.on('chat:permissionDone', (_e, id, rid) => cb(id, rid)),
   onChatModels: (cb) => ipcRenderer.on('chat:models', (_e, id, models) => cb(id, models)),
+  // Bağlam doluluğu ve otomatik sıkıştırma izni (compaction.js); kayıt saklama süresi önerisi
+  onChatContext: (cb) => ipcRenderer.on('chat:context', (_e, id, u) => cb(id, u)),
+  onCompactBlocked: (cb) => ipcRenderer.on('chat:compactBlocked', (_e, id, info) => cb(id, info)),
+  // Sınav (sinav.js): sıkıştırmadan sonra kart; eşiğin üstünde "Sınavı yap" / "Atla"
+  onExam: (cb) => ipcRenderer.on('sinav:event', (_e, id, ev) => cb(id, ev)),
+  examRun: (chatId) => ipcRenderer.invoke('sinav:run', chatId),
+  examSkip: (chatId) => ipcRenderer.invoke('sinav:skip', chatId),
+  // Yeniden doğuş (dogus.js): tahmini bedel, başlatma, adımlar
+  rebirthPlan: (chatId) => ipcRenderer.invoke('dogus:plan', chatId),
+  rebirthStart: (chatId) => ipcRenderer.invoke('dogus:start', chatId),
+  onRebirth: (cb) => ipcRenderer.on('dogus:event', (_e, id, ev) => cb(id, ev)),
+  retention: (accountId) => ipcRenderer.invoke('settings:retention', accountId),
+  setRetention: (accountId) => ipcRenderer.invoke('settings:setRetention', accountId),
 
   onChatArtifact: (cb) => ipcRenderer.on('chat:artifact', (_e, id, info) => cb(id, info)),
 
@@ -47,6 +67,73 @@ contextBridge.exposeInMainWorld('panel', {
   artifactsOpenExternal: (id, n) => ipcRenderer.invoke('artifacts:openExternal', id, n),
   artifactsReveal: (id) => ipcRenderer.invoke('artifacts:reveal', id),
   onArtifactsChanged: (cb) => ipcRenderer.on('artifacts:changed', () => cb()),
+
+  simDevices: () => ipcRenderer.invoke('sim:devices'),
+  simStatus: () => ipcRenderer.invoke('sim:status'),
+  simAttach: (choice) => ipcRenderer.invoke('sim:attach', choice),
+  simDetach: () => ipcRenderer.invoke('sim:detach'),
+  simShutdown: (udid) => ipcRenderer.invoke('sim:shutdown', udid),
+  simScreenshot: () => ipcRenderer.invoke('sim:screenshot'),
+  simInput: (obj) => ipcRenderer.send('sim:input', obj),
+  onSimState: (cb) => ipcRenderer.on('sim:state', (_e, st) => cb(st)),
+  onSimFrame: (cb) => ipcRenderer.on('sim:frame', (_e, jpeg) => cb(jpeg)),
+  onSimOpen: (cb) => ipcRenderer.on('sim:open', (_e, chatId) => cb(chatId)),
+
+  browserAttach: (chatId, wcId) => ipcRenderer.invoke('browser:attach', chatId, wcId),
+  browserUserNav: (chatId, url) => ipcRenderer.send('browser:userNav', chatId, url),
+  browserViewport: (chatId, opts) => ipcRenderer.invoke('browser:viewport', chatId, opts),
+  browserScreenshot: (chatId) => ipcRenderer.invoke('browser:screenshot', chatId),
+  onBrowserOpen: (cb) => ipcRenderer.on('browser:open', (_e, chatId) => cb(chatId)),
+  onBrowserViewport: (cb) => ipcRenderer.on('browser:viewport', (_e, chatId, size, wcId) => cb(chatId, size, wcId)),
+  // Yan oturumlar (sessions.js): ana süreç sekme açtırır / mesaj yazdırır; tur sonu bildirimi başlatan sohbete
+  onSessionQuery: (cb) => ipcRenderer.on('session:query', (_e, id, op, args) => cb(id, op, args)),
+  sessionReply: (id, reply) => ipcRenderer.send('session:reply', id, reply),
+  onSessionEvent: (cb) => ipcRenderer.on('session:event', (_e, parentId, ev) => cb(parentId, ev)),
+  // Octopus (octopus.js): hesabın ahtapotları, klasörün durumu (ahtapotu var mı, geçmişi var mı), açık sohbeti beyin yapma, kayıt değişince bildirim
+  octopusList: (accountId) => ipcRenderer.invoke('octopus:list', accountId),
+  octopusFolder: (accountId, cwd) => ipcRenderer.invoke('octopus:folder', accountId, cwd),
+  octopusAdopt: (chatId) => ipcRenderer.invoke('octopus:adopt', chatId),
+  onOctopusChanged: (cb) => ipcRenderer.on('octopus:changed', (_e, accountId) => cb(accountId)),
+  // "Projeyi Octopus'a al" (alma.js): klasörü yalnız okuyarak tara, ahtapotu kur; ahtapotun ayarları (kol sınırı, hafıza)
+  octopusSurvey: (accountId, cwd) => ipcRenderer.invoke('octopus:survey', accountId, cwd),
+  octopusImport: (accountId, opts) => ipcRenderer.invoke('octopus:import', accountId, opts),
+  octopusSettings: (octoId, patch) => ipcRenderer.invoke('octopus:settings', octoId, patch),
+  // Defter (defter.js): ahtapotun satırları, arayüzden yazma (add, edit, supersede, pin, unpin, close, revert), satırın kaynağı, değişince bildirim
+  defterList: (octoId) => ipcRenderer.invoke('defter:list', octoId),
+  defterApply: (octoId, op, args) => ipcRenderer.invoke('defter:apply', octoId, op, args),
+  defterSource: (octoId, id) => ipcRenderer.invoke('defter:source', octoId, id),
+  defterImport: (octoId, patterns) => ipcRenderer.invoke('defter:import', octoId, patterns), // içe aktarma deseni (ahtapot kaydına)
+  onDefterChanged: (cb) => ipcRenderer.on('defter:changed', (_e, octoId) => cb(octoId)),
+  // Hafıza dizini (hafiza.js): Türkçeye uyumlu arama ({ query, project, account, limit }), durum, şimdi tara
+  hafizaAra: (q) => ipcRenderer.invoke('hafiza:ara', q),
+  hafizaDurum: (o) => ipcRenderer.invoke('hafiza:durum', o),
+  hafizaTara: () => ipcRenderer.invoke('hafiza:tara'),
+  // Ayarlar: hafızadaki projeler ve boyutlar, ahtapotu olmayan proje ekle/çıkar, "Hafızayı sil" (dizin ve arşiv)
+  hafizaKapsam: () => ipcRenderer.invoke('hafiza:kapsam'),
+  memoryAdd: (accountId, cwd) => ipcRenderer.invoke('memory:add', accountId, cwd),
+  memoryRemove: (accountId, key) => ipcRenderer.invoke('memory:remove', accountId, key),
+  hafizaSil: () => ipcRenderer.invoke('hafiza:sil'),
+  // "Hafızada ara" penceresi: sohbetin hesabı ve klasörüyle ({ accountId, cwd, query, scope: 'proje'|'hesap', limit })
+  hafizaSohbetteAra: (o) => ipcRenderer.invoke('hafiza:sohbetteAra', o),
+  onWorktreeKept: (cb) => ipcRenderer.on('worktree:kept', (_e, info) => cb(info)),
+  awakeStatus: () => ipcRenderer.invoke('awake:status'),
+  // Kanca günlüğü (hooks.js): sohbetin aldığı Claude Code kanca olayları
+  hooksLog: (chatId) => ipcRenderer.invoke('hooks:log', chatId),
+  widgetRegister: (code) => ipcRenderer.invoke('widget:register', code),
+  changesList: (cwd) => ipcRenderer.invoke('changes:list', cwd),
+  changesDiff: (root, file) => ipcRenderer.invoke('changes:diff', root, file),
+  fileRead: (file) => ipcRenderer.invoke('file:read', file),
+  fileOpen: (file, line) => ipcRenderer.invoke('file:open', file, line),
+  editorList: () => ipcRenderer.invoke('editor:list'),
+  fileReveal: (file) => ipcRenderer.send('file:reveal', file),
+  onChangesOpen: (cb) => ipcRenderer.on('changes:open', (_e, chatId, opts) => cb(chatId, opts)),
+  // PR / CI izleme (prwatch.js): durum düğmesi ve olay kartları
+  onPrState: (cb) => ipcRenderer.on('pr:state', (_e, chatId, st) => cb(chatId, st)),
+  onPrEvent: (cb) => ipcRenderer.on('pr:event', (_e, chatId, ev) => cb(chatId, ev)),
+  prAutofix: (chatId, on) => ipcRenderer.invoke('pr:autofix', chatId, on),
+  prRefresh: (chatId) => ipcRenderer.invoke('pr:refresh', chatId),
+  prUnwatch: (chatId) => ipcRenderer.invoke('pr:unwatch', chatId),
+  onBrowserDownload: (cb) => ipcRenderer.on('browser:download', (_e, chatId, name) => cb(chatId, name)),
 
   onMenu: (cb) => ipcRenderer.on('menu:cmd', (_e, cmd, arg) => cb(cmd, arg)),
   openExternal: (url) => ipcRenderer.send('open:external', url),

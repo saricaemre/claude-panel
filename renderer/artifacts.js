@@ -40,7 +40,6 @@ async function loadArtifacts() {
     const page = $('#artifactsPage');
     const live = art.openId && artById(art.openId) && [...art.viewers].some((v) => page.contains(v.el));
     if (!live) renderArtifactsPage();
-    renderTopbar();
   }
 }
 
@@ -205,7 +204,6 @@ function showArtifacts(id) {
   document.body.dataset.page = 'artifacts';
   renderNav();
   renderSidebar();
-  renderTopbar();
   renderArtifactsPage({ animate: true });
   if (!art.loaded) loadArtifacts();
 }
@@ -235,10 +233,9 @@ function renderArtifactsPage({ animate } = {}) {
   if (art.openId && art.loaded && !open) art.openId = null;
   page.innerHTML = '';
   if (open) {
-    const v = artifactViewer(open, { onBack: () => { art.openId = null; renderArtifactsPage({ animate: true }); renderTopbar(); } });
+    const v = artifactViewer(open, { onBack: () => { art.openId = null; renderArtifactsPage({ animate: true }); } });
     page.append(v.el);
     page.classList.add('viewing');
-    renderTopbar();
     return;
   }
   page.classList.remove('viewing');
@@ -349,9 +346,9 @@ function artifactViewer(item, { compact, onBack, onClose }) {
     h('span', { class: 'spacer' }),
     seg,
     h('span', { class: 'av-div' }),
-    h('button', { class: 'icon-btn', title: 'İçeriği kopyala', onclick: () => copyArtifact(a, n) }, icon('copy', 16)),
-    h('button', { class: 'icon-btn', title: 'İndir', onclick: () => downloadArtifact(a, n) }, icon('download', 16)),
-    h('button', { class: 'icon-btn', title: 'Tarayıcıda aç', onclick: () => openArtifactExternal(a, n) }, icon('external', 16)),
+    h('button', { class: 'icon-btn av-extra', title: 'İçeriği kopyala', onclick: () => copyArtifact(a, n) }, icon('copy', 16)),
+    h('button', { class: 'icon-btn av-extra', title: 'İndir', onclick: () => downloadArtifact(a, n) }, icon('download', 16)),
+    h('button', { class: 'icon-btn av-extra', title: 'Tarayıcıda aç', onclick: () => openArtifactExternal(a, n) }, icon('external', 16)),
     starBtn, moreBtn,
     onClose ? h('button', { class: 'icon-btn', title: 'Kapat', onclick: onClose }, icon('close', 16)) : null);
 
@@ -468,6 +465,10 @@ async function openArtifactInChat(tab, id) {
   if (!artById(id)) await loadArtifacts();
   const a = artById(id);
   if (!a) return toast('Artifact bulunamadı.');
+  closeSimulatorInChat(tab);
+  closeBrowserInChat(tab);
+  closeChangesInChat(tab);
+  closeOctopusInChat(tab);
   tab.artViewer?.destroy();
   const v = artifactViewer(a, { compact: true, onClose: () => closeArtifactInChat(tab) });
   tab.artViewer = v;

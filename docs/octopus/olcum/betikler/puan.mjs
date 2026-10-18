@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+import { norm } from '/Users/emre/Claude Panel/docs/octopus/prototip/ortak.mjs';
+const S = JSON.parse(fs.readFileSync('/Users/emre/Claude Panel/docs/octopus/olcum/p71-soru-seti.json', 'utf8'));
+const split = (t) => { const m = {}; let cur = null; for (const l of t.split('\n')) { const x = l.match(/^\s*(\d{1,2})\.\s(.*)$/); if (x && +x[1] >= 1 && +x[1] <= 20 && (cur === null || +x[1] === cur + 1)) { cur = +x[1]; m[cur] = x[2]; } else if (cur) m[cur] += '\n' + l; } return m; };
+const A = split(JSON.parse(fs.readFileSync('cevap-a.json', 'utf8')).text);
+const B = split(JSON.parse(fs.readFileSync('cevap-b.json', 'utf8'))[1].text);
+const sc = (ans, q) => { const s = norm(ans || ''); if (/^\s*hatirlamiyorum\.?\s*$/.test(s)) return 0; return q.anahtar.filter((g) => new RegExp(g, 'i').test(s)).length / q.anahtar.length; };
+const out = S.sorular.map((q) => ({ no: q.no, kontrol: !!q.kontrol, tur: q.tur, a: +sc(A[q.no], q).toFixed(2), b: +sc(B[q.no], q).toFixed(2) }));
+fs.writeFileSync('puan-oto.json', JSON.stringify({ out, A, B }, null, 1), { mode: 0o600 });
+const sum = (f, k) => out.filter(f).reduce((s, x) => s + x[k], 0).toFixed(2);
+for (const x of out) console.log(String(x.no).padStart(2), x.kontrol ? 'K' : ' ', x.tur.padEnd(5), 'A', x.a.toFixed(2), 'B', x.b.toFixed(2));
+console.log('düşen 12: A', sum((x) => !x.kontrol, 'a'), 'B', sum((x) => !x.kontrol, 'b'), '| kontrol 8: A', sum((x) => x.kontrol, 'a'), 'B', sum((x) => x.kontrol, 'b'));

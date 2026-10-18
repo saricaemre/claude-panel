@@ -1,18 +1,37 @@
 // Sohbet görünümü: Claude Code'u resmi Agent SDK ile çalıştırır (terminal yok).
 // Her sohbet, hesabın kendi ayar klasörüyle (CLAUDE_CONFIG_DIR) ayrı bir Claude Code süreci açar.
-const { ipcMain, app } = require('electron');
+const { ipcMain, app, powerSaveBlocker } = require('electron');
 const { spawn, execFileSync } = require('child_process');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const simulator = require('./simulator');
+const browser = require('./browser');
+const terminals = require('./terminals');
+const changes = require('./changes');
+const sessions = require('./sessions');
+const worktrees = require('./worktrees');
+const wrapup = require('./wrapup');
+const defter = require('./defter');
+const opener = require('./opener');
+const prwatch = require('./prwatch');
+const environments = require('./environments');
+const octopus = require('./octopus');
+const hooks = require('./hooks');
+const compaction = require('./compaction');
+const hafiza = require('./hafiza');
+const danis = require('./danis');
+const sinav = require('./sinav');
+const dogus = require('./dogus');
 
 let sdkPromise;
+let helper = null; // scripts/sessions.mjs çalıştırıcısı (setup'ta); alma.js geçmiş oturumları bununla okur
 const loadSdk = () => (sdkPromise ||= import('@anthropic-ai/claude-agent-sdk'));
 
-// Panelde izin sormadan çalışan MCP sunucuları (sunucu adı tüm araçlarını kapsar).
+// Panelde izin sormadan çalışan MCP sunucuları (sunucu adı tüm araçlarını kapsar): config.json → autoAllowMcp, varsayılan boş.
 // Sohbet görünümüne allowedTools, terminaldeki claude'a --allowedTools olarak verilir.
-const AUTO_ALLOW_MCP = ['blender', 'figma-console'];
-const AUTO_ALLOW_TOOLS = AUTO_ALLOW_MCP.map((s) => `mcp__${s}`);
+let getAutoAllowMcp = () => [];
+const autoAllowTools = () => getAutoAllowMcp().map((s) => `mcp__${s}`);
 
 // ---------- Bağlayıcılar (MCP sunucuları) ----------
 // Claude Code bir sunucuyu kapatınca hesabın .claude.json dosyasında, projenin kaydındaki
@@ -112,16 +131,49 @@ class InputQueue {
   }
 }
 
+// Kullanıcı mesajı (yazma alanından, karttan ya da ana süreçten: dogus.js) Claude Code'a gider
+function pushUser(id, c, content) {
+  sessions.noteBusy(id);
+  setBusy(id, true);
+  c.queue.push({
+    type: 'user',
+    message: { role: 'user', content },
+    parent_tool_use_id: null,
+    origin: { kind: 'human' },
+  });
+}
+
 // ---------- Sohbetler ----------
-const chats = new Map(); // id -> { q, queue, pending, accountId }
+const chats = new Map(); // id -> { q, queue, pending, accountId, project, worktree, dir, parentId, getSessionId }
 let nextChatId = 1;
+let send = () => {};
+
+// ---------- Uyanık tutma ----------
+// Bir sohbette Claude çalışırken (mesaj gönderildi, tur bitmedi) Mac uyumaz; ekran kararabilir.
+// Ayar: config.json → keepAwake (varsayılan açık).
+const busy = new Set();
+let blocker = null;
+let keepAwake = () => true;
+function updateAwake() {
+  const want = busy.size > 0 && keepAwake();
+  if (want && blocker == null) blocker = powerSaveBlocker.start('prevent-app-suspension');
+  else if (!want && blocker != null) { powerSaveBlocker.stop(blocker); blocker = null; }
+}
+const setBusy = (id, on) => { on ? busy.add(id) : busy.delete(id); updateAwake(); };
 let nextReqId = 1;
 
-function setup({ getWindow, getAccount, expandHome, artifacts }) {
-  const send = (...args) => {
+function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, getKeepAwake, getAutoCompact, getAutoAllow }) {
+  if (getAutoAllow) getAutoAllowMcp = getAutoAllow;
+  send = (...args) => {
     const w = getWindow();
     if (w && !w.isDestroyed()) w.webContents.send(...args);
   };
+  if (getKeepAwake) keepAwake = getKeepAwake;
+  // Otomatik sıkıştırma onaya bağlı (compaction.js, OCTOPUS-PLANI.md İ1)
+  compaction.setup({ send: (...a) => send(...a), getPolicy: () => (getAutoCompact ? getAutoCompact() : 'ask') });
+  ipcMain.handle('hooks:log', (_e, id) => hooks.log(id));
+  danis.setup(); // önceki oturumdan kalan danışma dalları (çökme): dizin taraması başlamadan silinir
+  ipcMain.handle('awake:status', () => ({ active: blocker != null && powerSaveBlocker.isStarted(blocker), busy: busy.size }));
 
   async function accountEnv(accountId) {
     const account = getAccount(accountId);
@@ -141,11 +193,30 @@ function setup({ getWindow, getAccount, expandHome, artifacts }) {
 
   ipcMain.handle('chat:start', async (_e, opts) => {
     try {
-      const { accountId, cwd, mode, resumeId, model, permissionMode, effort } = opts;
+      const { accountId, cwd, mode, resumeId, model, permissionMode, effort, envId, parentId, title, worktree: wantWorktree, octopus: wantOctopus } = opts;
       const sdk = await loadSdk();
-      const env = await accountEnv(accountId);
+      let env = await accountEnv(accountId);
       let dir = expandHome(cwd) || os.homedir();
       if (!fs.existsSync(dir)) dir = os.homedir();
+      const folderTitle = path.basename(dir) || dir;
+      // Ayrı çalışma kopyası (worktrees.js): sohbet kendi dalında, <kök>/.claude/worktrees/<ad> içinde çalışır
+      let worktree = null;
+      if (wantWorktree && mode === 'new') {
+        worktree = await worktrees.create(dir, title || folderTitle);
+        dir = worktree.cwd;
+      }
+
+      // Seçili ortam (environments.js): değişkenler, ardından kurulum betiği; betik hata verirse sohbet başlamaz
+      const profile = getEnvironment(envId);
+      if (profile) {
+        environments.applyVars(env, profile.vars);
+        if (profile.setup?.trim()) {
+          const r = await environments.runSetup(profile.setup, { cwd: dir, env });
+          if (!r.ok) worktrees.cleanup(worktree);
+          if (!r.ok) return { ok: false, error: `"${profile.name}" ortamının kurulum betiği hata verdi${r.code > 0 ? ` (çıkış ${r.code})` : ''}.` + (r.output ? '\n' + r.output : '') };
+          env = r.env;
+        }
+      }
 
       const id = nextChatId++;
       const queue = new InputQueue();
@@ -153,43 +224,91 @@ function setup({ getWindow, getAccount, expandHome, artifacts }) {
       let stderrTail = '';
       let sessionId = resumeId || null;
 
+      const project = projectKey(dir);
+      // İzin kartı (arayüz: chat:permission → chat:permissionReply). canUseTool ve kartı kendisi açan araçlar (danis.js: eşiğin üstü) kullanır.
+      const openCard = ({ toolName, input, title, description, decisionReason, blockedPath, suggestions, signal, onAllow, waitTitle = title }) => new Promise((resolve) => {
+        const rid = nextReqId++;
+        const done = onAllow ? (r) => { if (r.behavior === 'allow') onAllow(); resolve(r); } : resolve;
+        pending.set(rid, { resolve: done, suggestions, input });
+        // Yan oturumsa (kol) başlatan sohbete "seni bekliyor" kartı gider (sessions.js)
+        sessions.noteWaiting(id, true, waitingSummary(toolName, input, waitTitle));
+        send('chat:permission', id, {
+          rid, toolName, input, title, description, decisionReason, blockedPath,
+          canAlways: Array.isArray(suggestions) && suggestions.length > 0,
+        });
+        signal?.addEventListener('abort', () => {
+          if (!pending.has(rid)) return;
+          pending.delete(rid);
+          if (!pending.size) sessions.noteWaiting(id, false);
+          send('chat:permissionDone', id, rid);
+          resolve({ behavior: 'deny', message: 'İptal edildi' });
+        });
+      });
       // Artifacts: Claude'un yazdığı .html/.svg dosyaları ve publish_artifact aracı galeriye düşer
       const onArtifact = (info) => send('chat:artifact', id, info);
       const track = artifacts.createTracker({ cwd: dir, accountId, onArtifact });
-      const panelMcp = await artifacts.createMcpServer(sdk, { cwd: dir, accountId, getSessionId: () => sessionId, onArtifact });
+      // Simülatör aracı: Claude simülatörü açınca bu sohbetin sekmesinde canlı görüntü bölmesi açılır
+      // Tarayıcı aracı: ilk kullanımda bu sohbetin yanında tarayıcı bölmesi açılır
+      const extraTools = (z) => [
+        simulator.createTool(sdk, z, { cwd: dir, onAttach: () => send('sim:open', id) }),
+        browser.createTool(sdk, z, { chatId: id, onOpen: () => send('browser:open', id) }),
+        terminals.createTool(sdk, z, { chatId: id, accountId, cwd: dir, envId }),
+        changes.createTool(sdk, z, { chatId: id, cwd: dir }),
+        sessions.createTool(sdk, z, { chatId: id, cwd: dir }),
+        wrapup.createTool(sdk, z),
+        opener.createTool(sdk, z, { cwd: dir }),
+        prwatch.createTool(sdk, z, { chatId: id, cwd: dir, env }),
+        ...hafiza.createTools(sdk, z, { accountId, project, getSessionId: () => sessionId }), // hatirla, hatirla_oku
+        defter.createTool(sdk, z, { chatId: id, getSessionId: () => sessionId }), // her sohbete; çağrılınca ahtapotun başı mı diye bakar
+        // Geçmiş beyne ya da kola danışma: izin kartını araç kendisi açar (tahmin eşiği aşınca), SDK'nın kartı açılmaz (allowedTools)
+        danis.createTool(sdk, z, {
+          chatId: id, accountId, getSessionId: () => sessionId,
+          env: () => accountEnv(accountId), helper: (payload) => runHelper(accountId, payload),
+          ask: ({ title, input, signal }) => openCard({ toolName: 'mcp__panel__danis', input, title, signal }).then((r) => r.behavior === 'allow'),
+        }),
+      ];
+      const panelMcp = await artifacts.createMcpServer(sdk, { cwd: dir, accountId, getSessionId: () => sessionId, onArtifact, extraTools });
+      // Ahtapotun başı (octopus.js): yeni ahtapot ('new') ya da "Devam et" ile açılan baş (ahtapot kimliği).
+      // Ayrı kopyada açılmaz: kopya kapanınca silinir, baş oraya geri dönemezdi. Sistem istemi (hafıza talimatı) buna bağlı olduğu için
+      // seçeneklerden önce; arada await yok, sohbet kaydıyla (chats.set) aynı eşzamanlı adımda kalır.
+      const octoId = wantOctopus && !worktree && !parentId
+        ? octopus.bindHead(id, { octopus: wantOctopus, accountId, project: { key: project, cwd: dir, name: path.basename(project) || project } })
+        : null;
 
       const options = {
         cwd: dir,
         env,
-        systemPrompt: { type: 'preset', preset: 'claude_code' },
+        // Başa hafıza ve defter talimatı (hafiza.js, defter.js → HEAD_PROMPT): bağlamda olmayanı önce hatirla ile arasın; ret, zevk, karar,
+        // kural ve açık işi deftere yazsın. "Beyin yap" ile baş olan sohbet bunları ancak yeniden açılınca alır (sistem istemi süreç açılırken verilir).
+        systemPrompt: { type: 'preset', preset: 'claude_code', ...(octoId ? { append: hafiza.HEAD_PROMPT + '\n\n' + defter.HEAD_PROMPT } : {}) },
         settingSources: ['user', 'project', 'local'], // CLAUDE.md, hook'lar, izinler, skill'ler
         mcpServers: { panel: panelMcp },
-        allowedTools: ['mcp__panel__publish_artifact', ...AUTO_ALLOW_TOOLS],
+        allowedTools: ['mcp__panel__publish_artifact', 'mcp__panel__show', 'mcp__panel__show_widget', 'mcp__panel__wrap_up', 'mcp__panel__open',
+          'mcp__panel__hatirla', 'mcp__panel__hatirla_oku', 'mcp__panel__defter', 'mcp__panel__danis', ...autoAllowTools()],
         includePartialMessages: true,
         includeHookEvents: true,
+        hooks: hooks.create({ chatId: id, accountId }), // Claude Code kancaları (hooks.js): günlük, otomatik sıkıştırma izni (compaction.js), defteri masaya koyma (defter.js)
         allowDangerouslySkipPermissions: true, // "Tam yetki" moduna sonradan geçebilmek için
         stderr: (d) => { stderrTail = (stderrTail + d).slice(-4000); },
-        canUseTool: (toolName, input, o) =>
-          new Promise((resolve) => {
-            const rid = nextReqId++;
-            pending.set(rid, { resolve, suggestions: o.suggestions, input });
-            send('chat:permission', id, {
-              rid,
-              toolName,
-              input,
-              title: o.title,
-              description: o.description,
-              decisionReason: o.decisionReason,
-              blockedPath: o.blockedPath,
-              canAlways: Array.isArray(o.suggestions) && o.suggestions.length > 0,
-            });
-            o.signal?.addEventListener('abort', () => {
-              if (!pending.has(rid)) return;
-              pending.delete(rid);
-              send('chat:permissionDone', id, rid);
-              resolve({ behavior: 'deny', message: 'İptal edildi' });
-            });
-          }),
+        canUseTool: (toolName, input, o) => {
+          // Simülatör: bakmak/dokunmak/yazmak sormadan; .app başlatmak ve adres açmak izin kartıyla (simulator.js → ASK_ACTIONS)
+          if (toolName === 'mcp__panel__simulator' && !simulator.ASK_ACTIONS.has(input?.action)) {
+            return Promise.resolve({ behavior: 'allow', updatedInput: input });
+          }
+          // Tarayıcı: yerel ve izinli siteler sormadan; dış sitede site başına kart (onaylanınca site bu sohbette izinli).
+          // "Hep izin ver" önerisi verilmez: araç düzeyinde kural site ve komut denetimini atlatırdı.
+          // Terminal: okumak sormadan; komut çalıştırmak her seferinde, Claude'un açmadığı sekmeyi durdurmak kartla (terminals.js)
+          // PR: bakmak ve izlemek sormadan; otomatik düzeltmeyi açmak kartla (prwatch.js)
+          let site = null;
+          const RULES = { mcp__panel__browser: browser, mcp__panel__terminal: terminals, mcp__panel__sessions: sessions, mcp__panel__pr: prwatch };
+          if (RULES[toolName]) {
+            site = RULES[toolName].permission(id, input);
+            if (!site) return Promise.resolve({ behavior: 'allow', updatedInput: input });
+          }
+          const suggestions = site ? undefined : o.suggestions;
+          return openCard({ toolName, input, title: site?.title || o.title, description: o.description, decisionReason: o.decisionReason,
+            blockedPath: o.blockedPath, suggestions, signal: o.signal, waitTitle: site?.title, onAllow: site?.origin ? () => browser.allowOrigin(id, site.origin) : null });
+        },
       };
       // Test için: sahte bir Claude Code çalıştırılabiliri verilebilir
       if (process.env.CLAUDE_PANEL_CLAUDE_BIN) options.pathToClaudeCodeExecutable = process.env.CLAUDE_PANEL_CLAUDE_BIN;
@@ -199,50 +318,139 @@ function setup({ getWindow, getAccount, expandHome, artifacts }) {
       if (mode === 'continue') options.continue = true;
       if (mode === 'resume' && resumeId) options.resume = resumeId;
 
-      const q = sdk.query({ prompt: queue, options });
-      chats.set(id, { q, queue, pending, accountId, project: projectKey(dir) });
+      // Sohbetin kaydı. Beden (Claude Code süreci: q, queue) yeniden doğuşta (dogus.js) değişir; sohbet kimliği, sekme, kollar ve kartlar aynı kalır.
+      const c = {
+        q: null, queue: null, pending, accountId, project, worktree, dir, parentId: parentId || null, getSessionId: () => sessionId,
+        body: 0, waiters: [], model: model || null, effort: effort || null, permissionMode: permissionMode || null, rebirthing: false,
+      };
+      chats.set(id, c);
 
-      (async () => {
-        try {
-          for await (const msg of q) {
-            if (msg.session_id) sessionId = msg.session_id;
-            send('chat:msg', id, msg);
-            track(msg);
+      // Bir beden: süreç ve mesaj akışı. Eski bedenin geç gelen mesajları, kapanışı ve tur sonu ölçümü yok sayılır (c.body).
+      const startBody = (opts) => {
+        const body = ++c.body;
+        const queue = new InputQueue();
+        const q = sdk.query({ prompt: queue, options: opts });
+        Object.assign(c, { q, queue });
+        let turnText = []; // bu turun Claude metni (ana süreçten gönderilen turlar onu bekler: c.turn)
+        (async () => {
+          try {
+            for await (const msg of q) {
+              if (c.body !== body) break;
+              if (msg.session_id && msg.session_id !== sessionId) { sessionId = msg.session_id; octopus.noteSession(id, sessionId); }
+              if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
+                defter.noteCompacted(id); // SessionStart (compact) gelmezse defter sonraki mesajda
+                sinav.noteDue(id, 'compact'); // PostCompact kancası gelmezse de sınav yapılır
+              }
+              send('chat:msg', id, msg);
+              track(msg);
+              if (msg.type === 'assistant' && !msg.parent_tool_use_id) {
+                const blocks = msg.message?.content || [];
+                const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+                sessions.noteText(id, text);
+                if (text) turnText.push(text);
+                const todo = blocks.findLast((b) => b.type === 'tool_use' && b.name === 'TodoWrite');
+                if (todo) octopus.noteTodos(id, todo.input?.todos); // kolun ilerlemesi ahtapot kaydına
+              }
+              if (msg.type === 'result') {
+                setBusy(id, false);
+                sessions.turnEnded(id, msg.subtype === 'success');
+                compaction.refresh(id, q).then((u) => { if (c.body === body) sinav.turnEnded(id, u); }); // sınavın tahmini bu ölçümden
+                hafiza.noteTurn();
+                c.waiters.shift()?.({ result: msg, text: turnText.join('\n') });
+                turnText = [];
+              }
+            }
+            if (c.body === body) send('chat:end', id, null);
+          } catch (err) {
+            if (c.body !== body) return;
+            const detail = stderrTail.trim().split('\n').slice(-6).join('\n');
+            send('chat:end', id, (err?.message || String(err)) + (detail ? '\n' + detail : ''));
+          } finally {
+            if (c.body === body) {
+              for (const { resolve } of pending.values()) resolve({ behavior: 'deny', message: 'Oturum kapandı' });
+              pending.clear();
+              for (const w of c.waiters.splice(0)) w(null);
+              chats.delete(id);
+              setBusy(id, false);
+              browser.forget(id);
+              sessions.closed(id);
+              octopus.chatClosed(id);
+              prwatch.forget(id);
+              hooks.forget(id);
+              compaction.forget(id);
+              defter.forget(id);
+              sinav.forget(id);
+              dogus.forget(id);
+            }
           }
-          send('chat:end', id, null);
-        } catch (err) {
-          const detail = stderrTail.trim().split('\n').slice(-6).join('\n');
-          send('chat:end', id, (err?.message || String(err)) + (detail ? '\n' + detail : ''));
-        } finally {
-          for (const { resolve } of pending.values()) resolve({ behavior: 'deny', message: 'Oturum kapandı' });
-          pending.clear();
-          chats.delete(id);
-        }
-      })();
+        })();
+        // Model listesini arka planda iste
+        q.supportedModels?.().then((models) => { if (c.body === body) send('chat:models', id, models); }).catch(() => {});
+      };
+      startBody(options);
 
-      // Model listesini arka planda iste
-      q.supportedModels?.().then((models) => send('chat:models', id, models)).catch(() => {});
+      // Ana süreçten bir tur (dogus.js): mesaj gider, tur sonunda { result, text } döner; sohbet kapanırsa null
+      c.turn = (text) => new Promise((resolve) => { c.waiters.push(resolve); pushUser(id, c, text); });
+      // Yeniden doğuş: aynı seçeneklerle (devam etmeden) yeni bir süreç açılır, eski bedenin süreci kapanır (oturum dosyası kalır: fosil).
+      // İlk mesaj devir notudur; ilk tur bitince döner. Panelin MCP sunucusu yeni süreç için yeniden kurulur.
+      c.rebirth = async (text) => {
+        const old = { q: c.q, queue: c.queue };
+        const mcp = await artifacts.createMcpServer(sdk, { cwd: dir, accountId, getSessionId: () => sessionId, onArtifact, extraTools });
+        const o = { ...options, mcpServers: { panel: mcp } };
+        delete o.resume;
+        delete o.continue;
+        for (const k of ['model', 'effort', 'permissionMode']) if (c[k]) o[k] = c[k];
+        sessionId = null;
+        stderrTail = '';
+        octopus.expectBody(id, 'rebirth'); // ilk session_id kayıtta yeni beden
+        startBody(o);
+        try { old.queue.close(); } catch {}
+        try { old.q.close(); } catch {}
+        sinav.noteDue(id, 'rebirth'); // yeni bedenin ilk turundan sonra sınav
+        return c.turn(text);
+      };
 
-      return { ok: true, id, cwd: dir, title: path.basename(dir) || dir };
+      // Sınav (sinav.js): başın sıkıştırmasından sonra, tur sonunda; dal danışmayla aynı yoldan açılır
+      sinav.register(id, { sdk, cwd: dir, getSessionId: () => sessionId, env: () => accountEnv(accountId), helper: (payload) => runHelper(accountId, payload) });
+      // Yeniden doğuş (dogus.js): yalnız ahtapotun başında; oturum dosyası hesabın ayar klasöründen okunur
+      dogus.register(id, {
+        accountId, dir, getSessionId: () => sessionId, isBusy: () => busy.has(id),
+        configDir: env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'),
+        turn: (text) => c.turn(text), rebirth: (text) => c.rebirth(text), setRebirthing: (on) => { c.rebirthing = !!on; },
+      });
+      // Yan oturum (sessions.js): başlatan sohbet açıksa ona bağlanır; her tur sonunda ona bildirim gider
+      if (parentId && chats.has(parentId)) sessions.register(id, parentId, title, dir, worktree);
+
+      return { ok: true, id, cwd: dir, title: folderTitle, worktree: worktree && { branch: worktree.branch, path: worktree.path }, octopus: octoId };
     } catch (err) {
       return { ok: false, error: err?.message || String(err) };
     }
   });
 
-  ipcMain.on('chat:send', (_e, id, text, images) => {
-    const c = chats.get(id);
-    if (!c) return;
-    const content = [];
-    for (const img of images || []) {
-      content.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data } });
+  // İçerik düz metin ya da blok dizisidir (ekli görseller + ekli dosyalar + metin; bkz. renderer/chat.js → messageContent).
+  // Yalnız Claude Code'un kabul ettiği iki blok tipi geçer.
+  const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+  const cleanContent = (content) => {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    const out = [];
+    for (const b of content) {
+      if (b?.type === 'text' && typeof b.text === 'string' && b.text) out.push({ type: 'text', text: b.text });
+      else if (b?.type === 'image' && IMAGE_TYPES.has(b.source?.media_type) && typeof b.source?.data === 'string') {
+        out.push({ type: 'image', source: { type: 'base64', media_type: b.source.media_type, data: b.source.data } });
+      }
     }
-    content.push({ type: 'text', text });
-    c.queue.push({
-      type: 'user',
-      message: { role: 'user', content: images?.length ? content : text },
-      parent_tool_use_id: null,
-      origin: { kind: 'human' },
-    });
+    return out;
+  };
+
+  ipcMain.on('chat:send', (_e, id, raw) => {
+    const c = chats.get(id);
+    const content = cleanContent(raw);
+    if (!c || !content.length) return;
+    if (c.rebirthing) return; // yeniden doğuş sürerken (dogus.js) turlar karışmasın; arayüz de göndermez
+    // Kolun görev tanımı, ilk mesajına eklenen defter kısmı olmadan (defter.js → armNote)
+    octopus.noteBrief(id, defter.stripArmNote(typeof content === 'string' ? content : content.filter((b) => b.type === 'text').map((b) => b.text).join('\n')));
+    pushUser(id, c, content);
   });
 
   ipcMain.on('chat:permissionReply', (_e, id, rid, reply) => {
@@ -250,6 +458,7 @@ function setup({ getWindow, getAccount, expandHome, artifacts }) {
     const p = c?.pending.get(rid);
     if (!p) return;
     c.pending.delete(rid);
+    if (!c.pending.size) sessions.noteWaiting(id, false);
     if (reply.behavior === 'allow') {
       const result = { behavior: 'allow', updatedInput: reply.updatedInput || p.input };
       if (reply.always && p.suggestions?.length) result.updatedPermissions = p.suggestions;
@@ -310,6 +519,32 @@ function setup({ getWindow, getAccount, expandHome, artifacts }) {
     }
   }
 
+  // Hesabın girişi (ilk açılış sihirbazı, renderer/kurulum.js): mesaj göndermeyen kısa ömürlü süreçte accountInfo (token harcamaz).
+  // Gerçek Claude Code 2.1.300'de ölçüldü (2026-10-17): girişsiz {"tokenSource":"none","apiProvider":"firstParty"},
+  // girişli { email, organization, subscriptionType, apiProvider }. API anahtarı ya da 3. taraf sağlayıcı da giriş sayılır.
+  ipcMain.handle('account:login', async (_e, accountId) => {
+    let queue, q;
+    try {
+      const sdk = await loadSdk();
+      const env = await accountEnv(accountId);
+      queue = new InputQueue();
+      const options = { cwd: os.homedir(), env, settingSources: [], persistSession: false, stderr: () => {} };
+      if (process.env.CLAUDE_PANEL_CLAUDE_BIN) options.pathToClaudeCodeExecutable = process.env.CLAUDE_PANEL_CLAUDE_BIN;
+      q = sdk.query({ prompt: queue, options });
+      (async () => { try { for await (const _ of q); } catch {} })();
+      const a = (await withTimeout(q.accountInfo(), 30000)) || {};
+      const loggedIn = !!(a.email || (a.tokenSource && a.tokenSource !== 'none') || (a.apiKeySource && a.apiKeySource !== 'none') ||
+        (a.apiProvider && a.apiProvider !== 'firstParty'));
+      if (loggedIn) infoCache.delete(accountId); // girişten önce yoklanan kullanım "plan yok" kalmasın
+      return { ok: true, loggedIn, email: a.email || '', plan: a.subscriptionType || '' };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    } finally {
+      try { queue?.close(); } catch {}
+      try { q?.close(); } catch {}
+    }
+  });
+
   const probing = new Map(); // accountId -> Promise (aynı anda tek yoklama)
   ipcMain.handle('account:info', async (_e, accountId, force) => {
     try {
@@ -333,7 +568,15 @@ function setup({ getWindow, getAccount, expandHome, artifacts }) {
   const claudeJson = (account) => path.join(expandHome(account.configDir) || os.homedir(), '.claude.json');
   const SCOPE_ORDER = ['local', 'project', 'user', 'claudeai'];
 
-  ipcMain.handle('mcp:list', (_e, accountId, cwd) => {
+  // Arayüzde gösterilecek bağlantı bilgisi: komut ya da adres. env ve headers gizli anahtar taşıyabildiği için gönderilmez.
+  const mcpDetail = (conf) => {
+    if (!conf || typeof conf !== 'object') return null;
+    if (conf.url) return { type: conf.type || 'http', target: String(conf.url) };
+    if (conf.command) return { type: conf.type || 'stdio', target: [conf.command, ...(Array.isArray(conf.args) ? conf.args : [])].join(' ') };
+    return { type: conf.type || '', target: '' };
+  };
+
+  ipcMain.handle('mcp:list', async (_e, accountId, cwd, withStatus) => {
     try {
       const account = getAccount(accountId);
       if (!account) throw new Error('Hesap bulunamadı: ' + accountId);
@@ -342,18 +585,35 @@ function setup({ getWindow, getAccount, expandHome, artifacts }) {
       const proj = cfg.projects?.[key] || {};
       const off = new Set(proj.disabledMcpServers || []);
       const found = {
-        local: Object.keys(proj.mcpServers || {}),
-        project: Object.keys(readJson(path.join(key, '.mcp.json'))?.mcpServers || {}),
-        user: Object.keys(cfg.mcpServers || {}),
-        claudeai: cfg.claudeAiMcpEverConnected || [], // hesabın claude.ai bağlayıcıları (Figma, Drive…)
+        local: proj.mcpServers || {},
+        project: readJson(path.join(key, '.mcp.json'))?.mcpServers || {},
+        user: cfg.mcpServers || {},
+        // hesabın claude.ai bağlayıcıları (Figma, Drive…): yapılandırması claude.ai'de
+        claudeai: Object.fromEntries((cfg.claudeAiMcpEverConnected || []).map((n) => [n, null])),
       };
       const servers = [];
       for (const scope of SCOPE_ORDER) {
-        for (const name of found[scope]) {
-          if (!servers.some((s) => s.name === name)) servers.push({ name, scope, enabled: !off.has(name) });
+        for (const [name, conf] of Object.entries(found[scope])) {
+          if (!servers.some((s) => s.name === name)) servers.push({ name, scope, enabled: !off.has(name), detail: mcpDetail(conf) });
         }
       }
-      return { ok: true, project: key, servers };
+      // "Bağlayıcıları yönet": bu klasörde açık bir sohbet varsa bağlantı durumu ve araç sayısı onun Claude Code sürecinden
+      let live = false;
+      const c = withStatus && [...chats.values()].find((x) => x.accountId === accountId && x.project === key);
+      if (c) {
+        const list = await withTimeout(c.q.mcpServerStatus(), 8000).catch(() => null);
+        if (Array.isArray(list)) {
+          live = true;
+          for (const st of list) {
+            const s = servers.find((x) => x.name === st.name);
+            if (!s) continue; // panelin kendi sunucusu (panel) gibi yapılandırma dışı olanlar
+            s.status = st.status;
+            s.tools = Array.isArray(st.tools) ? st.tools.length : null;
+            if (st.error) s.error = String(st.error).slice(0, 300);
+          }
+        }
+      }
+      return { ok: true, project: key, servers, live };
     } catch (err) {
       return { ok: false, error: err?.message || String(err) };
     }
@@ -451,26 +711,85 @@ function setup({ getWindow, getAccount, expandHome, artifacts }) {
     }
   });
 
+  // ---------- Kayıt saklama süresi (cleanupPeriodDays) ----------
+  // Claude Code oturum kayıtlarını varsayılan olarak 30 günde siler. Panel yalnız kullanıcının onayıyla,
+  // hesabın genel settings.json'una (symlink ise hedefine) tek bir değer yazar (OCTOPUS-PLANI.md İ1, P2.2).
+  const RETENTION_DAYS = 3650;
+  ipcMain.handle('settings:retention', (_e, accountId) => {
+    try {
+      const account = getAccount(accountId);
+      if (!account) throw new Error('Hesap bulunamadı: ' + accountId);
+      const file = userSettings(account);
+      const v = readJson(file)?.cleanupPeriodDays;
+      return { ok: true, days: typeof v === 'number' ? v : null, want: RETENTION_DAYS, file, shared: file !== path.join(configHome(account), 'settings.json') };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+  ipcMain.handle('settings:setRetention', (_e, accountId) => {
+    try {
+      const account = getAccount(accountId);
+      if (!account) throw new Error('Hesap bulunamadı: ' + accountId);
+      const file = userSettings(account);
+      const s = readJsonForWrite(file);
+      s.cleanupPeriodDays = RETENTION_DAYS;
+      writeJsonAtomic(file, s);
+      return { ok: true, days: RETENTION_DAYS };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+
   ipcMain.handle('chat:interrupt', async (_e, id) => {
     try { await chats.get(id)?.q.interrupt(); return true; } catch { return false; }
   });
   ipcMain.handle('chat:setModel', async (_e, id, model) => {
-    try { await chats.get(id)?.q.setModel(model || undefined); return true; } catch (e) { return e.message; }
+    const c = chats.get(id);
+    if (c) c.model = model || null; // yeniden doğuşta yeni beden aynı modelle açılır
+    try { await c?.q.setModel(model || undefined); return true; } catch (e) { return e.message; }
   });
   ipcMain.handle('chat:setEffort', async (_e, id, level) => {
-    try { await chats.get(id)?.q.applyFlagSettings({ effortLevel: level || null }); return true; } catch (e) { return e.message; }
+    const c = chats.get(id);
+    if (c) c.effort = level || null;
+    try { await c?.q.applyFlagSettings({ effortLevel: level || null }); return true; } catch (e) { return e.message; }
   });
   ipcMain.handle('chat:setMode', async (_e, id, mode) => {
-    try { await chats.get(id)?.q.setPermissionMode(mode); return true; } catch (e) { return e.message; }
+    const c = chats.get(id);
+    if (c) c.permissionMode = mode || null;
+    try { await c?.q.setPermissionMode(mode); return true; } catch (e) { return e.message; }
   });
   ipcMain.on('chat:close', (_e, id) => closeChat(id));
 
   // Geçmiş oturumlar: SDK ayar klasörünü süreç başına bir kez okuduğu için
   // her hesap için ayrı, kısa ömürlü bir yardımcı süreçte okuyoruz.
   ipcMain.handle('chat:sessions', (_e, accountId, cwd) => runHelper(accountId, { op: 'list', dir: expandHome(cwd) }));
+  // Yeni sohbet ekranındaki "Octopus olarak başlat" için: klasörün ahtapotu ve geçmiş oturum sayısı (yalnız okunur).
+  // Geçmişi olan klasörde anahtar kapalı gelir: var olan proje sormadan beyne çevrilmez (OCTOPUS-PLANI.md İ1, K8).
+  ipcMain.handle('octopus:folder', async (_e, accountId, cwd) => {
+    const dir = expandHome(cwd);
+    const rec = octopus.forProject(accountId, projectKey(dir));
+    const r = await runHelper(accountId, { op: 'list', dir });
+    return { octopusId: rec?.id || null, history: r?.ok ? r.sessions.length : null };
+  });
+  // "Bu sohbeti beyin yap": açık sohbet projenin başı olur. Yalnız panelin ahtapot kaydı yazılır; oturuma ve projeye dokunulmaz (İ1).
+  ipcMain.handle('octopus:adopt', (_e, id) => {
+    try {
+      const c = chats.get(id);
+      if (!c) throw new Error('Sohbet açık değil.');
+      if (c.parentId) throw new Error('Yan oturum beyin yapılamaz; baş ancak ana sohbet olabilir.');
+      if (c.worktree) throw new Error('Ayrı kopyadaki sohbet beyin yapılamaz: kopya kapanınca silinir, baş oraya geri dönemez.');
+      const octoId = octopus.adopt(id, { accountId: c.accountId, sessionId: c.getSessionId(),
+        project: { key: c.project, cwd: c.dir, name: path.basename(c.project) || c.project } });
+      if (!octoId) throw new Error('Bu projenin zaten bir ahtapotu var.');
+      return { ok: true, id: octoId };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
   ipcMain.handle('chat:history', (_e, accountId, sessionId, cwd) =>
     runHelper(accountId, { op: 'messages', sessionId, dir: expandHome(cwd) }));
 
+  helper = runHelper;
   async function runHelper(accountId, payload) {
     const env = await accountEnv(accountId);
     env.ELECTRON_RUN_AS_NODE = '1';
@@ -495,16 +814,35 @@ function setup({ getWindow, getAccount, expandHome, artifacts }) {
   loginEnv();
 }
 
+// Başlatan sohbetin "seni bekliyor" kartında görünen kısa açıklama
+function waitingSummary(toolName, input = {}, title) {
+  if (toolName === 'AskUserQuestion') return 'Soru: ' + (input.questions?.[0]?.question || '');
+  if (toolName === 'ExitPlanMode') return 'Plan onayı bekliyor';
+  if (title) return title;
+  return 'İzin: ' + toolName + (typeof input.command === 'string' ? ' · ' + input.command.slice(0, 120) : '');
+}
+
+// Sekme kapanınca (ya da panel kapanırken) çağrılır. Ayrı kopya temizse silinir, değilse korunur ve arayüze bildirilir.
 function closeChat(id) {
   const c = chats.get(id);
   if (!c) return;
   try { c.queue.close(); } catch {}
   try { c.q.close(); } catch {}
   chats.delete(id);
+  setBusy(id, false);
+  prwatch.forget(id);
+  if (c.worktree) {
+    const r = worktrees.cleanup(c.worktree);
+    if (!r.removed) send('worktree:kept', { branch: c.worktree.branch, path: c.worktree.path, dirty: r.dirty, ahead: r.ahead, error: r.error });
+  }
 }
 
 function closeAll() {
+  octopus.shutdown(); // panel kapanıyor: kapanan kollar "kesildi" sayılmaz
   for (const id of [...chats.keys()]) closeChat(id);
 }
 
-module.exports = { setup, closeAll, count: () => chats.size, AUTO_ALLOW_TOOLS };
+// Bir hesabın bir klasördeki geçmiş oturumları (yalnız okunur; SDK ayrı süreçte, CLAUDE.md §5)
+const listSessions = (accountId, dir) => (helper ? helper(accountId, { op: 'list', dir }) : Promise.resolve({ ok: false, error: 'hazır değil' }));
+
+module.exports = { setup, closeAll, count: () => chats.size, autoAllowTools, loginEnv, updateAwake, projectKey, listSessions };

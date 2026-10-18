@@ -1,0 +1,718 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Octopus taslak</title>
+<style>:root{color-scheme:dark;--text:#eeece5;--soft:#d3d0c7;--muted:#a19e95;--faint:#6f6c65;--clay:#d97757;--accent:#d97757;--bg:#252422;--bg-2:#1f1e1c;--bg-3:#2e2d2a;--line:rgba(236,230,214,.13);--line-soft:rgba(236,230,214,.075);--danger:#e5645a;--warn:#e2b86b;--ok:#8fbf7f;--ui:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;--mono:"SF Mono",Menlo,monospace}html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 var(--ui)}body{padding:14px;width:700px}</style></head><body>
+<style>
+.oc{font:14px/1.45 var(--ui);color:var(--text);-webkit-user-select:none;user-select:none}
+.oc-top{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.oc-name{flex:1;min-width:0;font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.oc-name b{color:var(--text);font-weight:600;letter-spacing:.06em}
+.oc-tag{font:10.5px var(--mono);color:var(--faint);border:1px solid var(--line);border-radius:5px;padding:1px 5px;margin-left:8px}
+.oc button{font:12px/1 var(--ui);color:var(--text);background:var(--bg-3);border:1px solid var(--line);border-radius:7px;padding:6px 10px;cursor:pointer;white-space:nowrap}
+.oc button:hover:not(:disabled){border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
+.oc button:disabled{opacity:.38;cursor:default}
+.oc button.pri{background:color-mix(in srgb,var(--accent) 24%,var(--bg-3));border-color:color-mix(in srgb,var(--accent) 50%,transparent)}
+.oc svg{display:block;width:100%;height:auto}
+.oc svg text{font-family:var(--ui)}
+.oc-info{display:flex;gap:10px;align-items:flex-start;min-height:66px;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:color-mix(in srgb,var(--bg-2) 80%,transparent)}
+.oc-info .dot{width:8px;height:8px;border-radius:50%;margin-top:6px;flex:none}
+.oc-info .tx{flex:1;min-width:0}
+.oc-info .t{font-size:13px;font-weight:600}
+.oc-info .d{font-size:12.5px;color:var(--muted);margin-top:1px}
+.oc-info .m{font:11px/1.4 var(--mono);color:var(--faint);margin-top:4px}
+.oc-info button{align-self:center;flex:none}
+.oc .hit,.oc .lbl,.oc .head{cursor:pointer}
+.oc .lbl .n{font-size:12px;font-weight:600}
+.oc .lbl .s{font-size:10.5px}
+.oc.dense .lbl .n{font-size:11px}
+.oc .lbl:not(.on) text{paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round}
+</style>
+<div class="oc" id="oc">
+  <div class="oc-top">
+    <div class="oc-name"><b>OCTOPUS</b> · Imladris projesini oyunlaştırma<span class="oc-tag">taslak</span></div>
+    <button id="oc-grow">+ Yeni kol</button>
+    <button id="oc-cut" disabled>Kolu kes</button>
+    <button id="oc-ink">Beyni sıkıştır</button>
+  </div>
+  <svg id="oc-sv" viewBox="0 0 700 468" role="img" aria-label="Octopus: baş ana oturum, her kol bir yan oturum"></svg>
+  <div class="oc-info" id="oc-info"></div>
+</div>
+<script>
+(() => {
+'use strict';
+const NS = 'http://www.w3.org/2000/svg';
+const $ = (id) => document.getElementById(id);
+const root = $('oc'), sv = $('oc-sv'), info = $('oc-info');
+const bGrow = $('oc-grow'), bCut = $('oc-cut'), bInk = $('oc-ink');
+const css = getComputedStyle(document.documentElement);
+const cv = (n, f) => css.getPropertyValue(n).trim() || f;
+const COL = {
+  accent: cv('--accent', '#d97757'), ok: cv('--ok', '#8fbf7f'), warn: cv('--warn', '#e2b86b'), danger: cv('--danger', '#e5645a'),
+  text: cv('--text', '#eeece5'), muted: cv('--muted', '#a19e95'), faint: cv('--faint', '#6f6c65'),
+  bg3: cv('--bg-3', '#2e2d2a'), line: cv('--line', 'rgba(236,230,214,.13)'),
+};
+const REDUCE = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const W = 700, H = 468, HX = 350, N = 48, MAX_ARMS = 8;
+const el = (tag, at, parent) => {
+  const e = document.createElementNS(NS, tag);
+  if (at) for (const k in at) e.setAttribute(k, at[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+};
+const lerp = (a, b, k) => a + (b - a) * k;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const ease = (k) => 1 - Math.pow(1 - clamp(k, 0, 1), 3);
+const back = (k) => { k = clamp(k, 0, 1); const c1 = 1.5, c3 = c1 + 1; return 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2); };
+const f1 = (v) => Math.round(v * 10) / 10;
+const op = (v) => Math.round(clamp(v, 0, 1) * 100) / 100;
+
+// ---- tanımlar ve katmanlar
+const defs = el('defs', null, sv);
+function grad(tag, id, at, stops) {
+  const g = el(tag, Object.assign({ id }, at), defs);
+  for (const [o, c, o2] of stops) el('stop', { offset: o, 'stop-color': c, 'stop-opacity': o2 == null ? 1 : o2 }, g);
+  return g;
+}
+grad('radialGradient', 'oc-head', { cx: '40%', cy: '28%', r: '80%' }, [[0, '#f2b297'], [0.5, COL.accent], [1, '#7c3b27']]);
+grad('radialGradient', 'oc-bg', { cx: '50%', cy: '24%', r: '60%' }, [[0, COL.accent, 0.14], [1, COL.accent, 0]]);
+function blur(id, sd) {
+  const f = el('filter', { id, x: '-80%', y: '-80%', width: '260%', height: '260%' }, defs);
+  el('feGaussianBlur', { stdDeviation: sd }, f);
+}
+blur('oc-b4', 4); blur('oc-b6', 6); blur('oc-b12', 12);
+const MANTLE = 'M350 24C398 24 421 60 419 104C417 140 400 160 396 176C380 190 320 190 304 176C300 160 283 140 281 104C279 60 302 24 350 24Z';
+el('path', { d: MANTLE }, el('clipPath', { id: 'oc-clip' }, defs));
+
+el('rect', { x: 0, y: 0, width: W, height: H, fill: 'url(#oc-bg)' }, sv);
+const gPlank = el('g', null, sv);
+const gDebris = el('g', null, sv);
+const gArms = el('g', null, sv);
+const gPulse = el('g', null, sv);
+const gHead = el('g', { class: 'head' }, sv);
+const gInk = el('g', { filter: 'url(#oc-b6)' }, sv);
+const gFx = el('g', null, sv);
+const gLbl = el('g', null, sv);
+
+// ---- baş (beyin)
+const halo = el('ellipse', { cx: HX, cy: 104, rx: 96, ry: 100, fill: COL.accent, opacity: 0.12, filter: 'url(#oc-b12)' }, gHead);
+el('path', { d: MANTLE, fill: 'url(#oc-head)' }, gHead);
+const gFill = el('g', { 'clip-path': 'url(#oc-clip)' }, gHead);
+const fillP = el('path', { fill: '#ffe4d6', opacity: 0.2 }, gFill);
+const fillL = el('path', { fill: 'none', stroke: '#fff2ea', 'stroke-width': 1.2, opacity: 0.5 }, gFill);
+const tint = el('path', { d: MANTLE, fill: COL.warn, opacity: 0 }, gHead);
+el('ellipse', { cx: 323, cy: 60, rx: 22, ry: 11, fill: '#fff', opacity: 0.11, transform: 'rotate(-30 323 60)' }, gHead);
+for (const [x, y, r] of [[373, 54, 3], [393, 88, 2.4], [308, 102, 2.1], [366, 122, 2.2], [338, 40, 1.7], [399, 130, 1.8], [300, 134, 1.6]])
+  el('ellipse', { cx: x, cy: y, rx: r, ry: r * 0.8, fill: '#7c3b27', opacity: 0.4 }, gHead);
+const ring = el('path', { d: MANTLE, fill: 'none', stroke: COL.text, 'stroke-width': 1.2, opacity: 0 }, gHead);
+const tBrain = el('text', { x: HX, y: 74, 'text-anchor': 'middle', fill: '#fff4ec', 'font-size': 9.5, 'font-weight': 600, 'letter-spacing': 2, opacity: 0.8 }, gHead);
+tBrain.textContent = 'BEYİN';
+const tCtx = el('text', { x: HX, y: 100, 'text-anchor': 'middle', fill: '#fff6f0', 'font-size': 19, 'font-weight': 600 }, gHead);
+const tCtxL = el('text', { x: HX, y: 115, 'text-anchor': 'middle', fill: '#fff4ec', 'font-size': 9.5, opacity: 0.75 }, gHead);
+tCtxL.textContent = 'bağlam dolu';
+const eyes = [326, 374].map((x) => {
+  const g = el('g', null, gHead);
+  el('ellipse', { cx: x, cy: 151, rx: 13.5, ry: 11.5, fill: '#7c3b27', opacity: 0.4 }, g);
+  const lid = el('g', null, g);
+  el('ellipse', { cx: x, cy: 150, rx: 9.5, ry: 7.6, fill: '#f5ebdf', stroke: '#6a3020', 'stroke-width': 1.1 }, lid);
+  const pupil = el('rect', { x: x - 4.6, y: 148.4, width: 9.2, height: 3.2, rx: 1.6, fill: '#1b1917' }, lid);
+  return { x, y: 150, lid, pupil, px: 0, py: 0 };
+});
+gHead.addEventListener('click', (e) => { e.stopPropagation(); select('head'); });
+sv.addEventListener('click', () => select('head'));
+
+// ---- deniz tozu
+const plank = Array.from({ length: 22 }, () => ({ x: Math.random() * W, y: Math.random() * H, r: 0.6 + Math.random() * 1.3, sp: 3 + Math.random() * 7, o: 0.06 + Math.random() * 0.16, ph: Math.random() * 6.28 }));
+for (const p of plank) p.el = el('circle', { r: p.r, fill: COL.text, opacity: p.o }, gPlank);
+
+// ---- kollar
+const MOTION = {
+  'çalışıyor':    { amp: 8, freq: 0.55, k: 1.25, curl: 0.5, lift: 0 },
+  'bekliyor':     { amp: 4, freq: 0.3,  k: 0.9,  curl: 1.6, lift: 1 },
+  'rapor':        { amp: 6, freq: 0.45, k: 1.1,  curl: 0.8, lift: 0 },
+  'doğrulanıyor': { amp: 4, freq: 0.3,  k: 1,    curl: 1.4, lift: 0 },
+  'bitti':        { amp: 3, freq: 0.16, k: 0.8,  curl: 2.5, lift: 0 },
+  'büyüyor':      { amp: 5, freq: 0.5,  k: 1.2,  curl: 0.4, lift: 0 },
+  'öneri':        { amp: 2, freq: 0.15, k: 0.8,  curl: 0.2, lift: 0 },
+  'kesildi':      { amp: 0, freq: 0,    k: 1,    curl: 0,   lift: 0 },
+};
+const STOPS = {
+  base: ['#a14f36', COL.accent, '#efa98d'],
+  rest: ['#8b4531', '#bf6a4e', '#d99b82'],
+  wait: ['#a14f36', '#e39a60', '#f3cd82'],
+};
+const STATE_NAME = { 'çalışıyor': 'çalışıyor', 'bekliyor': 'seni bekliyor', 'rapor': 'beyne rapor veriyor', 'doğrulanıyor': 'beyin doğruluyor', 'bitti': 'bitti', 'büyüyor': 'büyüyor', 'öneri': 'beyin öneriyor', 'kesildi': 'kesildi' };
+const STATE_COL = { 'çalışıyor': COL.accent, 'bekliyor': COL.warn, 'bitti': COL.ok, 'öneri': COL.faint, 'kesildi': COL.danger };
+
+const ARMS0 = [
+  { short: 'Faz 1 · Yönetmen', full: 'Faz 1: Yönetmen, Hakem ve oynanabilir akış', state: 'bitti', done: 6, total: 6, turns: 9,
+    last: 'Smoke 14/14 geçti, gerçek konuşma turu dahil. Beyin doğruladı.' },
+  { short: 'Faz 2 · Dövüş', full: 'Dövüş prototipi (Faz 2, arena)', state: 'bitti', done: 5, total: 5, turns: 7,
+    last: 'Arena kontrolü hatasız. Dövüş hissi henüz elle denenmedi.' },
+  { short: 'Faz 3 · Kadro', full: 'Faz 3: Kadro (yeni konuşan karakterler)', state: 'bitti', done: 4, total: 4, turns: 5,
+    last: 'Konuşan karakterler eklendi, tür denetimi temiz.' },
+  { short: 'Faz 4 · Düşmanlar', full: 'Faz 4: Düşmanlar (modeller ve yapay zekâ)', state: 'bitti', done: 5, total: 5, turns: 6,
+    last: 'Modeller ve davranışlar bağlandı, smoke 23/23.' },
+  { short: 'Faz 5 · Dünya', full: 'Faz 5: Dünya (mekânlar, izler, ara sahneler)', state: 'çalışıyor', done: 2, total: 7, turns: 3, branch: 'panel/faz-5-dunya',
+    last: 'Modül klasörleri listeleniyor, Colliders okunuyor',
+    acts: ['world/isikIzleri.ts düzenlendi', 'ara-sahneler/konuk-evi.json yazıldı', 'world/uykuOdasi.ts düzenlendi', 'npm run typecheck temiz', 'npm run smoke · 26/26'],
+    ask: { at: 4, q: 'İzin istiyor: Bash · npm run build:levels', btn: 'İzin ver' },
+    finalNote: 'Beyin doğruladı: smoke 26/26, tür denetimi temiz.' },
+  { short: 'Faz 6 · Ses', full: 'Faz 6: Ses (ortam sesleri, dövüş efektleri)', state: 'öneri', g: 0.18, done: 0, total: 5, turns: 0,
+    last: 'Beyin öneriyor: ses katmanı dünyadan bağımsız, ayrı bir kolda paralel yürüyebilir.',
+    acts: ['audio/README.md okundu', 'audio/ortam.ts yazıldı', 'combat/vurus.ts düzenlendi', 'npm run smoke geçti', 'Ses seviyeleri dengelendi'] },
+];
+const PRESETS = [
+  { short: 'Faz 7 · Kayıt', full: 'Faz 7: Kaydetme ve yükleme', total: 4,
+    acts: ['save/format.md okundu', 'save/kayit.ts yazıldı', 'ui/menu.ts düzenlendi', 'npm test geçti'],
+    ask: { at: 2, q: 'Soru soruyor: kayıt dosyası yerelde mi dursun, bulutta mı?', btn: 'Yanıtla: yerel' } },
+  { short: 'Faz 8 · Performans', full: 'Faz 8: Gece sahnesinde kare süresi', total: 5,
+    acts: ['Gece sahnesi ölçüldü', 'render/golge.ts düzenlendi', 'world/isikIzleri.ts düzenlendi', 'perf:night koşuldu', 'Kare süresi 21 → 14 ms'] },
+  { short: 'Testler', full: 'Uçtan uca test kapsamı', total: 6,
+    acts: ['tests/smoke.ts okundu', 'tests/dunya.spec.ts yazıldı', 'tests/kayit.spec.ts yazıldı', 'npm test koşuldu', 'tests/arena.spec.ts düzenlendi', 'npm test yeşil'] },
+];
+
+let uid = 0, arms = [], pulses = [], debris = [], sparks = [], inkP = [];
+let sel = 'head', note = null, headMeta = null, metaT = 0;
+let ctx = 0.64, ctxAnim = null, inking = false, compactions = 0, cutCount = 0, headFlash = 0, bob = 0;
+let blinkT = 2.5, blinkK = -1;
+const live = () => arms.filter((a) => !a.cutting);
+
+function addArm(o) {
+  const a = Object.assign({ id: ++uid, g: 1, done: 0, total: 5, turns: 0, acts: [], ph: Math.random() * 6.28,
+    next: 4 + Math.random() * 2, pulseT: 1 + Math.random() * 2, glowOp: 0, tipFlash: 0, lblOp: 0, hover: false }, o);
+  a.grad = el('linearGradient', { id: 'oc-ag' + a.id, gradientUnits: 'userSpaceOnUse' }, defs);
+  a.stops = [0, 0.55, 1].map((x) => el('stop', { offset: x }, a.grad));
+  a.gEl = el('g', null, gArms);
+  a.ghost = el('path', { fill: 'none', stroke: COL.accent, 'stroke-width': 1.4, 'stroke-dasharray': '2 6', 'stroke-linecap': 'round', opacity: 0 }, a.gEl);
+  a.glow = el('circle', { r: 11, fill: COL.accent, opacity: 0, filter: 'url(#oc-b6)' }, a.gEl);
+  a.body = el('path', { fill: 'url(#oc-ag' + a.id + ')' }, a.gEl);
+  a.edge = el('path', { fill: 'none', stroke: COL.text, 'stroke-width': 1, opacity: 0 }, a.gEl);
+  a.gSuck = el('g', null, a.gEl);
+  a.sc = Array.from({ length: a.total }, () => el('circle', { r: 1.5 }, a.gSuck));
+  a.ring = el('circle', { fill: 'none', stroke: '#fff3ea', 'stroke-width': 1, opacity: 0 }, a.gSuck);
+  a.hit = el('path', { class: 'hit', fill: 'none', stroke: 'transparent', 'stroke-width': 20, 'stroke-linecap': 'round', 'pointer-events': 'stroke' }, a.gEl);
+  a.lbl = el('g', { class: 'lbl' }, gLbl);
+  a.lblBg = el('rect', { rx: 7, fill: COL.bg3, stroke: COL.line, opacity: 0 }, a.lbl);
+  a.tN = el('text', { class: 'n', 'text-anchor': 'middle', y: 0 }, a.lbl);
+  a.tS = el('text', { class: 's', 'text-anchor': 'middle', y: 14 }, a.lbl);
+  const pick = (e) => { e.stopPropagation(); select(a.id); };
+  for (const x of [a.hit, a.body, a.lbl]) {
+    x.addEventListener('click', pick);
+    x.addEventListener('mouseenter', () => { a.hover = true; });
+    x.addEventListener('mouseleave', () => { a.hover = false; });
+  }
+  const m = MOTION[a.state];
+  Object.assign(a, { amp: m.amp, freq: m.freq, k: m.k, curlNow: m.curl, lift: m.lift });
+  arms.push(a);
+  layout();
+  paint(a);
+  setLabel(a);
+  return a;
+}
+
+function removeArm(a) {
+  a.gEl.remove(); a.lbl.remove(); a.grad.remove();
+  arms = arms.filter((x) => x !== a);
+  layout();
+  if (sel === 'head') renderInfo();
+}
+
+// Kollar başın altından yelpaze gibi açılır; sayı değişince yerlerine kayarlar
+function layout() {
+  const L = live(), n = L.length;
+  const spread = Math.min(70, 18 * n);
+  root.classList.toggle('dense', n >= 7);
+  L.forEach((a, i) => {
+    const f = n === 1 ? 0.5 : i / (n - 1);
+    const phi = (90 + spread - 2 * spread * f) * Math.PI / 180;
+    a.Tt = { x: HX + 285 * Math.cos(phi), y: 172 + 236 * Math.sin(phi) };
+    a.Bt = { x: HX + (n === 1 ? 0 : (f - 0.5) * 2 * Math.min(34, 7 * n)), y: 176 + 6 * (1 - Math.abs(f - 0.5) * 2) };
+    if (!a.T) { a.T = { ...a.Tt }; a.B = { ...a.Bt }; }
+  });
+  bGrow.disabled = n >= MAX_ARMS || !PRESETS.length;
+  bGrow.title = n >= MAX_ARMS ? 'Ahtapotun sekiz kolu var' : '';
+}
+
+function paint(a) {
+  const s = a.state === 'bitti' ? STOPS.rest : a.state === 'bekliyor' ? STOPS.wait : STOPS.base;
+  a.stops.forEach((st, i) => st.setAttribute('stop-color', s[i]));
+  a.glow.setAttribute('fill', a.state === 'bekliyor' ? COL.warn : a.state === 'çalışıyor' || a.state === 'büyüyor' ? COL.accent : '#fff2e8');
+}
+
+function setLabel(a) {
+  a.tN.textContent = (a.state === 'öneri' ? 'Öneri · ' : '') + a.short;
+  a.tN.setAttribute('fill', a.state === 'öneri' ? COL.muted : COL.text);
+  const counted = a.state === 'çalışıyor' || a.state === 'bitti';
+  a.tS.textContent = STATE_NAME[a.state] + (counted ? ` · ${a.done}/${a.total}` : '');
+  a.tS.setAttribute('fill', STATE_COL[a.state] || COL.muted);
+}
+
+function setState(a, s) {
+  a.state = s;
+  paint(a); setLabel(a);
+  if (sel === a.id || sel === 'head') renderInfo();
+}
+
+function normals(pts) {
+  for (let j = 0; j < pts.length; j++) {
+    const p = pts[Math.max(0, j - 1)], q = pts[Math.min(pts.length - 1, j + 1)];
+    const tx = q.x - p.x, ty = q.y - p.y, l = Math.hypot(tx, ty) || 1;
+    pts[j].nx = -ty / l; pts[j].ny = tx / l;
+  }
+}
+
+// Kolun orta çizgisi: kübik eğri + uca doğru büyüyen dalga + uçta kıvrım
+function geom(a, gOv) {
+  const ghost = gOv != null, g = ghost ? gOv : a.g;
+  const B = { x: a.B.x, y: a.B.y + bob }, T = { x: a.T.x, y: a.T.y - 32 * a.lift };
+  const dx = T.x - B.x;
+  const w = clamp(Math.abs(a.T.x - HX) / 285, 0, 1);
+  const side = Math.sign(a.T.x - HX) || (a.id % 2 ? 1 : -1);
+  const c1x = B.x + dx * 0.1 + side * 14 * (1 - w), c1y = B.y + 70 + 30 * (1 - w);
+  const c2x = T.x - dx * 0.35 * w - 25 * side * (1 - w), c2y = T.y + 45 * w - 70 * (1 - w);
+  let pts = [];
+  for (let j = 0; j <= N; j++) {
+    const s = g * j / N, u = 1 - s;
+    const b0 = u * u * u, b1 = 3 * u * u * s, b2 = 3 * u * s * s, b3 = s * s * s;
+    pts.push({ x: b0 * B.x + b1 * c1x + b2 * c2x + b3 * T.x, y: b0 * B.y + b1 * c1y + b2 * c2y + b3 * T.y, s });
+  }
+  normals(pts);
+  const amp = ghost ? 2 : a.amp;
+  for (const p of pts) {
+    const off = amp * Math.pow(p.s, 1.25) * Math.sin(2 * Math.PI * a.k * p.s - a.ph);
+    p.x += p.nx * off; p.y += p.ny * off;
+  }
+  const cAmt = (ghost ? 0.2 : a.curlNow) * -side;
+  if (Math.abs(cAmt) > 0.01) {
+    const m = Math.round(N * 0.6);
+    const out = pts.slice(0, m + 1).map((p) => ({ x: p.x, y: p.y, s: p.s }));
+    let px = pts[m].x, py = pts[m].y;
+    for (let j = m + 1; j <= N; j++) {
+      const k = (j - m) / (N - m), th = cAmt * k * k;
+      const vx = pts[j].x - pts[j - 1].x, vy = pts[j].y - pts[j - 1].y;
+      const c = Math.cos(th), sn = Math.sin(th);
+      px += vx * c - vy * sn; py += vx * sn + vy * c;
+      out.push({ x: px, y: py, s: pts[j].s });
+    }
+    pts = out;
+  }
+  normals(pts);
+  return { pts, curlSign: Math.sign(cAmt) || 1 };
+}
+
+function outline(pts, g) {
+  const sc = 0.45 + 0.55 * clamp(g, 0, 1);
+  const L = [], R = [];
+  for (let j = 0; j < pts.length; j++) {
+    const p = pts[j], u = j / (pts.length - 1);
+    const w = (0.7 + 13.5 * Math.pow(1 - u, 1.15)) * sc;
+    p.w = w;
+    L.push(f1(p.x + p.nx * w / 2) + ' ' + f1(p.y + p.ny * w / 2));
+    R.push(f1(p.x - p.nx * w / 2) + ' ' + f1(p.y - p.ny * w / 2));
+  }
+  return 'M' + L.join('L') + 'L' + R.reverse().join('L') + 'Z';
+}
+const line = (pts) => 'M' + pts.map((p) => f1(p.x) + ' ' + f1(p.y)).join('L');
+
+function stepArm(a, dt, t) {
+  const m = MOTION[a.state] || MOTION['bitti'];
+  const r = Math.min(1, dt * 2.5);
+  a.amp = lerp(a.amp, REDUCE ? m.amp * 0.3 : m.amp, r);
+  a.freq = lerp(a.freq, REDUCE ? m.freq * 0.5 : m.freq, r);
+  a.k = lerp(a.k, m.k, r);
+  let ct = m.curl;
+  if (a.state === 'bekliyor' && !REDUCE) ct += 1.1 * Math.sin(t * 3.4); // seni çağırıyor
+  a.curlNow = lerp(a.curlNow, ct, Math.min(1, dt * (a.state === 'bekliyor' ? 7 : 2)));
+  a.lift = lerp(a.lift, m.lift, Math.min(1, dt * 3));
+  a.ph += dt * a.freq * 2 * Math.PI;
+  if (a.Tt && !a.cutting) {
+    const q = Math.min(1, dt * 4);
+    a.T.x = lerp(a.T.x, a.Tt.x, q); a.T.y = lerp(a.T.y, a.Tt.y, q);
+    a.B.x = lerp(a.B.x, a.Bt.x, q); a.B.y = lerp(a.B.y, a.Bt.y, q);
+  }
+  if (a.growT != null) {
+    a.growT += dt / 1.15;
+    a.g = lerp(a.growFrom, 1, back(a.growT));
+    if (a.growT >= 1) { a.g = 1; a.growT = null; a.next = 3 + Math.random() * 1.5; setState(a, 'çalışıyor'); }
+  }
+  if (a.cutting) {
+    a.g = Math.max(0, a.g - dt * 0.6);
+    a.lblOp = Math.max(0, a.lblOp - dt * 4);
+    if (a.g <= 0.002) { removeArm(a); return; }
+  } else a.lblOp = Math.min(1, a.lblOp + dt * 2.5);
+  work(a, dt);
+
+  // çizim
+  const G = geom(a), P = G.pts, tip = P[P.length - 1];
+  a.pts = P;
+  const d = outline(P, a.g);
+  a.body.setAttribute('d', d);
+  a.body.setAttribute('opacity', a.state === 'öneri' || a.prev === 'öneri' ? 0.55 : 1);
+  a.edge.setAttribute('d', d);
+  a.edge.setAttribute('opacity', a.cutting ? 0 : sel === a.id ? 0.55 : a.hover ? 0.28 : 0);
+  a.hit.setAttribute('d', a.g > 0.3 && !a.cutting ? line(P) : 'M0 0');
+  a.grad.setAttribute('x1', f1(P[0].x)); a.grad.setAttribute('y1', f1(P[0].y));
+  a.grad.setAttribute('x2', f1(a.T.x)); a.grad.setAttribute('y2', f1(a.T.y));
+
+  if (a.state === 'öneri' || (a.cutting && a.prev === 'öneri')) {
+    const gp = geom(a, 1).pts;
+    a.ghost.setAttribute('d', line(gp.slice(Math.round(N * 0.16))));
+    a.ghost.setAttribute('opacity', op((0.4 + 0.14 * Math.sin(t * 2)) * (a.cutting ? a.lblOp : 1)));
+  } else a.ghost.setAttribute('opacity', 0);
+
+  // vantuzlar: her biri bir görev; yananlar bitmiş görevler
+  const showS = a.g > 0.6 && !a.cutting && a.state !== 'öneri';
+  a.gSuck.setAttribute('opacity', showS ? op((a.g - 0.6) / 0.4) : 0);
+  if (showS) {
+    const n = a.total;
+    let ringOn = false;
+    for (let k = 0; k < n; k++) {
+      const u = 0.3 + 0.6 * (n === 1 ? 0.5 : k / (n - 1));
+      const p = P[Math.round(u * (P.length - 1))];
+      const x = p.x + G.curlSign * p.nx * p.w * 0.2, y = p.y + G.curlSign * p.ny * p.w * 0.2;
+      const rr = Math.max(1.2, p.w * 0.19), c = a.sc[k], lit = k < a.done;
+      c.setAttribute('cx', f1(x)); c.setAttribute('cy', f1(y)); c.setAttribute('r', f1(rr));
+      c.setAttribute('fill', lit ? (a.state === 'bitti' ? '#e3efd6' : '#fde9db') : '#4d2014');
+      c.setAttribute('opacity', lit ? 0.92 : 0.4);
+      if (k === a.done && a.state === 'çalışıyor') {
+        ringOn = true;
+        a.ring.setAttribute('cx', f1(x)); a.ring.setAttribute('cy', f1(y));
+        a.ring.setAttribute('r', f1(rr + 1.8 + 1.2 * Math.sin(t * 5)));
+      }
+    }
+    a.ring.setAttribute('opacity', ringOn ? 0.8 : 0);
+  }
+
+  // uçtaki ışık
+  const glowT = a.cutting ? 0 : a.state === 'çalışıyor' ? 0.42 + 0.18 * Math.sin(t * 4)
+    : a.state === 'bekliyor' ? 0.62 + 0.3 * Math.sin(t * 6) : a.state === 'büyüyor' ? 0.4 : 0;
+  a.tipFlash = Math.max(0, a.tipFlash - dt * 1.5);
+  a.glowOp = lerp(a.glowOp, glowT + a.tipFlash * 0.7, Math.min(1, dt * 5));
+  a.glow.setAttribute('cx', f1(tip.x)); a.glow.setAttribute('cy', f1(tip.y));
+  a.glow.setAttribute('opacity', op(a.glowOp));
+
+  // etiket: büyümüş kolda uç bölgesinin altında (kıvrım ve kalkışla birlikte), yumuşak takip
+  let lx, ly;
+  if (a.g >= 0.98 && !a.cutting) {
+    let sx = 0, my = -1e9;
+    const from = Math.round(P.length * 0.6);
+    for (let j = from; j < P.length; j++) { sx += P[j].x; if (P[j].y > my) my = P[j].y; }
+    lx = sx / (P.length - from); ly = my + 20;
+  } else {
+    const wSide = clamp(Math.abs(a.T.x - HX) / 285, 0, 1);
+    lx = a.T.x; ly = a.T.y + 22 + 9 * wSide;
+  }
+  lx = clamp(lx, 58, W - 58);
+  if (a.lx == null) { a.lx = lx; a.ly = ly; }
+  if (!a.cutting) { const q2 = Math.min(1, dt * 3); a.lx = lerp(a.lx, lx, q2); a.ly = lerp(a.ly, ly, q2); }
+  a.lbl.setAttribute('transform', `translate(${f1(a.lx)} ${f1(a.ly)})`);
+  a.lbl.setAttribute('opacity', op(a.lblOp));
+  if (sel === a.id && !a.cutting) {
+    const b1 = a.tN.getBBox(), b2 = a.tS.getBBox();
+    const x0 = Math.min(b1.x, b2.x) - 8, x1 = Math.max(b1.x + b1.width, b2.x + b2.width) + 8;
+    a.lblBg.setAttribute('x', f1(x0)); a.lblBg.setAttribute('y', f1(b1.y - 4));
+    a.lblBg.setAttribute('width', f1(x1 - x0)); a.lblBg.setAttribute('height', f1(b2.y + b2.height + 4 - (b1.y - 4)));
+    a.lblBg.setAttribute('opacity', 1);
+    a.lbl.classList.add('on');
+  } else { a.lblBg.setAttribute('opacity', 0); a.lbl.classList.remove('on'); }
+}
+
+// Sahte iş akışı: görev biter, vantuz yanar, rapor kolun içinden beyne akar
+function work(a, dt) {
+  if (a.state !== 'çalışıyor') return;
+  a.pulseT -= dt;
+  if (a.pulseT <= 0) { pulse(a, 'up', 0.6); a.pulseT = 2.4 + Math.random() * 1.8; }
+  a.next -= dt;
+  if (a.next > 0) return;
+  a.done = Math.min(a.total, a.done + 1);
+  a.turns++;
+  a.last = a.acts[(a.done - 1) % Math.max(1, a.acts.length)] || a.last;
+  a.next = 4.5 + Math.random() * 2.5;
+  pulse(a, 'up', 1);
+  if (a.ask && !a.asked && a.done >= a.ask.at) {
+    a.asked = true;
+    setState(a, 'bekliyor');
+    if (sel === 'head') select(a.id);
+    return;
+  }
+  if (a.done >= a.total) {
+    setState(a, 'rapor');
+    pulse(a, 'up', 1.5, () => {
+      if (a.cutting) return;
+      headFlash = 1;
+      setState(a, 'doğrulanıyor');
+      setTimeout(() => {
+        if (a.cutting) return;
+        a.last = a.finalNote || 'Beyin doğruladı: iş tamam, testler yeşil.';
+        setState(a, 'bitti');
+      }, 1700);
+    });
+    return;
+  }
+  setLabel(a);
+  if (sel === a.id) renderInfo();
+}
+
+function pulse(a, dir, size, onArrive) {
+  const up = dir === 'up';
+  const gl = el('circle', { r: 7 * size, fill: up ? COL.accent : COL.text, opacity: 0.55, filter: 'url(#oc-b4)' }, gPulse);
+  const c = el('circle', { r: 2.6 * size, fill: up ? '#fff0e6' : '#ffffff' }, gPulse);
+  pulses.push({ a, up, size, p: up ? 1 : 0, c, gl, onArrive });
+}
+function stepPulses(dt) {
+  pulses = pulses.filter((q) => {
+    const a = q.a;
+    if (!arms.includes(a) || a.cutting || !a.pts) { q.c.remove(); q.gl.remove(); return false; }
+    q.p += (q.up ? -1 : 1) * dt / (q.up ? 1.5 : 1.1);
+    if (q.p <= 0 || q.p >= 1) {
+      q.c.remove(); q.gl.remove();
+      if (q.up) { headFlash = Math.max(headFlash, 0.5 * q.size); if (!ctxAnim) ctx = Math.min(1, ctx + 0.011 * q.size); }
+      else a.tipFlash = 1;
+      if (q.onArrive) q.onArrive();
+      return false;
+    }
+    const P = a.pts, fi = q.p * (P.length - 1), i0 = Math.floor(fi), i1 = Math.min(P.length - 1, i0 + 1), fr = fi - i0;
+    const x = f1(lerp(P[i0].x, P[i1].x, fr)), y = f1(lerp(P[i0].y, P[i1].y, fr));
+    q.c.setAttribute('cx', x); q.c.setAttribute('cy', y); q.gl.setAttribute('cx', x); q.gl.setAttribute('cy', y);
+    return true;
+  });
+}
+
+function answer(a) {
+  if (a.state !== 'bekliyor') return;
+  a.last = a.ask.btn === 'İzin ver' ? 'İzin verildi, devam ediyor.' : 'Yanıt alındı, devam ediyor.';
+  a.next = 3 + Math.random();
+  setState(a, 'çalışıyor');
+  pulse(a, 'down', 1);
+}
+function approve(a) {
+  if (a.state !== 'öneri') return;
+  a.growFrom = a.g; a.growT = 0;
+  a.last = 'Beynin yazdığı görev tanımıyla başladı.';
+  setState(a, 'büyüyor');
+  pulse(a, 'down', 1);
+}
+function growNew() {
+  if (live().length >= MAX_ARMS || !PRESETS.length) return;
+  const a = addArm(Object.assign({ state: 'büyüyor', g: 0, last: 'Beynin yazdığı görev tanımıyla başladı.' }, PRESETS.shift()));
+  a.growFrom = 0; a.growT = 0;
+  pulse(a, 'down', 1);
+  select(a.id);
+}
+
+function cut(a) {
+  if (!a || a.cutting) return;
+  const bud = a.state === 'öneri';
+  if (!bud && a.pts && a.g > 0.5) {
+    const k0 = Math.round(N * 0.22);
+    const pts = a.pts.slice(k0).map((p) => ({ x: p.x, y: p.y, nx: p.nx, ny: p.ny, w: p.w }));
+    debris.push({ pts, age: 0, rot: (a.T.x < HX ? -1 : 1) * (0.3 + Math.random() * 0.25), ox: pts[0].x, oy: pts[0].y,
+      el: el('path', { fill: a.state === 'bitti' ? '#b36248' : '#cf7354' }, gDebris) });
+    sparks.push({ x: a.pts[k0].x, y: a.pts[k0].y, age: 0, el: el('circle', { fill: 'none', stroke: '#fff', 'stroke-width': 1.5 }, gFx) });
+    a.g = 0.22;
+    cutCount++;
+    note = { text: `${a.short} kolu kesildi. Oturum kapandı, özeti beyin defterinde kaldı; istenirse kol yeniden büyür.`, until: performance.now() + 6500 };
+  } else {
+    note = { text: `${a.short} önerisi geri çekildi.`, until: performance.now() + 5000 };
+  }
+  a.prev = a.state;
+  a.cutting = true;
+  a.state = 'kesildi';
+  paint(a); setLabel(a);
+  layout();
+  select('head');
+}
+function stepDebris(dt) {
+  debris = debris.filter((d) => {
+    d.age += dt;
+    const k = d.age / 1.7;
+    if (k >= 1) { d.el.remove(); return false; }
+    const dy = 90 * k * k + 12 * k, rot = d.rot * k, c = Math.cos(rot), s = Math.sin(rot);
+    const L = [], R = [];
+    d.pts.forEach((p, j) => {
+      const wig = 4 * Math.sin(16 * d.age + j * 0.45) * (j / d.pts.length) * (1 - k);
+      const x = p.x + p.nx * wig - d.ox, y = p.y + p.ny * wig - d.oy;
+      const rx = x * c - y * s + d.ox, ry = x * s + y * c + d.oy + dy;
+      const nx = p.nx * c - p.ny * s, ny = p.nx * s + p.ny * c;
+      L.push(f1(rx + nx * p.w / 2) + ' ' + f1(ry + ny * p.w / 2));
+      R.push(f1(rx - nx * p.w / 2) + ' ' + f1(ry - ny * p.w / 2));
+    });
+    d.el.setAttribute('d', 'M' + L.join('L') + 'L' + R.reverse().join('L') + 'Z');
+    d.el.setAttribute('opacity', op(1 - k * k));
+    return true;
+  });
+}
+function stepSparks(dt) {
+  sparks = sparks.filter((s) => {
+    s.age += dt;
+    const k = s.age / 0.45;
+    if (k >= 1) { s.el.remove(); return false; }
+    s.el.setAttribute('cx', f1(s.x)); s.el.setAttribute('cy', f1(s.y));
+    s.el.setAttribute('r', f1(3 + 18 * ease(k))); s.el.setAttribute('opacity', op(1 - k));
+    return true;
+  });
+}
+
+// Sıkıştırma: mürekkep bulutu, beyin doluluğu düşer
+function ink(auto) {
+  if (inking) return;
+  inking = true;
+  compactions++;
+  const from = ctx, to = 0.2 + Math.random() * 0.06;
+  for (let i = 0; i < 34; i++) {
+    const ang = Math.random() * Math.PI * 2, sp = 20 + Math.random() * 75;
+    inkP.push({ x: HX + (Math.random() - 0.5) * 60, y: 118 + (Math.random() - 0.5) * 70, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp * 0.75 - 12,
+      r0: 4 + Math.random() * 7, r1: 20 + Math.random() * 30, life: 1.3 + Math.random(), age: 0, el: el('circle', { fill: '#0c0a09' }, gInk) });
+  }
+  ctxAnim = { from, to, t: -0.3 };
+  note = { text: `${auto ? 'Bağlam doldu; beyin' : 'Beyin'} kendini sıkıştırdı (%${Math.round(from * 100)} → %${Math.round(to * 100)}). Beyin defteri ve kolların durumu hemen geri yüklendi, kararlar kaybolmadı.`, until: performance.now() + 7000 };
+  select('head');
+  setTimeout(() => { inking = false; }, 2300);
+}
+function stepInk(dt) {
+  inkP = inkP.filter((p) => {
+    p.age += dt;
+    const k = p.age / p.life;
+    if (k >= 1) { p.el.remove(); return false; }
+    p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 1 - dt * 0.9; p.vy *= 1 - dt * 0.9;
+    p.el.setAttribute('cx', f1(p.x)); p.el.setAttribute('cy', f1(p.y));
+    p.el.setAttribute('r', f1(lerp(p.r0, p.r1, ease(k))));
+    p.el.setAttribute('opacity', op(0.88 * Math.pow(1 - k, 1.3)));
+    return true;
+  });
+}
+
+function stepHead(dt, t) {
+  bob = REDUCE ? 0 : 2.2 * Math.sin(t * 1.25);
+  gHead.setAttribute('transform', `translate(0 ${f1(bob)})`);
+  if (ctxAnim) {
+    ctxAnim.t += dt / 1.2;
+    if (ctxAnim.t > 0) ctx = lerp(ctxAnim.from, ctxAnim.to, ease(ctxAnim.t));
+    if (ctxAnim.t >= 1) ctxAnim = null;
+  } else {
+    ctx = Math.min(1, ctx + dt * 0.0006);
+    if (ctx >= 0.92) ink(true);
+  }
+  const lvl = 24 + (187 - 24) * (1 - ctx);
+  let top = '';
+  for (let x = 276; x <= 424; x += 8) top += (x === 276 ? 'M' : 'L') + x + ' ' + f1(lvl + 2.2 * Math.sin(x * 0.07 + t * 2.1));
+  fillP.setAttribute('d', top + 'L424 200L276 200Z');
+  fillL.setAttribute('d', top);
+  fillP.setAttribute('fill', ctx > 0.85 ? '#ffd9a8' : '#ffe4d6');
+  tCtx.textContent = '%' + Math.round(ctx * 100);
+
+  headFlash = Math.max(0, headFlash - dt * 1.4);
+  const waiting = arms.some((a) => a.state === 'bekliyor');
+  halo.setAttribute('fill', waiting ? COL.warn : COL.accent);
+  halo.setAttribute('opacity', op(0.1 + 0.3 * headFlash + (waiting ? 0.1 + 0.06 * Math.sin(t * 3.2) : 0)));
+  tint.setAttribute('opacity', op(waiting ? 0.22 + 0.1 * Math.sin(t * 3.2) : 0));
+  ring.setAttribute('opacity', sel === 'head' ? 0.5 : 0);
+
+  // gözler: seni bekleyen kola, yoksa seçili ya da çalışan kola bakar
+  const tg = arms.find((a) => a.state === 'bekliyor') || arms.find((a) => a.id === sel && !a.cutting) || arms.find((a) => a.state === 'çalışıyor');
+  const tp = tg && tg.pts ? tg.pts[tg.pts.length - 1] : { x: HX, y: 320 };
+  blinkT -= dt;
+  if (blinkT <= 0 && blinkK < 0) { blinkK = 0; blinkT = 3 + Math.random() * 4; }
+  let sy = 1;
+  if (blinkK >= 0) { blinkK += dt / 0.17; sy = 1 - 0.88 * Math.sin(Math.PI * Math.min(1, blinkK)); if (blinkK >= 1) blinkK = -1; }
+  for (const e of eyes) {
+    const ddx = tp.x - e.x, ddy = tp.y - e.y - bob, l = Math.hypot(ddx, ddy) || 1;
+    e.px = lerp(e.px, (ddx / l) * 2.6, Math.min(1, dt * 4));
+    e.py = lerp(e.py, (ddy / l) * 1.7, Math.min(1, dt * 4));
+    e.pupil.setAttribute('transform', `translate(${f1(e.px)} ${f1(e.py)})`);
+    e.lid.setAttribute('transform', `translate(0 ${f1(e.y * (1 - sy))}) scale(1 ${op(sy)})`);
+  }
+}
+
+function stepPlank(dt, t) {
+  for (const p of plank) {
+    p.y -= p.sp * dt * (REDUCE ? 0.2 : 1);
+    if (p.y < -4) { p.y = H + 4; p.x = Math.random() * W; }
+    p.el.setAttribute('cx', f1(p.x + 6 * Math.sin(t * 0.4 + p.ph)));
+    p.el.setAttribute('cy', f1(p.y));
+  }
+}
+
+// ---- alt bilgi kutusu
+function mkBtn(text, fn, pri) {
+  const b = document.createElement('button');
+  b.textContent = text;
+  if (pri) b.className = 'pri';
+  b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+  return b;
+}
+function div(cls, text) { const d = document.createElement('div'); d.className = cls; if (text != null) d.textContent = text; return d; }
+function select(id) {
+  sel = id;
+  const a = arms.find((x) => x.id === id);
+  bCut.disabled = !a || a.cutting;
+  bCut.textContent = a && a.state === 'öneri' ? 'Öneriyi geri çek' : 'Kolu kes';
+  renderInfo();
+}
+function renderInfo() {
+  const a = arms.find((x) => x.id === sel && !x.cutting);
+  if (!a && sel !== 'head') { sel = 'head'; bCut.disabled = true; }
+  info.textContent = '';
+  const dot = document.createElement('span');
+  dot.className = 'dot';
+  const tx = div('tx'), m = div('m');
+  let btn = null;
+  if (!a) {
+    dot.style.background = COL.accent;
+    tx.append(div('t', 'Beyin · Imladris projesini oyunlaştırma'),
+      div('d', note && note.until > performance.now() ? note.text
+        : 'Projenin ana oturumu. Yönü tutar, işi kollara böler, her kolun raporunu kendisi doğrular. Bağlamı dolunca kendini sıkıştırır; beyin defteri sayesinde kararlarını unutmaz.'));
+    headMeta = m;
+  } else {
+    headMeta = null;
+    dot.style.background = STATE_COL[a.state] || COL.muted;
+    const d = a.state === 'bekliyor' ? a.ask.q : a.state === 'çalışıyor' ? 'Şu an: ' + a.last
+      : a.state === 'rapor' ? 'Turunu bitirdi, raporu beyne taşınıyor.' : a.state === 'doğrulanıyor' ? 'Beyin, kolun işini kendi testleriyle doğruluyor.'
+      : a.state === 'büyüyor' ? 'Beynin yazdığı görev tanımıyla yeni oturum açılıyor.' : a.last;
+    const dEl = div('d', d);
+    tx.append(div('t', a.full), dEl);
+    m.textContent = `${STATE_NAME[a.state]} · ${a.done}/${a.total} görev · ${a.turns} tur${a.branch ? ' · dal ' + a.branch : ''}`;
+    if (a.state === 'bekliyor') btn = mkBtn(a.ask.btn, () => answer(a), true);
+    else if (a.state === 'öneri') btn = mkBtn('Kolu büyüt', () => approve(a), true);
+    else btn = mkBtn('Oturumu aç', () => { dEl.textContent = 'Panelde bu düğme kolun kendi sohbetini açar; taslakta yalnız gösterim.'; });
+  }
+  tx.append(m);
+  info.append(dot, tx);
+  if (btn) info.append(btn);
+  updateMeta();
+}
+function updateMeta() {
+  if (!headMeta) return;
+  const L = live().filter((a) => a.state !== 'öneri');
+  const wk = L.filter((a) => a.state === 'çalışıyor').length, wt = L.filter((a) => a.state === 'bekliyor').length, bud = live().length - L.length;
+  headMeta.textContent = `bağlam %${Math.round(ctx * 100)} · ${L.length} kol (${wk} çalışıyor${wt ? `, ${wt} seni bekliyor` : ''}${bud ? `, ${bud} öneri` : ''}) · sıkıştırma ${compactions} · kesilen ${cutCount}`;
+}
+
+bGrow.addEventListener('click', growNew);
+bCut.addEventListener('click', () => cut(arms.find((a) => a.id === sel)));
+bInk.addEventListener('click', () => ink(false));
+
+for (const o of ARMS0) addArm(o);
+for (const a of arms) { a.T = { ...a.Tt }; a.B = { ...a.Bt }; a.lblOp = 1; }
+select('head');
+
+let last = performance.now();
+const t0 = last;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  const t = (now - t0) / 1000;
+  stepPlank(dt, t);
+  stepHead(dt, t);
+  for (const a of arms.slice()) stepArm(a, dt, t);
+  stepPulses(dt); stepDebris(dt); stepSparks(dt); stepInk(dt);
+  metaT -= dt;
+  if (metaT <= 0) {
+    metaT = 0.4;
+    updateMeta();
+    if (sel === 'head' && note && note.until < now) { note = null; renderInfo(); }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body></html>

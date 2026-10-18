@@ -1,0 +1,4 @@
+module CoreSimulator [system] {
+  header "CoreSimulator.h"
+  export *
+}

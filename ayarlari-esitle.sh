@@ -5,13 +5,34 @@
 # Kullanım (tüm Claude Code oturumlarını kapattıktan sonra):
 #   bash ~/"Claude Panel"/ayarlari-esitle.sh
 #
-# Hesap klasörleri farklıysa argüman verin:
-#   bash ayarlari-esitle.sh ~/.claude-is ~/.claude-max ~/.claude-pro
+# Argümansız: paneldeki hesapların ayar klasörleri (config.json → accounts[].configDir; boş olan ~/.claude'dur, atlanır).
+# Belirli klasörler için argüman verin:
+#   bash ayarlari-esitle.sh ~/.claude-is ~/.claude-pro
 
 set -e
 SRC="$HOME/.claude"
 TARGETS=("$@")
-[ ${#TARGETS[@]} -eq 0 ] && TARGETS=("$HOME/.claude-is" "$HOME/.claude-max" "$HOME/.claude-pro")
+if [ ${#TARGETS[@]} -eq 0 ]; then
+  CFG="$HOME/Library/Application Support/Claude Panel/config.json"
+  if [ -f "$CFG" ]; then
+    while IFS= read -r d; do [ -n "$d" ] && TARGETS+=("$d"); done < <(python3 - "$CFG" "$HOME" <<'PY'
+import json, os, sys
+cfg, home = sys.argv[1], sys.argv[2]
+src = os.path.realpath(os.path.join(home, ".claude"))
+for a in json.load(open(cfg)).get("accounts") or []:
+    d = (a.get("configDir") or "").strip()
+    if not d: continue
+    d = os.path.join(home, d[2:]) if d.startswith("~/") else d
+    if os.path.realpath(d) != src: print(d)
+PY
+)
+  fi
+fi
+if [ ${#TARGETS[@]} -eq 0 ]; then
+  echo "Eşitlenecek hesap klasörü yok: paneldeki hesapların hepsi ~/.claude'u kullanıyor."
+  echo "Belirli klasörler için: bash ayarlari-esitle.sh ~/.claude-is ~/.claude-pro"
+  exit 0
+fi
 
 # Paylaşılacaklar: talimatlar, ayarlar/hook'lar, skill'ler, agent'lar, komutlar,
 # eklentiler, durum satırı betikleri ve proje hafızası + oturum geçmişi (projects).

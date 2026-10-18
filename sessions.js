@@ -1,0 +1,193 @@
+// Yan oturumlar: Claude bağımsız bir işi aynı hesapta, yeni bir sohbet sekmesinde başlatır (`sessions` aracı).
+// Sekmeyi arayüz açar (arka planda, odak değişmez). Yan oturum her tur bitirdiğinde başlatan sohbete bir bildirim
+// gider; arayüz onu başlatan sohbet boştayken Claude'a iletir (art arda en çok 5 kez, sonra kullanıcıyı bekler).
+// Yan oturum bir izin kartında (soru, plan onayı) kullanıcıyı beklerken de başlatan sohbete kart gider; Claude'a iletilmez.
+// Başlatan sohbet bir ahtapotun başıysa yan oturum onun koludur: durumu kayda da yazılır, kol kol açamaz (OCTOPUS-PLANI.md İ5).
+const { ipcMain } = require('electron');
+const octopus = require('./octopus');
+const defter = require('./defter');
+
+let send = () => {};
+let nextReq = 1;
+const replies = new Map();
+const children = new Map(); // yan oturumun chatId'si -> { parent, title, cwd, state, lastText, turns, arm, waitNoted }
+
+// Bir sohbette aynı anda açık (bitmemiş, kapanmamış) yan oturum sınırı; ahtapotun başında kaydın settings.maxArms'ı geçerli
+const MAX_CHILDREN = 8;
+const ARM_RULE = 'Kollar kol açamaz; bunu başa öner.';
+// Durum adları ahtapot kaydıyla aynı (octopus.js); Claude'a ve listeye Türkçe adları gider
+const LABELS = { working: 'çalışıyor', waiting: 'izin bekliyor', reported: 'rapor verdi', stopped: 'durdu', done: 'bitti', closed: 'kapandı' };
+const active = (c) => c.state !== 'closed' && c.state !== 'done';
+
+function query(op, args, timeout = 60000) {
+  const id = nextReq++;
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => { replies.delete(id); reject(new Error('Arayüz yanıt vermedi')); }, timeout);
+    replies.set(id, (r) => {
+      clearTimeout(t);
+      replies.delete(id);
+      if (r?.ok) resolve(r); else reject(new Error(r?.error || 'Bilinmeyen hata'));
+    });
+    send('session:query', id, op, args);
+  });
+}
+
+// chat-main.js kancaları. Kayıt sohbet başlarken yapılır (ilk tur, araç yanıt dönmeden bitebilir).
+// Başlatan sohbet bir ahtapotun başıysa yan oturum kol olarak ahtapot kaydına da yazılır (octopus.js).
+function register(chatId, parent, title, cwd, worktree) {
+  const arm = octopus.armStarted(chatId, parent, { title, cwd, worktree });
+  children.set(chatId, { parent, title: String(title || '').slice(0, 60), cwd, state: 'working', lastText: '', turns: 0, arm, waitNoted: false });
+}
+function setState(c, state, extra = {}) {
+  c.state = state;
+  octopus.updateArm(c.arm, { state, ...extra });
+}
+function noteText(chatId, text) {
+  const c = children.get(chatId);
+  if (c && text) c.lastText = text;
+}
+// Yan oturuma mesaj gitti (kullanıcı ya da başlatan sohbet). Bitmiş kol yeni mesajla yeniden çalışır.
+function noteBusy(chatId) {
+  const c = children.get(chatId);
+  if (!c || c.state === 'closed') return;
+  c.waitNoted = false;
+  setState(c, 'working', c.state === 'done' ? { endedAt: null } : {});
+}
+// Yan oturumda izin kartı açıldı ya da (hepsi) yanıtlandı. Başlatan sohbete turda bir kez kart gider: "seni bekliyor".
+function noteWaiting(chatId, on, what = '') {
+  const c = children.get(chatId);
+  if (!c || c.state === 'closed' || c.state === 'done') return;
+  if (!on) {
+    if (c.state === 'waiting') setState(c, 'working');
+    return;
+  }
+  if (c.state === 'waiting') return;
+  setState(c, 'waiting');
+  if (c.waitNoted) return;
+  c.waitNoted = true;
+  send('session:event', c.parent, { childId: chatId, title: c.title, state: 'waiting', label: LABELS.waiting, text: String(what).slice(0, 300) });
+}
+function turnEnded(chatId, ok) {
+  const c = children.get(chatId);
+  if (!c) return;
+  const state = ok ? 'reported' : 'stopped';
+  const text = c.lastText.slice(0, 1500);
+  c.turns++;
+  c.waitNoted = false;
+  if (c.state !== 'done') setState(c, state, { lastReport: text });
+  send('session:event', c.parent, { childId: chatId, title: c.title, state, label: LABELS[state], text });
+}
+// Ahtapottaki "kesildi" octopus.chatClosed'da yazılır
+function closed(chatId) {
+  const c = children.get(chatId);
+  if (c) c.state = 'closed';
+}
+
+// Yeni yan oturum açılamıyorsa nedeni: kol kol açamaz, sınır doldu
+function startBlocked(chatId) {
+  if (octopus.isArm(chatId)) return ARM_RULE;
+  const maxArms = octopus.maxArms(chatId);
+  const limit = maxArms || MAX_CHILDREN;
+  const open = [...children.values()].filter((c) => c.parent === chatId && active(c)).length;
+  if (open < limit) return null;
+  return maxArms
+    ? `Bu ahtapotta aynı anda en çok ${limit} kol çalışabilir. Doğruladığın kolları "done" ile bitir ya da kullanıcıdan kapatmasını iste.`
+    : `Bu sohbetten en çok ${limit} yan oturum açık olabilir.`;
+}
+
+const own = (chatId, id) => {
+  const c = children.get(id);
+  if (!c || c.parent !== chatId) throw new Error(`${id} bu sohbetin başlattığı bir yan oturum değil`);
+  return c;
+};
+
+// İzin: başlatmak her seferinde kartla (yeni bir Claude oturumu açar, kullanım harcar); gerisi kendi yan oturumlarında sormadan.
+// Reddedilecek başlatma (kol, sınır) kart açmadan araca gider; araç nedeniyle reddeder.
+function permission(chatId, input = {}) {
+  if (input.action === 'start' && !startBlocked(chatId)) return { title: 'Claude yeni bir yan oturum başlatmak istiyor' };
+  return null;
+}
+
+function createTool(sdk, z, { chatId, cwd }) {
+  return sdk.tool(
+    'sessions',
+    'Bağımsız bir işi Claude Panel\'de ayrı bir yan oturuma (aynı hesapta yeni bir sohbet sekmesi) devreder. Kullanıcı ayrı, paralel ya da ' +
+      'arka planda iş istediğinde ya da iş birbirinden bağımsız parçalara ayrılıyorsa kullan; küçük işleri burada yap. "start" her seferinde ' +
+      'kullanıcıya sorulur; prompt, bu konuşmayı görmeyen bir oturum için eksiksiz bir görev tanımı olmalı (dosyalar, ne yapılacak, bitti ne demek). ' +
+      'Yan oturum her turu bitirdiğinde sana <yan-oturum-olayi> bildirimi gelir (kullanıcı yazmadı); sonucu doğrulamadan bitti deme. ' +
+      '"send" yan oturuma mesaj yazar, "read" son yanıtını okur, "list" durumlarını verir, "done" sonucunu doğruladığın yan oturumu bitti olarak işaretler ' +
+      '(sekmesi açık kalır; açık yan oturum sınırından düşer). Dosya yazan paralel işlerde worktree: true ver (yan oturum kendi dalında çalışır, dosyalar çakışmaz). ' +
+      'Bu sohbet bir ahtapotun koluysa yan oturum açamazsın; gerekiyorsa başa öner.',
+    {
+      action: z.enum(['start', 'list', 'send', 'read', 'done']).describe('Yapılacak iş'),
+      title: z.string().optional().describe('start: sekme adı (60 karakterden kısa)'),
+      prompt: z.string().optional().describe('start: yan oturuma ilk mesaj (eksiksiz görev tanımı)'),
+      cwd: z.string().optional().describe('start: çalışma klasörü (varsayılan bu sohbetin klasörü)'),
+      worktree: z.boolean().optional().describe('start: yan oturum ayrı bir git çalışma kopyasında (kendi dalında) çalışsın; dosya yazan paralel işler için önerilir'),
+      id: z.number().optional().describe('send/read/done: yan oturum numarası (start ya da list\'ten)'),
+      message: z.string().optional().describe('send: yan oturuma yazılacak mesaj'),
+    },
+    async (a) => {
+      const ok = (text) => ({ content: [{ type: 'text', text }] });
+      try {
+        switch (a.action) {
+          case 'start': {
+            if (octopus.isArm(chatId)) return { content: [{ type: 'text', text: ARM_RULE }], isError: true };
+            const title = String(a.title || '').trim().slice(0, 60);
+            const prompt = String(a.prompt || '').trim();
+            if (!title || !prompt) throw new Error('title ve prompt gerekli');
+            const blocked = startBlocked(chatId);
+            if (blocked) throw new Error(blocked);
+            const dir = a.cwd || cwd;
+            // Ahtapotun kolu: ilk mesajına başın defterinden kural, ret ve zevk eklenir (P5.2); kol da reddedilenleri bilsin
+            const role = octopus.roleOf(chatId);
+            const note = role?.role === 'head' ? defter.armNote(role.octoId) : '';
+            const { id } = await query('start', { parentId: chatId, title, prompt: prompt + note, cwd: dir, worktree: !!a.worktree });
+            if (!children.has(id)) register(id, chatId, title, dir);
+            const { cwd: where, branch } = await query('info', { childId: id });
+            return ok(`Yan oturum ${id} başladı: "${title}" (${where}${branch ? ', dal ' + branch : ''}). Her turunu bitirdiğinde sana bildirim gelecek.`);
+          }
+          case 'list': {
+            const list = [...children.entries()].filter(([, c]) => c.parent === chatId);
+            if (!list.length) return ok('Bu sohbetin başlattığı yan oturum yok.');
+            return ok(list.map(([id, c]) => `${id} · ${c.title} · ${LABELS[c.state]} · ${c.turns} tur${c.lastText ? ' · son: ' + c.lastText.replace(/\s+/g, ' ').slice(0, 120) : ''}`).join('\n'));
+          }
+          case 'send': {
+            const c = own(chatId, a.id);
+            if (c.state === 'closed') throw new Error(`Yan oturum ${a.id} kapandı`);
+            const message = String(a.message || '').trim();
+            if (!message) throw new Error('message gerekli');
+            await query('send', { childId: a.id, text: message });
+            return ok(`Yan oturum ${a.id}'e yazıldı. Turu bitince bildirim gelecek.`);
+          }
+          case 'read': {
+            const c = own(chatId, a.id);
+            return ok(`${a.id} · ${c.title} · ${LABELS[c.state]}\n\n${c.lastText.slice(0, 20000) || '(henüz yanıt yok)'}`);
+          }
+          // Kapanmış (kesilmiş) kol da bitti sayılabilir: baş işini sonradan doğrulamış olabilir
+          case 'done': {
+            const c = own(chatId, a.id);
+            if (c.state === 'done') return ok(`Yan oturum ${a.id} zaten bitti.`);
+            if (c.state !== 'closed') c.state = 'done';
+            octopus.updateArm(c.arm, { state: 'done', endedAt: octopus.now() });
+            return ok(`Yan oturum ${a.id} ("${c.title}") bitti olarak işaretlendi${c.arm ? '; ahtapotta kolu "bitti"' : ''}. Sekmesi açık kalırsa kullanıcı kapatabilir.`);
+          }
+          default:
+            throw new Error('Bilinmeyen işlem: ' + a.action);
+        }
+      } catch (err) {
+        return { content: [{ type: 'text', text: 'Yan oturum: ' + (err?.message || err) }], isError: true };
+      }
+    }
+  );
+}
+
+function setup({ getWindow }) {
+  send = (...args) => {
+    const w = getWindow();
+    if (w && !w.isDestroyed()) w.webContents.send(...args);
+  };
+  ipcMain.on('session:reply', (_e, id, r) => replies.get(id)?.(r));
+}
+
+module.exports = { setup, createTool, permission, register, noteText, noteBusy, noteWaiting, turnEnded, closed };

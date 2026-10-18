@@ -27,12 +27,28 @@ const TOOL_ICONS = {
   Read: 'file', Edit: 'pencil', MultiEdit: 'pencil', Write: 'file', Bash: 'terminal', Grep: 'search', Glob: 'folder',
   WebFetch: 'globe', WebSearch: 'search', Task: 'sparkle', Agent: 'sparkle', TodoWrite: 'check', Skill: 'layers',
   NotebookEdit: 'file', AskUserQuestion: 'chat', ExitPlanMode: 'layers', mcp__panel__publish_artifact: 'artifacts',
+  mcp__panel__simulator: 'phone', mcp__panel__browser: 'globe', mcp__panel__terminal: 'terminal', mcp__panel__show: 'panel', mcp__panel__show_widget: 'sparkle', mcp__panel__sessions: 'layers', mcp__panel__wrap_up: 'check',
+  mcp__panel__open: 'external', mcp__panel__pr: 'code', mcp__panel__defter: 'book',
 };
 const PUBLISH_TOOL = 'mcp__panel__publish_artifact';
+const SIM_TOOL = 'mcp__panel__simulator';
+const BROWSER_TOOL = 'mcp__panel__browser';
+const TERMINAL_TOOL = 'mcp__panel__terminal';
+const TERMINAL_ACTIONS = { list: 'sekmeler', read: 'okuma', run: 'komut', stop: 'durdurma (Ctrl-C)' };
+const SHOW_TOOL = 'mcp__panel__show';
+const BROWSER_ACTIONS = {
+  navigate: 'gezinme', screenshot: 'ekran görüntüsü', read_page: 'sayfa ağacı', find: 'arama', get_text: 'sayfa metni', click: 'tıklama',
+  type: 'yazı', key: 'tuş', scroll: 'kaydırma', hover: 'imleç', form_input: 'form', wait: 'bekleme', console: 'konsol', network: 'ağ',
+  eval: 'JavaScript', resize: 'görünüm',
+};
+const SIM_ACTIONS = {
+  list: 'cihazlar', attach: 'açıldı', launch: 'uygulama başlatıldı', screenshot: 'ekran görüntüsü', tap: 'dokunma', swipe: 'kaydırma',
+  touch_path: 'hareket', touch2_path: 'iki parmak', rotate: 'döndürme', text: 'yazı', button: 'düğme', open_url: 'adres açıldı', describe_ui: 'arayüz ağacı', detach: 'bağlantı kesildi',
+};
 const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
 // MCP araçlarında kod taşıyan alanlar (Blender execute_blender_code, Figma figma_execute…) kod bloğu olarak çizilir
 const MCP_CODE_KEYS = ['code', 'script', 'python', 'javascript', 'js', 'sql'];
-const MCP_LANGS = [[/blender/i, 'python'], [/figma|pencil/i, 'javascript'], [/unity/i, 'csharp']];
+const MCP_LANGS = [[/blender/i, 'python'], [/figma|pencil|^panel$/i, 'javascript'], [/unity/i, 'csharp']];
 function mcpCodeField(name, input) {
   if (!name.startsWith('mcp__') || name === PUBLISH_TOOL || !input) return null;
   const key = MCP_CODE_KEYS.find((k) => typeof input[k] === 'string' && input[k].trim());
@@ -52,6 +68,15 @@ function toolCategory(name) {
   if (name === 'Task' || name === 'Agent') return 'agent';
   if (name === 'WebFetch' || name === 'WebSearch') return 'web';
   if (name === 'mcp__panel__publish_artifact') return 'artifact';
+  if (name === SIM_TOOL) return 'sim';
+  if (name === BROWSER_TOOL) return 'browser';
+  if (name === TERMINAL_TOOL) return 'terminal';
+  if (name === 'mcp__panel__show_widget') return 'widget';
+  if (name === 'mcp__panel__sessions') return 'session';
+  if (name === 'mcp__panel__wrap_up') return 'wrap';
+  if (name === 'mcp__panel__open') return 'open';
+  if (name === 'mcp__panel__pr') return 'pr';
+  if (name === 'mcp__panel__defter') return 'defter';
   if (name.startsWith('mcp__')) return 'mcp';
   return 'other';
 }
@@ -65,6 +90,15 @@ const CATEGORY_TEXT = {
   web: (n) => `${n} web isteği`,
   mcp: (n) => `${n} MCP aracı`,
   artifact: (n) => (n > 1 ? `${n} artifact yayımlandı` : 'artifact yayımlandı'),
+  sim: (n) => `${n} simülatör işlemi`,
+  browser: (n) => `${n} tarayıcı işlemi`,
+  terminal: (n) => `${n} terminal işlemi`,
+  widget: (n) => (n > 1 ? `${n} görsel gösterildi` : 'görsel gösterildi'),
+  session: (n) => `${n} yan oturum işlemi`,
+  wrap: () => 'özet',
+  open: (n) => (n > 1 ? `${n} dosya açıldı` : 'dosya açıldı'),
+  pr: (n) => `${n} PR işlemi`,
+  defter: (n) => (n > 1 ? `defterde ${n} işlem` : 'defter'),
   other: (n) => `${n} araç`,
 };
 
@@ -129,6 +163,17 @@ function relPath(tab, p) {
 
 function toolLabel(name) {
   if (name === PUBLISH_TOOL) return 'Artifact yayımlandı';
+  if (name === SIM_TOOL) return 'Simülatör';
+  if (name === BROWSER_TOOL) return 'Tarayıcı';
+  if (name === TERMINAL_TOOL) return 'Terminal';
+  if (name === SHOW_TOOL) return 'Gösterildi';
+  if (name === 'mcp__panel__show_widget') return 'Görsel';
+  if (name === 'mcp__panel__sessions') return 'Yan oturum';
+  if (name === 'mcp__panel__wrap_up') return 'Özet';
+  if (name === 'mcp__panel__open') return 'Açıldı';
+  if (name === 'mcp__panel__pr') return 'PR';
+  if (name === 'mcp__panel__defter') return 'Defter';
+  if (name === 'mcp__panel__danis') return 'Danışma';
   if (name.startsWith('mcp__')) {
     const [, server, ...rest] = name.split('__');
     return `${server} · ${rest.join('__')}`;
@@ -148,6 +193,35 @@ function toolSummary(tab, name, input = {}) {
     case 'Task': case 'Agent': return input.description || input.subagent_type || '';
     case 'Skill': return input.skill || input.command || '';
     case PUBLISH_TOOL: return input.title || relPath(tab, input.file_path) || '';
+    case SIM_TOOL: {
+      const where = input.x != null ? ` (${input.x}, ${input.y})${input.x2 != null ? ` → (${input.x2}, ${input.y2})` : ''}` : '';
+      const extra = input.device || input.name || input.text || input.orientation || input.url || (input.app_path ? relPath(tab, input.app_path) : '') || input.bundle_id || '';
+      return (SIM_ACTIONS[input.action] || input.action || '') + where + (extra ? ' · ' + extra : '');
+    }
+    case BROWSER_TOOL: {
+      const where = input.ref || (input.x != null ? `(${input.x}, ${input.y})` : '');
+      const extra = input.url || input.query || input.text || (input.value != null ? String(input.value) : '') || input.preset || input.code?.split('\n')[0] || '';
+      return [BROWSER_ACTIONS[input.action] || input.action || '', where, extra].filter(Boolean).join(' · ').slice(0, 200);
+    }
+    case TERMINAL_TOOL:
+      return [TERMINAL_ACTIONS[input.action] || input.action || '', input.tab_id != null ? 'sekme ' + input.tab_id : '', input.command || ''].filter(Boolean).join(' · ');
+    case 'mcp__panel__wrap_up':
+      return String(input.recap || '').slice(0, 120);
+    case 'mcp__panel__sessions':
+      return [{ start: 'başlat', list: 'liste', send: 'mesaj', read: 'okuma' }[input.action] || input.action || '', input.title || (input.id != null ? 'oturum ' + input.id : ''), input.message || ''].filter(Boolean).join(' · ').slice(0, 200);
+    case 'mcp__panel__open':
+      return `${input.action === 'reveal' ? 'Finder' : 'editör'} · ${relPath(tab, input.path)}${input.line ? ':' + input.line : ''}`;
+    case 'mcp__panel__defter':
+      return [DF_OPS[input.islem] || input.islem || '', input.id || '', input.tur ? DF_TYPES[input.tur] || input.tur : '', input.metin || ''].filter(Boolean).join(' · ').slice(0, 200);
+    case 'mcp__panel__danis': {
+      const k = input.kaynak || {};
+      const from = k.kol ? 'kol ' + k.kol : [k.oturum ? String(k.oturum).slice(0, 8) : '', k.an || ''].filter(Boolean).join(' · ');
+      return [from, input.soru || ''].filter(Boolean).join(' · ').slice(0, 200);
+    }
+    case 'mcp__panel__pr':
+      return [{ status: 'durum', watch: input.autofix ? 'izle · otomatik düzeltme' : 'izle', unwatch: 'izlemeyi bırak' }[input.action] || input.action || '', input.number ? '#' + input.number : ''].filter(Boolean).join(' · ');
+    case SHOW_TOOL:
+      return input.action === 'file' ? `${relPath(tab, input.path)}${input.line ? ':' + input.line : ''}` : 'değişiklikler' + (input.path ? ' · ' + relPath(tab, input.path) : '');
     case 'TodoWrite': {
       const t = input.todos || [];
       return `${t.filter((x) => x.status === 'completed').length}/${t.length}`;
@@ -233,28 +307,44 @@ function selectEl(cls, title, options, onchange) {
 
 // ---------- Sekme oluşturma ----------
 
+// opts.background: yan oturum (sessions.js); hesap, görünüm ve etkin sekme değişmez. opts.parentId: başlatan sohbet
 async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   const a = acct(acctId);
   const pane = state.panes[acctId];
   if (!a || !pane) return;
-  if (state.active !== acctId || state.view[acctId] !== 'code') selectAccount(acctId, 'code');
+  const bg = !!opts.background;
+  if (!bg && (state.active !== acctId || state.view[acctId] !== 'code')) selectAccount(acctId, 'code');
 
   const prefs = state.cfg.chatPrefs?.[acctId] || {};
   const tab = {
     kind: 'chat', acctId, cwd, mode, title: '…', exited: false, activity: false, attention: false,
     chatId: null, sessionId: resumeId || null, busy: false, models: [], model: '', effort: prefs.effort || '',
-    modelChoice: prefs.model || '', permissionMode: prefs.mode || '',
-    toolCards: new Map(), live: new Map(), images: [], slash: [], pendingPerms: new Map(),
-    group: null, todos: [], started: false,
+    modelChoice: prefs.model || '', permissionMode: prefs.mode || '', envId: opts.envId ?? envOf(acctId)?.id ?? '',
+    toolCards: new Map(), live: new Map(), attachments: [], slash: [], pendingPerms: new Map(),
+    group: null, todos: [], started: false, parentId: opts.parentId || null, autoTurns: 0, pendingEvents: [], pr: null,
   };
 
-  // --- Üst çubuk
-  const titleEl = h('div', { class: 'ct-title' }, a.name, h('span', { class: 'ct-sep' }, '·'), h('span', { class: 'ct-folder' }, tilde(cwd).split('/').pop() || cwd));
+  const env = environmentsList().find((e) => e.id === tab.envId) || null;
+  tab.envName = env?.name || '';
+
+  // --- Üst satır: mesajların üstünde yüzer (hesap ve klasör adı sekmede ve kenar çubuğunda)
   const statusEl = h('span', { class: 'ct-status' });
-  const sideBtn = h('button', { class: 'icon-btn', title: 'Yan paneli aç/kapat', onclick: () => toggleSide(tab) }, icon('panel', 17));
+  const sideBtn = h('button', { class: 'icon-btn', title: 'Yan paneli aç/kapat', onclick: () => toggleSide(tab) }, icon('panel', 16));
   const top = h('div', { class: 'chat-top' },
-    titleEl, statusEl, h('span', { class: 'spacer' }),
-    h('button', { class: 'top-btn', title: 'Bu oturumu terminalde aç', onclick: () => openInTerminal(tab) }, icon('terminal', 15), 'Terminal'),
+    tab.parentId ? h('button', { class: 'top-btn', title: 'Bu yan oturumu başlatan sohbete git', onclick: () => {
+      const p = chatsById.get(tab.parentId);
+      if (p) activateTab(p.acctId, p); else toast('Başlatan sohbet kapanmış.');
+    } }, icon('back', 14), 'Başlatan sohbet') : null,
+    statusEl, h('span', { class: 'spacer' }),
+    tab.prChip = h('button', { class: 'top-btn pr-chip', hidden: true, onclick: () => prMenu(tab) }),
+    // Ahtapotun başında görünür (renderer/octopus.js → refreshOctopusPanes)
+    tab.octoBtn = h('button', { class: 'top-btn octo-toggle', hidden: true, title: 'Ahtapotu yanda aç/kapat', onclick: () => toggleOctopusInChat(tab) }, icon('octopus', 14), 'Ahtapot'),
+    h('button', { class: 'top-btn changes-toggle', title: 'Değişiklikleri yanda aç/kapat (⌘⇧D)', onclick: () => toggleChangesInChat(tab) },
+      icon('code', 14), 'Değişiklikler', tab.changesBadge = h('span', { class: 'top-badge', hidden: true })),
+    h('button', { class: 'top-btn browser-toggle', title: 'Tarayıcıyı yanda aç/kapat (⌘⇧B)', onclick: () => toggleBrowserInChat(tab) }, icon('globe', 14), 'Tarayıcı'),
+    h('button', { class: 'top-btn sim-toggle', title: 'iOS simülatörünü yanda aç/kapat (⌘⇧S)', onclick: () => toggleSimulatorInChat(tab) }, icon('phone', 14), 'Simülatör'),
+    h('button', { class: 'top-btn', title: 'Bu oturumu terminalde aç', onclick: () => openInTerminal(tab) }, icon('terminal', 14), 'Terminal'),
+    h('button', { class: 'icon-btn chat-more', title: 'Sohbet menüsü', onclick: (e) => chatMenu(tab, e.currentTarget) }, icon('more', 16)),
     sideBtn);
 
   // --- Mesaj listesi ve boş ekran
@@ -269,8 +359,8 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   const input = h('textarea', { class: 'composer-input', rows: 1, placeholder: 'Claude\'a yazın…' });
   const attach = h('div', { class: 'composer-attach' });
   const slashBox = h('div', { class: 'slash-box', hidden: true });
-  const fileInput = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true,
-    onchange: (e) => { [...e.target.files].forEach((f) => addImage(tab, f)); e.target.value = ''; } });
+  const fileInput = h('input', { type: 'file', multiple: true, hidden: true,
+    onchange: (e) => { addAttachments(tab.attachments, attach, [...e.target.files]); e.target.value = ''; } });
   const sendBtn = h('button', { class: 'send-btn', title: 'Gönder (Enter)', onclick: () => submit(tab) }, icon('arrowUp', 17));
   const stopBtn = h('button', { class: 'stop-btn', title: 'Durdur (Esc)', hidden: true, onclick: () => interrupt(tab) }, h('span'));
   const modeSel = selectEl('meta-select', 'İzin modu (Shift+Tab)', MODES, (v) => changeMode(tab, v));
@@ -280,42 +370,55 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   const composer = h('div', { class: 'composer' },
     h('div', { class: 'composer-inner' },
       slashBox,
+      tab.planBar = planBar(),
       h('div', { class: 'composer-box' },
         attach, input,
         h('div', { class: 'composer-bar' },
-          h('button', { class: 'plus-btn', title: 'Görsel ekle', onclick: () => fileInput.click() }, icon('plus', 17)),
+          h('button', { class: 'plus-btn', title: 'Dosya veya fotoğraf ekle', onclick: () => fileInput.click() }, icon('plus', 17)),
           fileInput,
+          connectorsButton(acctId, () => tab.cwd),
           h('span', { class: 'spacer' }),
           stopBtn, sendBtn)),
       h('div', { class: 'composer-meta' },
         h('span', { class: 'meta-folder', title: cwd }, icon('folder', 14), tilde(cwd).split('/').pop() || cwd),
+        env ? h('span', { class: 'meta-folder meta-env', title: `Ortam: ${env.name} (${envSummary(env)})` }, icon('box', 14), env.name) : null,
+        tab.wtChip = h('span', { class: 'meta-folder meta-wt', hidden: true }),
         modeSel,
         h('span', { class: 'spacer' }),
-        picker, usageButton(acctId))));
+        tab.ctxRing = contextRing(tab), picker, usageButton(acctId))));
 
   // --- Yan panel
   const progressBody = h('div', { class: 'side-body' }, h('div', { class: 'side-empty' }, 'Claude görev listesi oluşturunca burada görünür.'));
   const progressCount = h('span', { class: 'side-count' });
-  const contextBody = h('div', { class: 'side-body' }, h('div', { class: 'side-row' }, icon('folder', 14), tilde(cwd)));
+  const contextBody = h('div', { class: 'side-body' }, h('div', { class: 'side-row' }, icon('folder', 14), tilde(cwd)),
+    env ? h('div', { class: 'side-row' }, icon('box', 14), `Ortam: ${tab.envName}`) : null);
   const sessionBody = h('div', { class: 'side-body' }, h('div', { class: 'side-empty' }, '—'));
   const side = h('aside', { class: 'chat-side' },
-    h('details', { class: 'side-sec', open: true }, h('summary', {}, 'İlerleme', progressCount), progressBody),
-    h('details', { class: 'side-sec', open: true }, h('summary', {}, 'Bağlam'), contextBody),
+    // İlerleme ve Bağlam her sohbette kapalı başlar, kullanıcı tıklayınca açılır
+    // (görev sayısı başlıkta görünür; yarım görevler yazma alanının üstünde de var).
+    h('details', { class: 'side-sec side-progress' }, h('summary', {}, 'İlerleme', progressCount), progressBody),
+    h('details', { class: 'side-sec side-context' }, h('summary', {}, 'Bağlam'), contextBody),
     h('details', { class: 'side-sec', open: true }, h('summary', {}, 'Oturum'), sessionBody));
 
   const main = h('div', { class: 'chat-main' }, top, scroller, composer);
   const artPane = h('div', { class: 'chat-art' });
-  const host = h('div', { class: 'term-host chat-host active' + (window.innerWidth > 1250 ? ' side-open' : '') }, main, artPane, side);
+  const simPane = h('div', { class: 'chat-sim' });
+  const browserPane = h('div', { class: 'chat-browser' });
+  const changesPane = h('div', { class: 'chat-changes' });
+  const octoPane = h('div', { class: 'chat-octo' });
+  const host = h('div', { class: 'term-host chat-host' + (bg ? '' : ' active') + (window.innerWidth > 1250 ? ' side-open' : '') }, main, artPane, simPane, browserPane, changesPane, octoPane, side);
   host.__tab = tab;
   Object.assign(tab, {
-    host, list, scroller, artPane, welcome, input, attach, slashBox, sendBtn, stopBtn, picker, modeSel,
+    host, list, scroller, artPane, simPane, browserPane, changesPane, octoPane, welcome, input, attach, slashBox, sendBtn, stopBtn, picker, modeSel,
     statusEl, progressBody, progressCount, contextBody, sessionBody,
   });
   syncSelects(tab);
 
   pane.termArea.append(host);
-  pane.launcher.classList.remove('active');
-  for (const t of state.tabs[acctId]) t.host.classList.remove('active');
+  if (!bg) {
+    pane.launcher.classList.remove('active');
+    for (const t of state.tabs[acctId]) t.host.classList.remove('active');
+  }
 
   wireComposer(tab);
   list.addEventListener('click', (e) => {
@@ -324,7 +427,7 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   });
 
   state.tabs[acctId].push(tab);
-  state.activeTab[acctId] = tab;
+  if (!bg) state.activeTab[acctId] = tab;
   renderTabs(acctId);
   renderSidebar();
   setStatus(tab, 'busy', 'Başlatılıyor');
@@ -336,35 +439,62 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
       markStarted(tab);
       for (const m of r.messages) renderHistoryMessage(tab, m);
       endGroup(tab);
+      tab.wrapBox = null;
+      closeWrapBoxes(tab); // geçmişteki kutular cevaplanmış sayılır
       divider(tab, 'Buradan devam ediliyor');
     }
   }
 
+  if (env?.setup.trim()) setStatus(tab, 'busy', 'Ortam hazırlanıyor');
   const res = await window.panel.chatStart({
-    accountId: acctId, cwd, mode, resumeId,
+    accountId: acctId, cwd, mode, resumeId, envId: tab.envId || undefined,
     model: tab.modelChoice || undefined,
     effort: tab.effort || undefined,
     permissionMode: tab.permissionMode || undefined,
+    parentId: tab.parentId || undefined, title: opts.title || undefined, worktree: !!opts.worktree || undefined,
+    octopus: opts.octopus || undefined,
   });
   if (!res.ok) {
     setStatus(tab, 'error', 'Başlatılamadı');
     markStarted(tab);
     note(tab, 'Claude Code başlatılamadı: ' + res.error + loginHint(res.error), 'error');
+    tab.startError = res.error;
     tab.exited = true;
     renderTabs(acctId);
-    return;
+    return tab;
   }
   tab.chatId = res.id;
   tab.cwd = res.cwd;
-  tab.title = res.title;
+  tab.octopusId = res.octopus || null; // ahtapotun başı (renderer/octopus.js)
+  tab.title = opts.title || res.title;
+  // Ayrı çalışma kopyası: yazma alanının altında dal adı (worktrees.js)
+  if (res.worktree) {
+    tab.worktree = res.worktree;
+    tab.wtChip.replaceChildren(icon('layers', 14), res.worktree.branch);
+    tab.wtChip.title = `Ayrı çalışma kopyası: ${tilde(res.worktree.path)}\nDal: ${res.worktree.branch}\nSekme kapanınca kopya temizse silinir, değişiklik varsa korunur.`;
+    tab.wtChip.hidden = false;
+  }
   chatsById.set(res.id, tab);
+  tab.browserView?.register(); // sohbet başlamadan açılmış tarayıcı bölmesi
+  refreshChanges(tab);
   setStatus(tab, 'idle', '');
   renderTabs(acctId);
   renderSidebar();
-  focusCurrent();
+  if (!bg) focusCurrent();
   scrollDown(tab, true);
-  if (opts.send) { tab.input.value = opts.send; submit(tab); }
+  if (opts.send || opts.attachments?.length) {
+    tab.input.value = opts.send || '';
+    tab.attachments.push(...(opts.attachments || []));
+    submit(tab);
+  }
   else if (opts.draft) setDraft(tab, opts.draft);
+  return tab;
+}
+
+// Üst satırdaki "…" menüsü
+function chatMenu(tab, anchor) {
+  if (openMenu.anchor === anchor) return closeMenu();
+  openMenu(anchor, [octopusMenuItem(tab), memoryMenuItem(tab)]); // renderer/octopus.js, renderer/hafiza.js
 }
 
 function setDraft(tab, text) {
@@ -400,6 +530,12 @@ function append(tab, el) {
 function note(tab, text, cls = '') {
   return append(tab, h('div', { class: 'chat-note ' + cls }, text));
 }
+// Açılış hook'unun çıktısı uzun olabilir: tek satırlık, kapalı bir özet; tıklanınca tam metin.
+function hookNote(msg, text) {
+  const n = text.split('\n').filter((l) => l.trim()).length;
+  const label = `${(msg.hook_name || msg.hook_event).split(':')[0]} hook'u çalıştı` + (n > 1 ? ` · ${n} satır` : '');
+  return h('details', { class: 'hook-note' }, h('summary', {}, label), h('div', { class: 'hook-body' }, text));
+}
 function divider(tab, text) {
   endGroup(tab);
   return append(tab, h('div', { class: 'chat-divider' }, h('span', {}, text)));
@@ -417,14 +553,19 @@ function setBusy(tab, busy) {
 }
 
 function userBubble(tab, content, queued) {
-  const text = typeof content === 'string' ? content : (content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-  const imgs = Array.isArray(content) ? content.filter((b) => b.type === 'image') : [];
+  const blocks = Array.isArray(content) ? content : [];
+  const texts = typeof content === 'string' ? [content] : blocks.filter((b) => b.type === 'text').map((b) => b.text);
+  const files = texts.map(parseFileBlock).filter(Boolean);
+  const text = texts.filter((t) => !parseFileBlock(t)).join('\n');
+  const imgs = blocks.filter((b) => b.type === 'image');
   // Sistem tarafından eklenen içerikleri (komut çıktıları, hatırlatmalar) gizle
-  if (!imgs.length && /^\s*<(command-|local-command|system-reminder|bash-)/.test(text)) return null;
+  if (!imgs.length && !files.length && /^\s*<(command-|local-command|system-reminder|bash-)/.test(text)) return null;
   markStarted(tab);
   endGroup(tab);
   const el = h('div', { class: 'msg-user' + (queued ? ' queued' : '') },
     imgs.length ? h('div', { class: 'user-imgs' }, imgs.map((b) => h('img', { src: `data:${b.source?.media_type};base64,${b.source?.data}` }))) : null,
+    files.length ? h('div', { class: 'user-files' }, files.map((f) =>
+      h('div', { class: 'attach-file', title: f.path || f.name }, fileChipBody(f.name, f.embedded ? 'İçerik eklendi' : 'Yol verildi')))) : null,
     text ? h('div', { class: 'user-text' }, text) : null);
   if (!tab.titleSet && text) {
     tab.titleSet = true;
@@ -517,6 +658,9 @@ function toolCard(tab, block, parentCard) {
     if (nearBottom(tab)) scrollDown(tab, true);
   }
   if (name === 'TodoWrite') updateProgress(tab, input.todos);
+  if (FILE_TOOLS.has(name) || name === 'NotebookEdit') recordEdit(tab, name, input);
+  if (name === 'mcp__panel__show_widget') showWidget(tab, card, input);
+  if (name === WRAP_TOOL) showWrapUp(tab, input);
   return el;
 }
 
@@ -549,6 +693,11 @@ function toolResult(tab, block) {
   if (!text || card.name === 'TodoWrite') return;
   if (['Edit', 'MultiEdit', 'Write'].includes(card.name) && !block.is_error) return;
   card.body.append(pre(text, block.is_error ? 'err' : 'out'));
+  // Defter yazması grup kapalıyken de görünür (grubun altında tek satır, "Geri al" ile)
+  if (card.name === 'mcp__panel__defter' && !block.is_error) {
+    const x = defterChatLine(tab, card, text);
+    if (x) { const stick = nearBottom(tab); (card.group ? card.group.shots : card.body).append(x); if (stick) scrollDown(tab, true); }
+  }
 }
 
 function finishGroups(tab) {
@@ -567,10 +716,12 @@ function updateProgress(tab, todos) {
   tab.progressCount.textContent = tab.todos.length ? `${done} / ${tab.todos.length}` : '';
   tab.progressBody.innerHTML = '';
   tab.progressBody.append(tab.todos.length ? todoList(tab.todos) : h('div', { class: 'side-empty' }, 'Görev yok.'));
+  updatePlanBar(tab);
 }
 
 function updateContext(tab, init) {
   const rows = [h('div', { class: 'side-row' }, icon('folder', 14), tilde(init.cwd || tab.cwd))];
+  if (tab.envName) rows.push(h('div', { class: 'side-row' }, icon('box', 14), `Ortam: ${tab.envName}`));
   const mcp = init.mcp_servers || [];
   if (mcp.length) {
     rows.push(h('div', { class: 'side-label' }, 'MCP sunucuları'));
@@ -663,7 +814,12 @@ function handleChatMsg(chatId, msg) {
       finishGroups(tab);
       endGroup(tab);
       setBusy(tab, false);
+      settleWrapUp(tab);
+      updatePlanBar(tab);
+      deliverSessionEvents(tab);
+      offerRetention(tab); // renderer/compaction.js
       refreshUsageSoon(tab.acctId);
+      refreshChanges(tab);
       const secs = Math.round((msg.duration_ms || 0) / 1000);
       updateSession(tab, { lastTurn: secs >= 60 ? `${Math.floor(secs / 60)} dk ${secs % 60} sn` : `${secs} sn` });
       if (msg.is_error || msg.subtype !== 'success') {
@@ -710,19 +866,20 @@ function handleSystem(tab, msg) {
       else if (out && /SessionStart/.test(msg.hook_event)) {
         let text = out;
         try { const j = JSON.parse(out); text = j.systemMessage || j.hookSpecificOutput?.additionalContext || out; } catch {}
-        tab.hookText = String(text).slice(0, 600);
-        tab.welcome.querySelector('.welcome-hook')?.remove();
-        if (!tab.started) tab.welcome.append(h('div', { class: 'welcome-hook' }, tab.hookText));
-        else note(tab, tab.hookText, 'muted hook');
+        tab.hookText = String(text).slice(0, 8000);
+        tab.welcome.querySelector('.hook-note')?.remove();
+        if (!tab.started) tab.welcome.append(hookNote(msg, tab.hookText));
+        else append(tab, hookNote(msg, tab.hookText));
       }
       return;
     }
     case 'status':
       if (msg.permissionMode) { tab.permissionMode = msg.permissionMode; syncSelects(tab); }
-      if (msg.status === 'compacting') note(tab, 'Sohbet özetleniyor…', 'muted');
+      compactStatus(tab, msg); // renderer/compaction.js
       return;
     case 'compact_boundary':
       divider(tab, 'Sohbet özetlendi');
+      tab.octoView?.ink(); // ahtapotun başında mürekkep (renderer/octopus.js)
       return;
     case 'api_retry':
       setStatus(tab, 'busy', `Yeniden deneniyor (${msg.attempt}/${msg.max_retries})`);
@@ -834,7 +991,9 @@ function handlePermission(chatId, req) {
   markStarted(tab);
   const reply = (r) => {
     window.panel.chatPermissionReply(chatId, req.rid, r);
+    card.dataset.reply = r.behavior;
     card.classList.add('answered');
+    tab.octoView?.refresh();
   };
 
   let card;
@@ -854,8 +1013,11 @@ function handlePermission(chatId, req) {
         h('button', { class: 'ghost-btn', onclick: () => reply({ behavior: 'deny', message: 'Kullanıcı reddetti' }) }, 'Reddet'),
         h('button', { class: 'ghost-btn danger', onclick: () => reply({ behavior: 'deny', message: 'Kullanıcı reddetti ve durdurdu', interrupt: true }) }, 'Reddet ve durdur')));
   }
+  // Başın "yeni kol" kartı ahtapot bölmesinde tomurcuk olarak görünür (renderer/octopus.js → pendingStarts)
+  if (req.toolName === 'mcp__panel__sessions' && req.input?.action === 'start') card.dataset.start = String(req.input.title || 'Yeni kol');
   endGroup(tab);
   tab.pendingPerms.set(req.rid, card);
+  tab.octoView?.refresh();
   append(tab, card);
   scrollDown(tab, true);
   if (!isVisible(tab) || !document.hasFocus()) flagAttention(tab, 'Claude onayınızı bekliyor');
@@ -906,6 +1068,7 @@ function handlePermissionDone(chatId, rid) {
   card.classList.add('answered');
   for (const b of card.querySelectorAll('button, input')) b.disabled = true;
   if (!tab.pendingPerms.size && tab.attention && isVisible(tab)) clearFlags(tab);
+  tab.octoView?.refresh();
 }
 
 // ---------- Model, efor, mod ----------
@@ -999,21 +1162,55 @@ function wireComposer(tab) {
     else if (e.key === 'Tab' && e.shiftKey) { e.preventDefault(); cycleMode(tab); }
   });
   input.addEventListener('paste', (e) => {
-    const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/'));
-    if (files.length) { e.preventDefault(); files.forEach((f) => addImage(tab, f)); }
+    const files = [...(e.clipboardData?.files || [])];
+    if (files.length) { e.preventDefault(); addAttachments(tab.attachments, tab.attach, files); }
   });
   tab.host.addEventListener('dragover', (e) => { e.preventDefault(); });
   tab.host.addEventListener('drop', (e) => {
     const files = [...(e.dataTransfer?.files || [])];
     if (!files.length) return;
     e.preventDefault();
-    for (const f of files) {
-      if (f.type.startsWith('image/')) addImage(tab, f);
-      else if (f.path) { input.value += (input.value ? ' ' : '') + '@' + relPath(tab, f.path); autosize(); }
-    }
+    addAttachments(tab.attachments, tab.attach, files);
     input.focus();
   });
   tab.scroller.addEventListener('scroll', () => { tab.stick = nearBottom(tab); });
+  wireReplySelection(tab);
+}
+
+// Claude'un yanıtında metin seçilince üstünde "Yanıtla" düğmesi; tıklanınca seçim alıntı olarak yazma alanına girer
+function wireReplySelection(tab) {
+  const btn = h('button', { class: 'reply-sel', hidden: true, title: 'Seçili metni alıntılayarak yanıtla',
+    onmousedown: (e) => e.preventDefault(), // seçim kaybolmasın
+    onclick: () => { quoteReply(tab, btn.dataset.text || ''); btn.hidden = true; window.getSelection()?.removeAllRanges(); },
+  }, icon('reply', 14), 'Yanıtla');
+  tab.scroller.append(btn);
+  tab.replyBtn = btn;
+  const update = () => {
+    const sel = window.getSelection();
+    const text = sel && !sel.isCollapsed ? sel.toString().trim() : '';
+    const range = text ? sel.getRangeAt(0) : null;
+    const node = range?.commonAncestorContainer;
+    const el = node?.nodeType === 1 ? node : node?.parentElement;
+    if (!text || !el?.closest('.msg-assistant') || !tab.list.contains(el)) { btn.hidden = true; return; }
+    const r = range.getBoundingClientRect();
+    const box = tab.scroller.getBoundingClientRect();
+    btn.dataset.text = text;
+    btn.hidden = false;
+    const left = Math.min(Math.max(r.left - box.left + r.width / 2 - btn.offsetWidth / 2, 8), box.width - btn.offsetWidth - 8);
+    const above = r.top - box.top - btn.offsetHeight - 8;
+    btn.style.left = left + 'px';
+    btn.style.top = (above > 30 ? above : r.bottom - box.top + 8) + tab.scroller.scrollTop + 'px';
+  };
+  tab.list.addEventListener('mouseup', () => setTimeout(update, 0));
+  tab.list.addEventListener('keyup', (e) => { if (e.shiftKey) update(); });
+  document.addEventListener('selectionchange', () => { if (!btn.hidden && window.getSelection()?.isCollapsed) btn.hidden = true; });
+}
+
+function quoteReply(tab, text) {
+  if (!text) return;
+  const quote = text.split('\n').map((l) => '> ' + l).join('\n');
+  const cur = tab.input.value.replace(/\s+$/, '');
+  setDraft(tab, (cur ? cur + '\n\n' : '') + quote + '\n\n');
 }
 
 function updateSlash(tab) {
@@ -1029,24 +1226,111 @@ function updateSlash(tab) {
   box.hidden = !matches.length;
 }
 
-function addImage(tab, file) {
-  const reader = new FileReader();
-  reader.onload = () => {
-    const [meta, data] = String(reader.result).split(',');
-    const mediaType = meta.match(/data:(.*?);/)?.[1] || 'image/png';
-    const img = { mediaType, data };
-    tab.images.push(img);
-    const thumb = h('div', { class: 'attach-thumb' },
-      h('img', { src: reader.result }),
-      h('button', { class: 'attach-x', onclick: () => { tab.images.splice(tab.images.indexOf(img), 1); thumb.remove(); } }, '×'));
-    tab.attach.append(thumb);
-  };
-  reader.readAsDataURL(file);
+// ---------- Ekler (dosya ve fotoğraf) ----------
+// Görsel → görsel bloğu (büyükse küçültülür). Küçük metin dosyası → içeriğiyle bir metin bloğu.
+// Diğerleri (PDF, Office belgesi, büyük dosya, klasör) → yalnız yolu gider; Claude Read aracıyla okur.
+// Dosya blokları <attached_file …> etiketiyle yazılır; geçmiş yüklenirken de kart olarak çizilir.
+
+const ATTACH_IMAGE = /^image\/(png|jpeg|gif|webp)$/;
+const IMAGE_MAX = 3.75 * 1024 * 1024; // base64 ile 5 MB API sınırının altında kalsın
+const TEXT_MAX = 256 * 1024;
+const TEXT_TYPE = /^text\/|json|xml|javascript|yaml|toml|x-sh/;
+const TEXT_EXT = /\.(txt|md|markdown|mdx|csv|tsv|json|jsonl|ya?ml|toml|ini|cfg|conf|env|xml|svg|html?|css|scss|less|m?js|cjs|jsx|tsx?|py|rb|go|rs|java|kts?|swift|c|cc|cpp|h|hpp|cs|php|sh|zsh|bash|fish|sql|graphql|vue|svelte|lua|r|log|diff|patch)$/i;
+
+const readAsDataUrl = (blob) => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(String(r.result));
+  r.onerror = () => rej(r.error);
+  r.readAsDataURL(blob);
+});
+
+// Büyük fotoğrafı uzun kenarı 2048 px olacak şekilde küçült (saydamlık için JPEG dışındakiler WebP)
+async function shrinkImage(file) {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, 2048 / Math.max(bmp.width, bmp.height));
+  const canvas = new OffscreenCanvas(Math.round(bmp.width * scale), Math.round(bmp.height * scale));
+  canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  const out = await canvas.convertToBlob({ type: file.type === 'image/jpeg' ? 'image/jpeg' : 'image/webp', quality: 0.85 });
+  return out.size <= IMAGE_MAX ? out : null;
+}
+
+async function readAttachment(file) {
+  const path = window.panel.filePath(file);
+  const name = file.name || path.split('/').pop() || 'dosya';
+  const base = { name, path, size: file.size };
+  try {
+    if (ATTACH_IMAGE.test(file.type)) {
+      const blob = file.size > IMAGE_MAX ? await shrinkImage(file) : file;
+      if (blob) {
+        const url = await readAsDataUrl(blob);
+        return { ...base, kind: 'image', mediaType: blob.type, data: url.slice(url.indexOf(',') + 1), url };
+      }
+    } else if (file.size <= TEXT_MAX && (TEXT_TYPE.test(file.type) || TEXT_EXT.test(name))) {
+      const text = await file.text();
+      if (!text.includes('\u0000')) return { ...base, kind: 'text', text };
+    }
+  } catch {} // okunamayan (ör. klasör) → yolu verilir
+  if (path) return { ...base, kind: 'file' };
+  toast(`${name} eklenemedi: dosya okunamadı`);
+  return null;
+}
+
+// list: ek dizisi (sekmenin ya da Yeni sohbet ekranının), el: kartların çizildiği kutu
+async function addAttachments(list, el, files) {
+  for (const f of files) {
+    const a = await readAttachment(f);
+    if (a) list.push(a);
+  }
+  renderAttachments(list, el);
+}
+
+function renderAttachments(list, el) {
+  el.innerHTML = '';
+  for (const a of list) {
+    const remove = h('button', { class: 'attach-x', title: 'Kaldır', onclick: () => { list.splice(list.indexOf(a), 1); renderAttachments(list, el); } }, '×');
+    el.append(a.kind === 'image'
+      ? h('div', { class: 'attach-thumb', title: a.name }, h('img', { src: a.url }), remove)
+      : h('div', { class: 'attach-file', title: a.path || a.name }, fileChipBody(a.name, a.kind === 'text' ? 'İçerik eklendi' : 'Yol verildi'), remove));
+  }
+}
+
+function fileChipBody(name, sub) {
+  const ext = (name.match(/\.([^.]+)$/)?.[1] || '').toUpperCase().slice(0, 5);
+  return [h('span', { class: 'af-ic' }, icon('file', 16)),
+    h('span', { class: 'af-text' }, h('span', { class: 'af-name' }, name), h('small', {}, [ext, sub].filter(Boolean).join(' · ')))];
+}
+
+const xmlAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+const xmlUnattr = (s) => s.replace(/&lt;/g, '<').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+
+function fileBlockText(a) {
+  const attrs = `name="${xmlAttr(a.name)}"` + (a.path ? ` path="${xmlAttr(a.path)}"` : '');
+  return a.kind === 'text'
+    ? `<attached_file ${attrs}>\n${a.text}\n</attached_file>`
+    : `<attached_file ${attrs}>İçerik eklenmedi; gerekirse dosyayı bu yoldan okuyun.</attached_file>`;
+}
+
+function parseFileBlock(text) {
+  const m = /^<attached_file name="([^"]*)"(?: path="([^"]*)")?>([\s\S]*)<\/attached_file>$/.exec(text);
+  return m && { name: xmlUnattr(m[1]), path: m[2] ? xmlUnattr(m[2]) : '', embedded: m[3].startsWith('\n') };
+}
+
+// Gönderilen içerik: ek yoksa düz metin, varsa önce ekler sonra metin (Claude uygulaması gibi)
+function messageContent(text, atts) {
+  if (!atts.length) return text;
+  return [
+    ...atts.map((a) => (a.kind === 'image'
+      ? { type: 'image', source: { type: 'base64', media_type: a.mediaType, data: a.data } }
+      : { type: 'text', text: fileBlockText(a) })),
+    ...(text ? [{ type: 'text', text }] : []),
+  ];
 }
 
 function submit(tab) {
   const text = tab.input.value.trim();
-  if ((!text && !tab.images.length) || !tab.chatId) return;
+  if ((!text && !tab.attachments.length) || !tab.chatId) return;
+  if (tab.reborning) return toast('Yeniden doğuş sürüyor; bitince yazabilirsiniz.'); // renderer/dogus.js
   if (text === '/clear' || text === '/new') {
     tab.input.value = '';
     const { acctId, cwd } = tab;
@@ -1054,16 +1338,22 @@ function submit(tab) {
     createChatTab(acctId, cwd, 'new');
     return;
   }
-  const images = tab.images.splice(0);
+  const content = messageContent(text, tab.attachments.splice(0));
   tab.attach.innerHTML = '';
-  const content = images.length
-    ? [...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } })), { type: 'text', text }]
-    : text;
-  userBubble(tab, content, tab.busy);
-  window.panel.chatSend(tab.chatId, text, images);
   tab.input.value = '';
   tab.autosize?.();
   tab.slashBox.hidden = true;
+  sendMessage(tab, content);
+}
+
+// Kullanıcının mesajı olarak gider (yazma alanından ya da bir karttaki düğmeden; yazma alanındaki taslak korunur)
+function sendMessage(tab, content) {
+  if (!tab.chatId) return;
+  if (tab.reborning) return toast('Yeniden doğuş sürüyor; bitince yazabilirsiniz.');
+  tab.autoTurns = 0; // kullanıcı yazdı: yan oturum ve PR bildirimleri yeniden kendiliğinden iletilebilir
+  closeWrapBoxes(tab);
+  userBubble(tab, content, tab.busy);
+  window.panel.chatSend(tab.chatId, content);
   tab.stick = true;
   scrollDown(tab, true);
   if (!tab.busy) setBusy(tab, true);
@@ -1077,7 +1367,7 @@ async function interrupt(tab) {
 
 function openInTerminal(tab) {
   if (!tab.sessionId) { toast('Oturum henüz başlamadı; önce bir mesaj gönderin.'); return; }
-  launch(tab.acctId, tab.cwd, 'resume-id', tab.sessionId);
+  launch(tab.acctId, tab.cwd, 'resume-id', tab.sessionId, tab.envId);
 }
 
 // ---------- Geçmiş oturum seçici ----------

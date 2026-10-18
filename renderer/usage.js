@@ -104,7 +104,8 @@ function usageLevel(pct) {
   return pct >= 90 ? 'high' : pct >= 70 ? 'mid' : 'low';
 }
 
-function usageButton(acctId) {
+// 18 px halka: bar.setPct(0–100) ile dolar (kullanım ve bağlam göstergesi)
+function ringSvg() {
   const svgNS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(svgNS, 'svg');
   svg.setAttribute('viewBox', '0 0 18 18');
@@ -119,6 +120,12 @@ function usageButton(acctId) {
   bar.setAttribute('stroke-dasharray', RING_C);
   bar.setAttribute('transform', 'rotate(-90 9 9)');
   svg.append(track, bar);
+  bar.setPct = (pct) => bar.setAttribute('stroke-dashoffset', RING_C * (1 - Math.min(100, Math.max(0, pct)) / 100));
+  return { svg, bar };
+}
+
+function usageButton(acctId) {
+  const { svg, bar } = ringSvg();
 
   const btn = h('button', { class: 'usage-btn', 'data-acct-widget': acctId, onclick: () => {
     if (openMenu.anchor === btn) return closeMenu();
@@ -131,7 +138,7 @@ function usageButton(acctId) {
     btn.classList.toggle('loading', !!info.loading && pct == null);
     btn.classList.toggle('unknown', pct == null);
     btn.dataset.level = pct == null ? '' : usageLevel(pct);
-    bar.setAttribute('stroke-dashoffset', RING_C * (1 - Math.min(100, Math.max(0, pct ?? 0)) / 100));
+    bar.setPct(pct ?? 0);
     btn.title = pct == null ? 'Kullanım' : `Oturum limiti: %${Math.round(pct)} kullanıldı`;
     if (openMenu.anchor === btn) openMenu.el.refresh?.();
   };
@@ -206,10 +213,23 @@ function openUsage(anchor, acctId) {
 // Seçim klasöre (git köküne) özeldir; aynı klasördeki sohbet ve terminal aynı kaydı kullanır.
 
 const MCP_SCOPES = { local: 'Yalnız bu klasör', project: 'Proje · .mcp.json', user: 'Tüm klasörler', claudeai: 'claude.ai bağlayıcısı' };
+// claude.ai bağlayıcıları hesabın claude.ai girişine bağlıdır; orada eklenen bağlayıcı yeni Claude Code oturumlarında görünür
+const CONNECTORS_DIRECTORY = 'https://claude.ai/directory';
+const CONNECTORS_SETTINGS = 'https://claude.ai/settings/connectors';
+
+// Bağlayıcıyı bu klasörde aç/kapat (s.enabled yerinde güncellenir); açık sohbetlere de hemen uygulanır
+async function toggleMcp(acctId, folder, s) {
+  const r = await window.panel.mcpToggle(acctId, folder, s.name, !s.enabled);
+  if (r?.ok) s.enabled = r.enabled;
+  else toast('Bağlayıcı değiştirilemedi: ' + (r?.error || 'bilinmeyen hata'));
+  if (r?.liveErrors?.length) toast('Açık sohbete uygulanamadı (yeniden başlatınca geçerli olur): ' + r.liveErrors[0]);
+  for (const b of document.querySelectorAll(`[data-connectors="${acctId}"]`)) b.reload?.();
+  return r?.ok;
+}
 
 function connectorsButton(acctId, getFolder) {
   let data = null; // { servers, project } ya da { servers: [], error }
-  const btn = h('button', { class: 'pill-btn ghost icon-only connectors-btn' }, icon('plug', 15));
+  const btn = h('button', { class: 'pill-btn ghost icon-only connectors-btn', 'data-connectors': acctId }, icon('plug', 15));
   const load = async () => {
     const folder = getFolder();
     if (!folder) { data = null; return btn.refresh(); }
@@ -217,6 +237,7 @@ function connectorsButton(acctId, getFolder) {
     data = r?.ok ? r : { servers: [], error: r?.error || 'okunamadı' };
     btn.refresh();
   };
+  btn.reload = load;
   btn.refresh = () => {
     const list = data?.servers || [];
     const off = list.filter((s) => !s.enabled).length;
@@ -243,10 +264,7 @@ function openConnectors(anchor, acctId, folder, getData) {
       onclick: async (e) => {
         e.stopPropagation();
         el.disabled = true;
-        const r = await window.panel.mcpToggle(acctId, folder, s.name, !s.enabled);
-        if (r?.ok) s.enabled = r.enabled;
-        else toast('Bağlayıcı değiştirilemedi: ' + (r?.error || 'bilinmeyen hata'));
-        if (r?.liveErrors?.length) toast('Açık sohbete uygulanamadı (yeniden başlatınca geçerli olur): ' + r.liveErrors[0]);
+        await toggleMcp(acctId, folder, s);
         anchor.refresh();
       },
     },
@@ -263,6 +281,11 @@ function openConnectors(anchor, acctId, folder, getData) {
     body,
     h('div', { class: 'cn-foot' }, 'Bu klasör için geçerli: sohbette ve terminalde. Açık sohbetlere hemen uygulanır.'),
     h('div', { class: 'pop-sep' }),
+    h('button', { class: 'pop-item cn-browse', title: 'claude.ai bağlayıcı dizini, bu hesabın Web görünümünde',
+      onclick: (e) => { e.stopPropagation(); closeMenu(); openWeb(acctId, CONNECTORS_DIRECTORY); } },
+      icon('library', 15), h('span', { class: 'pop-label' }, h('span', {}, 'Bağlayıcılara göz at'))),
+    h('button', { class: 'pop-item cn-manage', onclick: (e) => { e.stopPropagation(); closeMenu(); openConnectorsManager(acctId, folder); } },
+      icon('briefcase', 15), h('span', { class: 'pop-label' }, h('span', {}, 'Bağlayıcıları yönet'))),
     h('button', { class: 'pop-item cn-plugins', onclick: (e) => { e.stopPropagation(); closeMenu(); openPlugins(acctId, folder); } },
       icon('layers', 15), h('span', { class: 'pop-label' }, h('span', {}, 'Eklentileri yönet')), icon('chevronDown', 13, 'cn-go')));
   pop.refresh = () => {
@@ -275,6 +298,89 @@ function openConnectors(anchor, acctId, folder, getData) {
   };
   pop.refresh();
   openPopover(anchor, pop);
+}
+
+// ---------- Bağlayıcıları yönet ----------
+// Claude uygulamasındaki "Manage connectors": bu klasörde geçerli bütün bağlayıcılar, nereden geldikleri,
+// neye bağlandıkları ve (bu klasörde açık sohbet varsa) bağlantı durumu. claude.ai bağlayıcıları claude.ai'de yönetilir.
+
+const MCP_GROUPS = { local: 'Yalnız bu klasör', project: 'Proje · .mcp.json', user: 'Tüm klasörler', claudeai: 'claude.ai' };
+const MCP_STATUS = { connected: 'Bağlı', failed: 'Hata', 'needs-auth': 'Giriş gerekli', pending: 'Bağlanıyor', disabled: 'Kapalı' };
+
+function openConnectorsManager(acctId, folder) {
+  const list = h('div', { class: 'mm-list' }, h('div', { class: 'cn-empty' }, 'Yükleniyor…'));
+  const note = h('div', { class: 'pl-note' });
+  const close = () => { modal.remove(); document.removeEventListener('keydown', onKey, true); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+  const web = (url) => { close(); openWeb(acctId, url); };
+  const modal = h('div', { class: 'modal mcp-modal' },
+    h('div', { class: 'modal-card pl-card' },
+      h('div', { class: 'modal-head' },
+        h('h2', {}, 'Bağlayıcılar'),
+        h('span', { class: 'pl-acct' }, [acct(acctId)?.name, tilde(folder).split('/').pop()].filter(Boolean).join(' · ')),
+        h('span', { class: 'spacer' }),
+        h('button', { class: 'icon-btn', title: 'Kapat', onclick: close }, icon('close', 16))),
+      note,
+      list,
+      h('div', { class: 'modal-actions' },
+        h('span', { class: 'pl-hint' }, 'Yerel bağlayıcı eklemek için terminalde ', h('code', {}, 'claude mcp add')),
+        h('span', { class: 'spacer' }),
+        h('button', { class: 'ghost-btn mm-browse', onclick: () => web(CONNECTORS_DIRECTORY) }, 'Göz at'),
+        h('button', { class: 'ghost-btn', title: 'Bu klasörde terminal aç', onclick: () => { close(); launch(acctId, folder, 'shell'); } }, 'Terminal'),
+        h('button', { class: 'primary-btn', onclick: close }, 'Bitti'))));
+  modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
+  document.addEventListener('keydown', onKey, true);
+  document.body.append(modal);
+
+  const row = (s) => {
+    const sw = h('button', {
+      class: 'switch', role: 'switch', 'aria-checked': String(s.enabled), 'aria-label': s.name, title: s.enabled ? 'Bu klasörde kapat' : 'Bu klasörde aç',
+      onclick: async () => {
+        sw.disabled = true;
+        await toggleMcp(acctId, folder, s);
+        sw.setAttribute('aria-checked', String(s.enabled));
+        sw.title = s.enabled ? 'Bu klasörde kapat' : 'Bu klasörde aç';
+        el.classList.toggle('off', !s.enabled);
+        sw.disabled = false;
+      },
+    }, h('span'));
+    const name = s.scope === 'claudeai' ? s.name.replace(/^claude\.ai\s+/, '') : s.name;
+    const st = s.enabled ? s.status : 'disabled';
+    const el = h('div', { class: 'pl-row mm-row' + (s.enabled ? '' : ' off'), 'data-name': s.name },
+      h('span', { class: 'pl-ic' }, icon(s.scope === 'claudeai' ? 'globe' : 'plug', 16)),
+      h('div', { class: 'pl-text' },
+        h('div', { class: 'pl-name' }, h('b', {}, name),
+          st && MCP_STATUS[st] ? h('span', { class: 'mm-status', 'data-status': st }, MCP_STATUS[st]) : null,
+          s.tools ? h('span', { class: 'pl-meta' }, `${s.tools} araç`) : null),
+        s.detail?.target
+          ? h('div', { class: 'mm-target', title: s.detail.target }, h('span', {}, s.detail.type), s.detail.target)
+          : s.scope === 'claudeai' ? h('div', { class: 'pl-desc' }, 'Hesabın claude.ai girişinden gelir') : null,
+        s.error ? h('div', { class: 'pl-override' }, s.error) : null),
+      sw);
+    return el;
+  };
+
+  window.panel.mcpList(acctId, folder, true).then((r) => {
+    list.innerHTML = '';
+    if (!r?.ok) { list.append(h('div', { class: 'cn-empty' }, 'Bağlayıcılar okunamadı: ' + (r?.error || ''))); return; }
+    note.textContent = 'Açma/kapama yalnız bu klasörde (' + tilde(folder) + ') geçerli: sohbette ve terminalde. '
+      + (r.live ? 'Bağlantı durumu bu klasördeki açık sohbetten.' : 'Bağlantı durumu, bu klasörde açık bir sohbet varken görünür.');
+    if (!r.servers.length) {
+      list.append(h('div', { class: 'cn-empty' }, 'Bu hesapta bağlayıcı yok. ', h('button', { class: 'link-btn', onclick: () => web(CONNECTORS_DIRECTORY) }, 'Bağlayıcılara göz atın'),
+        ' ya da terminalde ', h('code', {}, 'claude mcp add'), ' ile ekleyin.'));
+      return;
+    }
+    for (const scope of Object.keys(MCP_GROUPS)) {
+      const group = r.servers.filter((s) => s.scope === scope);
+      if (!group.length) continue;
+      list.append(
+        h('div', { class: 'mm-group' }, h('span', {}, MCP_GROUPS[scope]),
+          scope === 'claudeai'
+            ? h('button', { class: 'link-btn mm-claudeai', onclick: () => web(CONNECTORS_SETTINGS) }, 'claude.ai\'de yönet', icon('external', 12))
+            : null),
+        h('div', { class: 'pl-list' }, group.map(row)));
+    }
+  });
 }
 
 // ---------- Eklentiler (Claude Code plugin'leri) ----------

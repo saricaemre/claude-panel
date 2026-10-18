@@ -4,6 +4,7 @@
 //   artifact://view/<id>/<n>/          → sayfa (html/svg olduğu gibi; md ve kod biçimlenmiş HTML olarak)
 //   artifact://view/<id>/<n>/<yol>     → kaynak dosyanın klasöründeki görsel, css vb. (göreli bağlantılar)
 //   artifact://thumb/<id>/<n>/         → küçük resim
+//   artifact://widget/<anahtar>/       → sohbet içi görsel (show_widget); bellekte, galeride değil
 const { app, ipcMain, protocol, session, BrowserWindow, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -185,10 +186,41 @@ const PAGE_SANDBOX = 'sandbox allow-scripts allow-forms allow-modals allow-popup
 
 const notFound = () => new Response('Bulunamadı', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
 
+// ---------- Sohbet içi görseller (show_widget) ----------
+// Claude'un yazdığı HTML/SVG bellekte tutulur ve artifact sayfaları gibi kökensiz kum havuzunda sunulur.
+// Anahtar rastgeledir (başka bir sayfa tahmin edemesin). Panelin renk değişkenleri ve iki küçük yardımcı eklenir:
+// yükseklik bildirimi (iframe içeriğe göre uzar) ve sendPrompt(metin) (yazma alanına taslak koyar).
+const widgets = new Map(); // anahtar -> sayfa
+const WIDGET_MAX = 300;
+const WIDGET_HEAD = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<style>:root{color-scheme:dark;--text:#eeece5;--soft:#d3d0c7;--muted:#a19e95;--faint:#6f6c65;--clay:#d97757;--accent:#d97757;
+--bg:#252422;--bg-2:#1f1e1c;--bg-3:#2e2d2a;--line:rgba(236,230,214,.13);--line-soft:rgba(236,230,214,.075);--danger:#e5645a;--warn:#e2b86b;--ok:#8fbf7f;
+--ui:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;--mono:"SF Mono",Menlo,monospace}
+html,body{margin:0;background:transparent;color:var(--text);font:14px/1.5 var(--ui)}</style>
+<script>(()=>{const say=(m)=>parent.postMessage(Object.assign({__panelWidget:1},m),'*');
+const h=()=>say({height:Math.ceil(document.documentElement.getBoundingClientRect().height)});
+window.sendPrompt=(t)=>say({prompt:String(t).slice(0,4000)});
+addEventListener('load',h);new ResizeObserver(h).observe(document.documentElement);setTimeout(h,0);})()</script>
+`;
+function registerWidget(code) {
+  const html = String(code || '');
+  if (!html.trim()) throw new Error('widget_code boş');
+  if (html.length > 512 * 1024) throw new Error('widget_code 512 KB\'tan büyük');
+  const key = crypto.randomBytes(12).toString('hex');
+  widgets.set(key, WIDGET_HEAD + html);
+  if (widgets.size > WIDGET_MAX) widgets.delete(widgets.keys().next().value);
+  return `artifact://widget/${key}/`;
+}
+
 function handleProtocol(req) {
   try {
     const u = new URL(req.url);
     const [, id, nStr, ...rest] = decodeURIComponent(u.pathname).split('/');
+    if (u.host === 'widget') {
+      const page = widgets.get(id);
+      if (!page || nStr) return notFound();
+      return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'content-security-policy': PAGE_SANDBOX } });
+    }
     const a = find(id);
     if (!a) return notFound();
     const n = Number(nStr) || latest(a);
@@ -352,6 +384,7 @@ function setup({ getWindow }) {
     const r = upsertFromFile(filePath, { source });
     return { id: r.artifact.id, created: r.created, version: r.version };
   }));
+  ipcMain.handle('widget:register', wrap((code) => ({ url: registerWidget(code) })));
   ipcMain.handle('artifacts:addContent', wrap((opts) => {
     const r = upsert({ title: opts.title, content: opts.content, lang: opts.lang, kind: opts.kind, source: opts.source });
     return { id: r.artifact.id, created: r.created, version: r.version };
@@ -437,7 +470,7 @@ function artifactEvent(r) {
 }
 
 // Claude'un artifact yayımlayabilmesi için süreç içi MCP sunucusu ("mcp__panel__publish_artifact")
-async function createMcpServer(sdk, { cwd, accountId, getSessionId, onArtifact }) {
+async function createMcpServer(sdk, { cwd, accountId, getSessionId, onArtifact, extraTools = () => [] }) {
   const { z } = await import('zod');
   const publish = sdk.tool(
     'publish_artifact',
@@ -474,11 +507,36 @@ async function createMcpServer(sdk, { cwd, accountId, getSessionId, onArtifact }
       }
     }
   );
+  // Sohbet içi görsel: çizimi arayüz araç girdisinden yapar (geçmiş yüklenince de görünür); araç yalnız doğrular
+  const widget = sdk.tool(
+    'show_widget',
+    'Sohbetin içinde, yanıtının arasında bir görsel gösterir: SVG çizim, diyagram, grafik, tablo, küçük etkileşimli araç (hesaplayıcı, ' +
+      'karşılaştırma, kaydırıcı…). Saklanacak ya da paylaşılacak sayfalar için publish_artifact kullan; bu araç anlık açıklama içindir. ' +
+      'widget_code tam bir HTML parçası ya da <svg> ile başlayan SVG olabilir; betikler çalışır, cdnjs/jsdelivr/unpkg\'den kütüphane yüklenebilir. ' +
+      'Zemin saydam ve koyu temadır; renkler için CSS değişkenlerini kullan: --text, --muted, --faint, --bg-2, --bg-3, --line, --accent, --ok, --warn, --danger, ' +
+      'yazı için --ui ve --mono. Yükseklik içeriğe göre ayarlanır, genişlik sohbet sütunudur (~700 px). sendPrompt("metin") kullanıcının yazma ' +
+      'alanına taslak koyar (kullanıcı gönderir). Sayfa panele ve dosyalara erişemez.',
+    {
+      title: z.string().describe('Kısa snake_case ad (ör. satis_grafigi)'),
+      widget_code: z.string().describe('HTML ya da SVG'),
+    },
+    async (args) => {
+      const code = String(args.widget_code || '');
+      if (!code.trim()) return { content: [{ type: 'text', text: 'widget_code boş' }], isError: true };
+      if (code.length > 512 * 1024) return { content: [{ type: 'text', text: 'widget_code 512 KB\'tan büyük' }], isError: true };
+      return { content: [{ type: 'text', text: `"${args.title}" sohbette gösterildi` }] };
+    }
+  );
   return sdk.createSdkMcpServer({
     name: 'panel',
     version: '1.0.0',
-    instructions: 'Claude Panel\'de çalışıyorsun. Ürettiğin sayfa, rapor, diyagram ve belgeleri publish_artifact ile Artifacts galerisine yayımlayabilirsin.',
-    tools: [publish],
+    instructions: 'Claude Panel\'de çalışıyorsun. Ürettiğin sayfa, rapor, diyagram ve belgeleri publish_artifact ile Artifacts galerisine yayımlayabilirsin; ' +
+      'anlık bir çizim, grafik ya da küçük etkileşimli araç için show_widget ile sohbetin içinde göster. ' +
+      'iOS uygulamalarını simulator, web sayfalarını ve localhost uygulamalarını browser aracıyla panelin içinde deneyebilirsin. ' +
+      'Kullanıcının terminal sekmelerini terminal ile okuyabilir, değişiklikleri ya da bir dosyayı show ile yan bölmede gösterebilirsin. ' +
+      'Bağımsız bir işi sessions ile ayrı bir yan oturuma devredebilirsin. ' +
+      'Projenin geçmiş oturumlarında (sıkıştırmayla bağlamdan düşenler dahil) kelimesi kelimesine aramak için hatirla.',
+    tools: [publish, widget, ...extraTools(z)],
     alwaysLoad: true,
   });
 }

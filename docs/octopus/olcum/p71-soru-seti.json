@@ -1,0 +1,454 @@
+{
+ "surum": 1,
+ "tarih": "2026-10-18",
+ "kaynak": "Kızıl Elma, oturum 6e15a2f4-0e77-4083-92fe-f4dafb9c913d, 30 Eylül 2026 08:33–15:53 (3. sıkıştırma sınırı a29cc80a)",
+ "not": "Doğru cevaplar kayıttan çıkarıldı (saat UTC). 'anahtar': her grup bir düzenli ifade; cevap (Türkçe arama biçiminde: küçük harf, aksansız) her grubu içeriyorsa grup tutar. 'kesin' sorularda puan = tutan grup / grup sayısı; 'yorum' sorularda bu yalnız ön puan, son puanı Emre verir. 'kontrol': 3. özette yaşayan bilgi (A'nın da bilmesi beklenir). 'iz': özette yaşayıp yaşamadığını ölçen katı ifadeler (cevap puanında kullanılmaz).",
+ "sorular": [
+  {
+   "no": 1,
+   "konu": "ilk görev",
+   "tur": "kesin",
+   "soru": "Bu oturumun 30 Eylül sabahındaki ilk görevi neydi? Hangi oyuna bakılacaktı, neler düzeltilecekti ve hangi karar yeniden açılacaktı?",
+   "dogru": "Döndürmeyi, koşuyu ve sürüklenen cepheyi Total War'a bakarak yeniden kurmak (taburlar yan yan kaymadan, hızlı ve canlı); K665'i yeniden açmak. Hedefi Emre oturum 541'de vermişti.",
+   "anahtar": [
+    "total war",
+    "k665",
+    "don|kos|cephe"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T08:33:13Z",
+     "uuid": "11c216d1-148e-4c74-ad5f-726c82ca808f"
+    }
+   ],
+   "iz": [
+    "k665"
+   ]
+  },
+  {
+   "no": 2,
+   "konu": "ilk görev",
+   "tur": "kesin",
+   "soru": "O ilk görev hangi yeni kararla sonuçlandı ve K665'in durumu ne oldu?",
+   "dogru": "K666 (dizilme, Total War usulü yuvaya koşu) yazıldı; K665 'kısmen geçersiz (yerine K666)' oldu.",
+   "anahtar": [
+    "k666",
+    "gecersiz|yerine|yerini"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T09:03:59Z",
+     "uuid": "b6ec31f6-b75a-4e3a-8c2e-0530deecd1a3"
+    }
+   ],
+   "iz": [
+    "k666"
+   ]
+  },
+  {
+   "no": 3,
+   "konu": "ilk görev",
+   "tur": "kesin",
+   "soru": "Total War verisinden alınan koşu hızı ve erlerin yuvasına koşarken çıkabildiği hız çarpanı neydi?",
+   "dogru": "Koşu 3,0 m/sn; yuva yakalamada azami hızın 1,6 katı (FormUpSpeedFactor, Total War'ın max_tracking_ratio'su).",
+   "anahtar": [
+    "3[,.]0",
+    "1[,.]6"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T09:03:59Z",
+     "uuid": "b6ec31f6-b75a-4e3a-8c2e-0530deecd1a3"
+    }
+   ],
+   "iz": [
+    "run 3[.,]0|kosu 3[.,]0|3[.,]0 m/s",
+    "1[.,]6\\s*(×|x\\b|kat)"
+   ]
+  },
+  {
+   "no": 4,
+   "konu": "ilk görev",
+   "tur": "kesin",
+   "soru": "Yeni dizilmede altı taburla yerinde 90° dönüş kaç saniyede oturuyordu (önceden ne oluyordu)?",
+   "dogru": "2,05 sn; önceden hiç oturmuyordu.",
+   "anahtar": [
+    "2[,.]05"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T09:03:59Z",
+     "uuid": "b6ec31f6-b75a-4e3a-8c2e-0530deecd1a3"
+    }
+   ],
+   "iz": [
+    "2[.,]05"
+   ]
+  },
+  {
+   "no": 5,
+   "konu": "açık iş",
+   "tur": "kesin",
+   "soru": "Oturum 542'nin raporunda Emre'nin K260 onayını bekleyen, oyuncuya görünen yeni içerik neydi?",
+   "dogru": "Dizilme sırasında oynayan yeni uzun adımlı koşu klibi (RUN, 3,4 m/sn).",
+   "anahtar": [
+    "kosu klib|run klib|\\brun\\b"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T09:03:59Z",
+     "uuid": "b6ec31f6-b75a-4e3a-8c2e-0530deecd1a3"
+    }
+   ],
+   "iz": [
+    "run.{0,6}(klib|clip)|kosu klib"
+   ]
+  },
+  {
+   "no": 6,
+   "konu": "ret",
+   "tur": "kesin",
+   "manset": true,
+   "soru": "Arayüz (HUD) çıpası için Emre'nin verdiği ilk referans neydi, hangi karar numarasıyla yazıldı ve sonu ne oldu?",
+   "dogru": "Witcher 3 (K667). Emre 'olmamış' dedi, reddedildi; yerine BFME2 referansı geldi (K668), K667 'geçersiz'.",
+   "anahtar": [
+    "witcher",
+    "k667|olmamis|redd|gecersiz"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T09:46:09Z",
+     "uuid": "7b83721b-fb00-4b82-bc0b-89db12974a10"
+    },
+    {
+     "ts": "2026-09-30T09:55:15Z",
+     "uuid": "668e8952-b642-47be-bbbc-e66d3018b90e"
+    }
+   ],
+   "iz": [
+    "witcher"
+   ]
+  },
+  {
+   "no": 7,
+   "konu": "ret",
+   "tur": "kesin",
+   "soru": "BFME2 palantır uyarlamasının ilk (SVG ile çizilmiş) hâli için Emre ne dedi?",
+   "dogru": "'amatör duruyor şu ana gördüğüm kadarıyla. sana referanslar vereceğim dur'",
+   "anahtar": [
+    "amator"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T10:04:45Z",
+     "uuid": "kuyruk mesajı (queue-operation)"
+    }
+   ],
+   "iz": [
+    "amator"
+   ]
+  },
+  {
+   "no": 8,
+   "konu": "ret",
+   "tur": "kesin",
+   "soru": "Emre BFME2 ekran görüntülerini verdikten sonraki turda harita halkası hangi malzemeden, hangi alete benzetilerek kurulmuştu ve Emre bu tura ne dedi?",
+   "dogru": "Tombak bir usturlap (WebGL ile ışıklanan krom, rumi süsler, cam küreler). Emre: 'beğenmedim ya. tasarım stilini komple değiştirmek lazım. daha modern bir arayüz lazım, son derece şık.'",
+   "anahtar": [
+    "tombak|usturlap|astrolab",
+    "begenme|modern|sik"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T12:06:48Z",
+     "uuid": "fb823017-13f1-4975-8dd5-531f0b2a9664"
+    },
+    {
+     "ts": "2026-09-30T12:24:31Z",
+     "uuid": "a59e5535-160a-48cb-8524-b679fa32544f"
+    }
+   ],
+   "iz": [
+    "tombak|usturlap|astrolab"
+   ]
+  },
+  {
+   "no": 9,
+   "konu": "ret",
+   "tur": "kesin",
+   "soru": "Assassin's Creed Mirage'ı referans gösteren 'modern-minimal Osmanlı' önerin neden düştü?",
+   "dogru": "Emre 'osmanlı dili olmasın çünkü oyun general'a hitap edecek' dedi: oyun genel kitleye hitap edecek, yönünü değiştirdi.",
+   "anahtar": [
+    "osmanli",
+    "genel|general"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T12:26:14Z",
+     "uuid": "c5b79ec9-7fdd-4f99-be0b-0edd82bc3c12"
+    }
+   ],
+   "iz": [
+    "modern-minimal|minimal ottoman|minimal osmanli|mirage"
+   ]
+  },
+  {
+   "no": 10,
+   "konu": "ret ve zevk",
+   "tur": "kesin",
+   "soru": "Anno 117 / Age of Empires IV / Age of Mythology Retold önerine Emre ne dedi, nasıl örnekler istedi?",
+   "dogru": "'üçünü de beğenmedim. daha heroik tematik olabilir daha sanatsal örnekler'",
+   "anahtar": [
+    "heroik|kahraman",
+    "sanatsal|artistik"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T12:50:11Z",
+     "uuid": "7eedc8c9-d705-4af6-8d97-1c738e070f21"
+    }
+   ],
+   "iz": [
+    "heroik|heroic"
+   ]
+  },
+  {
+   "no": 11,
+   "konu": "ret",
+   "tur": "kesin",
+   "kontrol": true,
+   "soru": "Total War: Three Kingdoms mürekkep turu ve ondan sonraki 'cam adalar' turu için Emre ne dedi?",
+   "dogru": "TW3K turu: 'hayır ya bu ne böyle her yer kapkara olmuş'. Cam adalar: 'markasal bir oyun arayüzü gibi değil, bir mobil app arayüzü yapmışsın gibi'.",
+   "anahtar": [
+    "kara",
+    "mobil"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T14:23:53Z",
+     "uuid": "60da9f85-3534-49c7-866f-90bd447b4bd5"
+    },
+    {
+     "ts": "2026-09-30T14:49:03Z",
+     "uuid": "ea720283-db07-4623-bac0-73f76c34de8c"
+    }
+   ],
+   "iz": [
+    "kapkara",
+    "mobil"
+   ]
+  },
+  {
+   "no": 12,
+   "konu": "ret",
+   "tur": "yorum",
+   "soru": "Bugün reddedilen bütün arayüz yönlerini sırasıyla say.",
+   "dogru": "1) Witcher 3 (K667) 2) BFME2 palantır SVG uyarlaması ('amatör', K668) 3) tombak/usturlap WebGL krom 4) modern-minimal Osmanlı (AC Mirage) 5) Anno 117 / AoE IV / AoM Retold 6) Total War: Three Kingdoms mürekkep ('kapkara') 7) cam adalar ('mobil app').",
+   "anahtar": [
+    "witcher",
+    "amator|svg|palantir",
+    "tombak|usturlap|astrolab",
+    "minimal|mirage",
+    "anno|aoe|age of empires",
+    "three kingdoms|tw3k|murekkep",
+    "cam|mobil"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T09:46–14:49",
+     "uuid": "6, 7, 8, 9, 10, 11 numaralı soruların kaynakları"
+    }
+   ],
+   "iz": [
+    "witcher",
+    "amator|svg|palantir",
+    "tombak|usturlap|astrolab",
+    "minimal|mirage",
+    "anno|aoe|age of empires",
+    "three kingdoms|tw3k|murekkep",
+    "cam|mobil"
+   ]
+  },
+  {
+   "no": 13,
+   "konu": "zevk",
+   "tur": "yorum",
+   "soru": "Emre görsel kalite çıtasını hangi sözlerle tarif etti?",
+   "dogru": "'kaliteli efektli gölgeli model kalitesi yüksek görüntü kalitesi yüksek, premium ve modern olan tarz'; tema görünümü '2026'da çıkacak bir premium oyun kadar kaliteli', 'AI slop bir şey değil istediğim'.",
+   "anahtar": [
+    "premium",
+    "modern",
+    "golge|efekt|slop|2026"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T12:26:14Z",
+     "uuid": "c5b79ec9-7fdd-4f99-be0b-0edd82bc3c12"
+    },
+    {
+     "ts": "2026-09-30T12:27",
+     "uuid": "AskUserQuestion cevabı (araç sonucu)"
+    }
+   ],
+   "iz": [
+    "premium"
+   ]
+  },
+  {
+   "no": 14,
+   "konu": "zevk",
+   "tur": "yorum",
+   "kontrol": true,
+   "soru": "'Hayal gücünden bir çalışma' isterken Emre arayüzün nasıl olmasını istedi?",
+   "dogru": "'şık, güçlü, animatif efektler, dolguları butonları yerleşkeleri her şeyiyle mükemmel bir arayüz'; 'kullanıcının ekranını aşırı kaplamaması lazım'; 'şık, anlaşılır ve zevkli'.",
+   "anahtar": [
+    "kapla",
+    "animat|efekt",
+    "sik|anlasilir|zevk"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T14:23:53Z",
+     "uuid": "60da9f85-3534-49c7-866f-90bd447b4bd5"
+    }
+   ],
+   "iz": [
+    "kapla"
+   ]
+  },
+  {
+   "no": 15,
+   "konu": "K669",
+   "tur": "kesin",
+   "kontrol": true,
+   "soru": "K669 ne diyor? Emre'nin 'general' sözü neydi, fraksiyonlara ne oluyor?",
+   "dogru": "Sunum genel kitleye, premium ve Osmanlı odaklı değil ('bunu amerikadan da biri oynayabilir'). 'General' = genel kitle (C&C Generals değil). Fraksiyonlar (Osmanlı, Doğu Roma, Safeviler…) aynı kalıyor.",
+   "anahtar": [
+    "genel kitle|general audience|genel",
+    "fraksiyon|dogu roma|safevi"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T12:29:31Z",
+     "uuid": "454c66ec-739a-4463-8566-0197d7a4aa7e"
+    },
+    {
+     "ts": "2026-09-30T12:27",
+     "uuid": "AskUserQuestion cevabı (araç sonucu)"
+    }
+   ],
+   "iz": [
+    "genel kitle|general audience"
+   ]
+  },
+  {
+   "no": 16,
+   "konu": "K669",
+   "tur": "kesin",
+   "kontrol": true,
+   "soru": "K669'da Emre'ye açık bırakılan soru neydi?",
+   "dogru": "GDD §7'deki 'minyatür kimlik' sütununa ne olacağı.",
+   "anahtar": [
+    "minyatur"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T13:11:25Z",
+     "uuid": "9f384ff5-af07-4278-93e7-747fb7e76583 (2. özet; ADR'nin kendisi dosyada)"
+    }
+   ],
+   "iz": [
+    "minyatur"
+   ]
+  },
+  {
+   "no": 17,
+   "konu": "kural",
+   "tur": "yorum",
+   "kontrol": true,
+   "soru": "Referans incelerken Emre neye itiraz etti; o günden beri nasıl kare alıyorsun?",
+   "dogru": "Çok sayıda video indirmeye: 'bokunu çıkarma kaç tane video indiriyosun ya'. Artık az indirip tek kareleri doğrudan akıştan alıyor (yt-dlp -g + ffmpeg -ss … -frames:v 1).",
+   "anahtar": [
+    "video",
+    "kare|akis|frame|ffmpeg"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T12:3x",
+     "uuid": "kuyruk mesajı (queue-operation)"
+    }
+   ],
+   "iz": [
+    "video"
+   ]
+  },
+  {
+   "no": 18,
+   "konu": "kural",
+   "tur": "kesin",
+   "kontrol": true,
+   "soru": "Görsel bir işi sunarken her seferinde ne yapman gerekiyor ve neden?",
+   "dogru": "Canlı localhost linkini mesaja yazmak; Emre 'nasıl görebilirim? neden siteyi de vermiyorsun beni arattırıyorsun her seferinde?' diye sordu.",
+   "anahtar": [
+    "link|baglanti|localhost|adres"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T12:21:15Z",
+     "uuid": "f8fb7611-492a-4369-bc69-0bd8df08de24"
+    }
+   ],
+   "iz": [
+    "link"
+   ]
+  },
+  {
+   "no": 19,
+   "konu": "karar",
+   "tur": "kesin",
+   "kontrol": true,
+   "soru": "Oyunun yeni adı ne oldu (hangi kararla), elenen ad önerilerinden ikisi hangileri, ikon için son yön ne?",
+   "dogru": "'The Winds of the East' (K670). Elenenler: Golden Horn, Warcrown, Era of Sieges, Sic Transit, The Era of Sultans… İkon: artistik işlenmiş rüzgâr ve kılıç; son istek ünlü strateji oyunlarının 5 ikonunu incelemek.",
+   "anahtar": [
+    "winds of the east",
+    "golden horn|warcrown|era of|sic transit|sultan",
+    "kilic|sword"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T15:27:53Z",
+     "uuid": "dbaf5dfa-0ac2-4594-8ef3-b9bbc661a8b0"
+    },
+    {
+     "ts": "2026-09-30T15:44:22Z",
+     "uuid": "1d347ef5-4be8-45ad-8f13-76b3c60c1509"
+    }
+   ],
+   "iz": [
+    "winds of the east"
+   ]
+  },
+  {
+   "no": 20,
+   "konu": "açık iş",
+   "tur": "yorum",
+   "kontrol": true,
+   "soru": "Oturum 543 nasıl kapanmalı ve başlık yazı tipiyle ilgili hangi iş açık?",
+   "dogru": "kapanis_hukmu.py --kapsam calisma; oturumlar/2026-09-30-oturum-543.md günlüğü '## SIRADAKİ İŞ' ile; kilit silinir (oturum_ac.py --kilit-sil); commit yok. Noto Serif Google Fonts'tan geliyor (CDN yasağına aykırı); projeye indirmek için izin istenecek.",
+   "anahtar": [
+    "kapanis",
+    "543",
+    "noto|font|yazi tipi"
+   ],
+   "kaynak": [
+    {
+     "ts": "2026-09-30T15:53:22Z",
+     "uuid": "47c94975-c755-476d-af64-914e8e0dc4ff (3. özet, bekleyen işler)"
+    }
+   ],
+   "iz": [
+    "kapanis_hukmu"
+   ]
+  }
+ ]
+}

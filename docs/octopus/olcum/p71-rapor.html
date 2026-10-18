@@ -1,0 +1,260 @@
+<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>P7.1 Yeniden oynatma ölçümü</title><style>
+:root{--bg:#1f1e1d;--bg2:#2a2927;--line:#3a3836;--text:#e8e6e1;--muted:#a8a49c;--a:#c9824f;--b:#7fb069;--warn:#d9a441;--no:#c25b4e}
+body{background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,system-ui,sans-serif;margin:0;padding:32px 40px 60px;max-width:1100px}
+h1{font:600 26px/1.25 Georgia,serif;margin:0 0 4px}h2{font:600 19px Georgia,serif;margin:36px 0 10px;border-bottom:1px solid var(--line);padding-bottom:6px}
+.sub{color:var(--muted);margin-bottom:24px}.hero{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:18px 22px;margin:18px 0}
+.hero h3{margin:0 0 10px;font:600 17px Georgia,serif}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}.two>div{background:#232220;border-radius:8px;padding:10px 14px}
+.lab{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}.la{color:var(--a)}.lb{color:var(--b)}
+.bar{display:grid;grid-template-columns:150px 1fr 60px 1fr 60px;gap:10px;align-items:center;margin:8px 0}.bw{background:#2f2d2b;height:14px;border-radius:7px;overflow:hidden}
+.b{height:100%}.b.a{background:var(--a)}.b.bb{background:var(--b)}.bv{font-variant-numeric:tabular-nums;color:var(--muted);font-size:13px}.bl{font-size:14px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}th,td{border-bottom:1px solid var(--line);padding:8px 8px;vertical-align:top;text-align:left}th{color:var(--muted);font-weight:500}
+.p{display:inline-block;min-width:34px;text-align:center;border-radius:5px;padding:1px 6px;font-variant-numeric:tabular-nums}.ok{background:#2f4a2a;color:#b6dfa3}.mid{background:#4a3f22;color:#ecd08f}.no{background:#4a2723;color:#eba69c}
+.k{font-size:11px;color:var(--warn);border:1px solid #6b5420;border-radius:4px;padding:0 4px;margin-left:4px}.ans{white-space:pre-wrap;color:#d6d2ca}.dg{color:var(--muted)}
+ul{padding-left:20px}li{margin:4px 0}code{background:#2f2d2b;padding:1px 5px;border-radius:4px;font-size:13px}details{margin:6px 0}summary{cursor:pointer;color:var(--muted)}pre{white-space:pre-wrap;background:#232220;padding:12px;border-radius:8px;font-size:12.5px}
+</style></head><body>
+<h1>P7.1 · Yeniden oynatma ölçümü</h1>
+<div class="sub">Kızıl Elma, oturum 6e15a2f4, 30 Eylül 2026 · 3. sıkıştırma anı (15:53 UTC) · ölçüm 2026-10-18, claude-opus-5-5, Max hesabı · toplam API karşılığı 1,36 $</div>
+<p><b>Soru:</b> Üst üste üç sıkıştırmadan sonra Claude Code'un kendi özetiyle uyanan beden (<span class="la">A</span>) mı, defter ve devir notuyla kurulan yeni beden (<span class="lb">B</span>) mi daha çok hatırlıyor?<br><b>Cevap:</b> B. 3. özette düşen 12 sorunun A'da 2%'si, B'de 85%'i geri geldi. Buna karşılık 3. özette yaşayan 8 kontrol sorusunun 2'sinde B, A'nın bildiğini bilemedi.</p>
+<div class="hero"><h3>Manşet · Arayüz (HUD) çıpası için Emre'nin verdiği ilk referans neydi, hangi karar numarasıyla yazıldı ve sonu ne oldu?</h3><div class="two">
+<div><div class="lab la">A · Claude Code özeti <span class="p no">0</span></div><div class="ans">Hatırlamıyorum. Elimdeki özette ilk referansın ne olduğu ve hangi karar numarasıyla yazıldığı yok.</div></div>
+<div><div class="lab lb">B · defter + devir notu <span class="p ok">1</span></div><div class="ans">tahmin: İlk çıpa Witcher 3 referanslıydı (koyu yarı saydam zemin, ince altın hat, serif başlıklar). Kararı K667 olarak yazıldı. Bu referansı Emre'nin mi verdiğini notta göremiyorum. Sonu ret oldu, Emre "olmamış. bfme2 referanslarına bak." dedi.</div></div></div>
+<div class="dg" style="margin-top:10px">Doğru: Witcher 3 (K667). Emre 'olmamış' dedi, reddedildi; yerine BFME2 referansı geldi (K668), K667 'geçersiz'.</div></div>
+<div class="bar"><div class="bl">3. özette düşen (12)</div><div class="bw"><div class="b a" style="width:2.4166666666666665%"></div></div><div class="bv">A 2%</div><div class="bw"><div class="b bb" style="width:84.75%"></div></div><div class="bv">B 85%</div></div><div class="bar"><div class="bl">Kontrol (8)</div><div class="bw"><div class="b a" style="width:93.75%"></div></div><div class="bv">A 94%</div><div class="bw"><div class="b bb" style="width:75%"></div></div><div class="bv">B 75%</div></div><div class="bar"><div class="bl">Hepsi (20)</div><div class="bw"><div class="b a" style="width:38.95%"></div></div><div class="bv">A 39%</div><div class="bw"><div class="b bb" style="width:80.85000000000001%"></div></div><div class="bv">B 81%</div></div>
+<h2>Ne çıktı</h2><ul>
+<li><b>A uydurmadı.</b> Düşen soruların hepsine "hatırlamıyorum" dedi. Bildiği tek kısım, kendi özetinde duran son iki ret turu (12. soruda 7 yönden 2'si). İlk görev, Witcher, "amatör", usturlap ve "heroik" A için tamamen kayıp.</li>
+<li><b>B'nin defteri 30 işlemle 27 satır çıkardı</b> (9 ret, 5 zevk, 5 karar, 5 açık iş, 3 kural; 3'ü kapandı). Defter özeti 6.281 karakter, not toplam ~5,4 bin token. Bilgi defterde yazılı olan her soruda B doğru cevap verdi, Witcher dahil. B'nin kaçırdıkları ya defterde ya da son turlarda olmayan ayrıntılar: koşu hızı 3,0 m/sn, 2,05 sn ve iki kontrol sorusu.</li>
+<li><b>Defter işletme bilgisini tutmuyor.</b> 16. soru (K669'da Emre'ye açık bırakılan "minyatür kimlik" sorusu) ve 20. soru (543'ün kapanış adımları, yazı tipi izni) Claude Code özetinde yaşıyor, B'de yok. Çıkarıcı bunları "gelip geçici" saydı. Gerçek kullanımda kapanış kuralları projenin <code>CLAUDE.md</code>'sinden gelir; bu ölçümde o dosya iki bedene de verilmedi. Yine de özetin bu tür ayrıntıyı tutması, defterin tek başına yetmediğini gösteriyor. İkisi birlikte masaya konmalı: özet ve defter. Planın §7.8 f'sinde yeniden doğuş özetin yerine geçiyor; bu sonuca göre gözden geçirilmeli.</li>
+<li><b>Ürün hatası (P7.4):</b> <code>dogus.js</code> son turları dosyanın son 4 MB'ından alıyor. <code>/compact</code> dosyaya eski zincirin 2.084 kayıtlık bir kopyasını eklediği için ürünün notunda 6 yerine 1 tur çıktı, o da 3 saat eskiydi. Ölçümde son turlar soy zincirinden, zaman sırasıyla alındı.</li>
+<li><b>Bedel:</b> plandaki ~600 bin token yerine 141 bin girdi ve 15 bin çıktı tokenı tuttu (A 0,14 $, defter çıkarımı 0,96 $, B 0,26 $). Çıkarım ham kayıt yerine metin dökümünü okudu.</li></ul>
+<h2>Bütün sorular</h2><p class="dg">Puan: kesin sorularda dize eşleşmesi (tutan anahtar grubu / grup sayısı). Yorum sorularında ve iki düzeltilen yerde ön puan (A13 0,33 → 0: 14. sorunun alıntısını vermiş; A15 1 → 0,5: "general"i ve fraksiyonları bilmiyor). <b>Son puanı Emre verir.</b> "K" = kontrol sorusu (3. özette yaşıyor).</p>
+<table><tr><th>No</th><th>Soru · doğru cevap</th><th style="width:28%">A</th><th style="width:28%">B</th></tr>
+<tr><td>1</td><td>Bu oturumun 30 Eylül sabahındaki ilk görevi neydi? Hangi oyuna bakılacaktı, neler düzeltilecekti ve hangi karar yeniden açılacaktı?<div class="dg" style="margin-top:4px">Döndürmeyi, koşuyu ve sürüklenen cepheyi Total War'a bakarak yeniden kurmak (taburlar yan yan kaymadan, hızlı ve canlı); K665'i yeniden açmak. Hedefi Emre oturum 541'de vermişti.</div></td><td><span class="p no">0</span><div class="ans">Hatırlamıyorum.</div></td><td><span class="p ok">1</span><div class="ans">Görev Total War'a bakmaktı. Önce yerinde dönüş, koşu adımı ve sağ tuş cephe çizimi ölçülecek, sonra döndürme, koşu ve sürüklenen cephe taburlar yan yan kaymadan hızlı ve canlı olacak biçimde düzeltilecekti. Yeniden açılacak karar K665'ti. (Notta bu, oturum 541'de verilen hedef olarak geçiyor; "sabah" olduğu yazmıyor.)</div></td></tr><tr><td>2</td><td>O ilk görev hangi yeni kararla sonuçlandı ve K665'in durumu ne oldu?<div class="dg" style="margin-top:4px">K666 (dizilme, Total War usulü yuvaya koşu) yazıldı; K665 'kısmen geçersiz (yerine K666)' oldu.</div></td><td><span class="p no">0</span><div class="ans">Hatırlamıyorum.</div></td><td><span class="p ok">1</span><div class="ans">Görev K666 kararıyla sonuçlandı ve K665'in yerine geçti. Hedefe 8 m kala tabur yerine konuyor, erler yeni yuvalarına dönüp koşuyor, yollar kesişmiyor, yarım hızla yan kayma yok. Tek tabur kendi ortası etrafında dönüyor.</div></td></tr><tr><td>3</td><td>Total War verisinden alınan koşu hızı ve erlerin yuvasına koşarken çıkabildiği hız çarpanı neydi?<div class="dg" style="margin-top:4px">Koşu 3,0 m/sn; yuva yakalamada azami hızın 1,6 katı (FormUpSpeedFactor, Total War'ın max_tracking_ratio'su).</div></td><td><span class="p no">0</span><div class="ans">Hatırlamıyorum.</div></td><td><span class="p mid">0,50</span><div class="ans">Koşu hızını hatırlamıyorum. Erlerin yuvasına koşarken çıktığı hız çarpanı 1,6.</div></td></tr><tr><td>4</td><td>Yeni dizilmede altı taburla yerinde 90° dönüş kaç saniyede oturuyordu (önceden ne oluyordu)?<div class="dg" style="margin-top:4px">2,05 sn; önceden hiç oturmuyordu.</div></td><td><span class="p no">0</span><div class="ans">Hatırlamıyorum.</div></td><td><span class="p no">0</span><div class="ans">Hatırlamıyorum.</div></td></tr><tr><td>5</td><td>Oturum 542'nin raporunda Emre'nin K260 onayını bekleyen, oyuncuya görünen yeni içerik neydi?<div class="dg" style="margin-top:4px">Dizilme sırasında oynayan yeni uzun adımlı koşu klibi (RUN, 3,4 m/sn).</div></td><td><span class="p no">0</span><div class="ans">Hatırlamıyorum.</div></td><td><span class="p ok">1</span><div class="ans">Yeni RUN koşu klibi. K666 dizilmesiyle birlikte tezgâhta denenip onaylanmayı bekliyor; oturum 542 değişiklikleri commit edilmedi.</div></td></tr><tr><td>6 ★</td><td>Arayüz (HUD) çıpası için Emre'nin verdiği ilk referans neydi, hangi karar numarasıyla yazıldı ve sonu ne oldu?<div class="dg" style="margin-top:4px">Witcher 3 (K667). Emre 'olmamış' dedi, reddedildi; yerine BFME2 referansı geldi (K668), K667 'geçersiz'.</div></td><td><span class="p no">0</span><div class="ans">Hatırlamıyorum. Elimdeki özette ilk referansın ne olduğu ve hangi karar numarasıyla yazıldığı yok.</div></td><td><span class="p ok">1</span><div class="ans">tahmin: İlk çıpa Witcher 3 referanslıydı (koyu yarı saydam zemin, ince altın hat, serif başlıklar). Kararı K667 olarak yazıldı. Bu referansı Emre'nin mi verdiğini notta göremiyorum. Sonu ret oldu, Emre "olmamış. bfme2 referanslarına bak." dedi.</div></td></tr><tr><td>7</td><td>BFME2 palantır uyarlamasının ilk (SVG ile çizilmiş) hâli için Emre ne dedi?<div class="dg" style="margin-top:4px">'amatör duruyor şu ana gördüğüm kadarıyla. sana referanslar vereceğim dur'</div></td><td><span class="p no">0</span><div class="ans">Hatırlamıyorum.</div></td><td><span class="p ok">1</span><div class="ans">"amatör duruyor şu ana gördüğüm kadarıyla"</div></td></tr><tr><td>8</td><td>Emre BFME2 ekran görüntülerini verdikten sonraki turda harita halkası hangi malzemeden, hangi alete benzetilerek kurulmuştu ve Emre bu tura ne dedi?<div class="dg" style="margin-top:4px">Tombak bir usturlap (WebGL ile ışıklanan krom, rumi süsler, cam küreler). Emre: 'beğenmedim ya. tasarım stilini komple değiştirmek lazım. daha modern bir arayüz lazım, son derece şık.'</div></td><td><span class="p no">0</span><div class="ans">Hatırlamıyorum.</div></td><td><span class="p ok">1</span><div class="ans">Halka tombak malzemedendi ve usturlaba benzetilerek kurulmuştu; yanında cam küreler, rumi kartuş ve boyalı madalyonlar vardı. Emre "beğenmedim ya. tasarım stilini komple değiştirmek lazım. daha modern bir arayüz lazım, son derece şık." dedi. Bu turun ekran görüntülerinden hemen sonra geldiği notta açıkça yazmıyor.</div></td></tr><tr><td>9</td><td>Assassin's Creed Mirage'ı referans gösteren 'modern-minimal Osmanlı' önerin neden düştü?<div class="dg" style="margin-top:4px">Emre 'osmanlı dili olmasın çünkü oyun general'a hitap edecek' dedi: oyun genel kitleye hitap edecek, yönünü değiştirdi.</div></td><td><span class="p no">0</span><div class="ans">Hatırlamıyorum.</div></td><td><span class="p ok">1</span><div class="ans">Emre Osmanlı görsel dilini toptan reddetti: "osmanlı dili olmasın çünkü oyun general'a hitap edecek." Mirage yönü de bu retle düştü.</div></td></tr><tr><td>10</td><td>Anno 117 / Age of Empires IV / Age of Mythology Retold önerine Emre ne dedi, nasıl örnekler istedi?<div class="dg" style="margin-top:4px">'üçünü de beğenmedim. daha heroik tematik olabilir daha sanatsal örnekler'</div></td><td><span class="p no">0</span><div class="ans">Hatırlamıyorum. Yalnız bir seçenek listesinden "1 olsun, kur bakalım" diyerek Three Kingdoms'u seçtiğini biliyorum; o listenin Anno / AoE IV / AoM önerisi olup olmadığını bilmiyorum.</div></td><td><span class="p ok">1</span><div class="ans">"üçünü de beğenmedim." Daha heroik, tematik ve sanatsal örnekler istedi, çünkü üçünü fazla sade ve kahramanlıktan uzak buldu.</div></td></tr><tr><td>11<span class="k">K</span></td><td>Total War: Three Kingdoms mürekkep turu ve ondan sonraki 'cam adalar' turu için Emre ne dedi?<div class="dg" style="margin-top:4px">TW3K turu: 'hayır ya bu ne böyle her yer kapkara olmuş'. Cam adalar: 'markasal bir oyun arayüzü gibi değil, bir mobil app arayüzü yapmışsın gibi'.</div></td><td><span class="p ok">1</span><div class="ans">Mürekkep turu için: "hayır ya bu ne böyle her yer kapkara olmuş". Cam adalar için: "bu, markasal bir oyun arayüzü gibi değil, bir mobil app arayüzü yapmışsın gibi."</div></td><td><span class="p ok">1</span><div class="ans">Three Kingdoms turu için "hayır ya bu ne böyle her yer kapkara olmuş." dedi. Cam adalar için "bu, markasal bir oyun arayüzü gibi değil, bir mobil app arayüzü yapmışsın gibi" dedi.</div></td></tr><tr><td>12</td><td>Bugün reddedilen bütün arayüz yönlerini sırasıyla say.<div class="dg" style="margin-top:4px">1) Witcher 3 (K667) 2) BFME2 palantır SVG uyarlaması ('amatör', K668) 3) tombak/usturlap WebGL krom 4) modern-minimal Osmanlı (AC Mirage) 5) Anno 117 / AoE IV / AoM Retold 6) Total War: Three Kingdoms mürekkep ('kapkara') 7) cam adalar ('mobil app').</div></td><td><span class="p mid">0,29</span><div class="ans">Bildiğim sıra: önce Three Kingdoms mürekkep turu (kapkara), sonra cam adalar (mobil app gibi). Bunlardan önceki reddedilen yönleri hatırlamıyorum.</div></td><td><span class="p ok">1</span><div class="ans">Bunlar bugün değil, 30 Eylül'de reddedildi. Sıra defter numaralarına göre:
+   1. Witcher 3 çıpası
+   2. İlk BFME2 (palantır ve SVG tombak)
+   3. İkinci BFME2 (usturlap halka)
+   4. Osmanlı dili ve Mirage
+   5. Anno 117, AoE IV ve AoM Retold referansları
+   6. Three Kingdoms mürekkep turu
+   7. Cam adalar
+   8. HUD merkez nesnesi olarak rüzgârgülü</div></td></tr><tr><td>13</td><td>Emre görsel kalite çıtasını hangi sözlerle tarif etti?<div class="dg" style="margin-top:4px">'kaliteli efektli gölgeli model kalitesi yüksek görüntü kalitesi yüksek, premium ve modern olan tarz'; tema görünümü '2026'da çıkacak bir premium oyun kadar kaliteli', 'AI slop bir şey değil istediğim'.</div></td><td><span class="p no">0</span> <span class="dg">(oto 0,33)</span><div class="ans">Tahmin: arayüz için "şık, güçlü, animatif efektler… her şeyiyle mükemmel" dedi. İkon için "ödül alabilecek bir ikon istiyorum, o derece başarılı olsun" dedi.</div></td><td><span class="p mid">0,67</span><div class="ans">"premium oyun kadar kaliteli… AI slop bir şey değil istediğim" ve "bu referanstan bile daha iyi bir iş bekliyorum senden. profesyonel bir iş bekliyorum."</div></td></tr><tr><td>14<span class="k">K</span></td><td>'Hayal gücünden bir çalışma' isterken Emre arayüzün nasıl olmasını istedi?<div class="dg" style="margin-top:4px">'şık, güçlü, animatif efektler, dolguları butonları yerleşkeleri her şeyiyle mükemmel bir arayüz'; 'kullanıcının ekranını aşırı kaplamaması lazım'; 'şık, anlaşılır ve zevkli'.</div></td><td><span class="p ok">1</span><div class="ans">"Şık, güçlü, animatif efektler, dolguları, butonları, yerleşkeleri her şeyiyle mükemmel" olsun istedi. Kullanıcının ekranını aşırı kaplamamalı; şık, anlaşılır ve zevkli olmalı.</div></td><td><span class="p ok">1</span><div class="ans">tahmin: "şık, güçlü, animatif efektler… kullanıcının ekranını aşırı kaplamaması lazım. şık, anlaşılır ve zevkli bir arayüz." Bu sözün o istekle birlikte söylendiğini notta göremiyorum.</div></td></tr><tr><td>15<span class="k">K</span></td><td>K669 ne diyor? Emre'nin 'general' sözü neydi, fraksiyonlara ne oluyor?<div class="dg" style="margin-top:4px">Sunum genel kitleye, premium ve Osmanlı odaklı değil ('bunu amerikadan da biri oynayabilir'). 'General' = genel kitle (C&amp;C Generals değil). Fraksiyonlar (Osmanlı, Doğu Roma, Safeviler…) aynı kalıyor.</div></td><td><span class="p mid">0,50</span> <span class="dg">(oto 1)</span><div class="ans">K669'a göre oyun genel kitleye yönelik ve ortak sunumda Osmanlı süslemesi yok. Emre'nin "general" sözünü hatırlamıyorum. Tahmin: fraksiyonlar ayrı kaplamalarla kendi kimliğini taşıyor (planda Osmanlı / Doğu Roma kaplaması var).</div></td><td><span class="p ok">1</span><div class="ans">K669'a göre sunum genel kitleye yönelik olacak, Osmanlı odaklı olmayacak. Emre "bunu amerikadan da biri oynayabilir" dedi. "General" sözü ise Osmanlı dili retindeydi: "oyun general'a hitap edecek". Fraksiyonlar (Osmanlı, Doğu Roma, Safevîler…) aynı kalıyor, K668 kısmen geçersiz.</div></td></tr><tr><td>16<span class="k">K</span></td><td>K669'da Emre'ye açık bırakılan soru neydi?<div class="dg" style="margin-top:4px">GDD §7'deki 'minyatür kimlik' sütununa ne olacağı.</div></td><td><span class="p ok">1</span><div class="ans">Tahmin: GDD §7'deki "minyatür kimlik" sorusu.</div></td><td><span class="p no">0</span><div class="ans">Hatırlamıyorum.</div></td></tr><tr><td>17<span class="k">K</span></td><td>Referans incelerken Emre neye itiraz etti; o günden beri nasıl kare alıyorsun?<div class="dg" style="margin-top:4px">Çok sayıda video indirmeye: 'bokunu çıkarma kaç tane video indiriyosun ya'. Artık az indirip tek kareleri doğrudan akıştan alıyor (yt-dlp -g + ffmpeg -ss … -frames:v 1).</div></td><td><span class="p ok">1</span><div class="ans">Gereksiz indirmeye itiraz etti ("bokunu çıkarma kaç tane video indiriyosun ya"). Tahmin: o günden beri yalnız gereken birkaç kareyi alıyorum, video indirmiyorum.</div></td><td><span class="p ok">1</span><div class="ans">Emre toplu video indirmeye itiraz etti: "bokunu çıkarma kaç tane video indiriyosun ya". O günden beri akıştan oyun başına birkaç kare çekiyorum.</div></td></tr><tr><td>18<span class="k">K</span></td><td>Görsel bir işi sunarken her seferinde ne yapman gerekiyor ve neden?<div class="dg" style="margin-top:4px">Canlı localhost linkini mesaja yazmak; Emre 'nasıl görebilirim? neden siteyi de vermiyorsun beni arattırıyorsun her seferinde?' diye sordu.</div></td><td><span class="p ok">1</span><div class="ans">Her sunumda canlı localhost linkini vermem gerekiyor. Sebebi Emre'nin "neden siteyi de vermiyorsun, beni arattırıyorsun her seferinde?" demesi.</div></td><td><span class="p ok">1</span><div class="ans">Tezgâhı açıp tam localhost linkini, parametreleriyle birlikte mesaja yazmam gerekiyor; yalnız PNG göndermek yetmiyor. Emre "neden siteyi de vermiyorsun beni arattırıyorsun her seferinde?" dedi.</div></td></tr><tr><td>19<span class="k">K</span></td><td>Oyunun yeni adı ne oldu (hangi kararla), elenen ad önerilerinden ikisi hangileri, ikon için son yön ne?<div class="dg" style="margin-top:4px">'The Winds of the East' (K670). Elenenler: Golden Horn, Warcrown, Era of Sieges, Sic Transit, The Era of Sultans… İkon: artistik işlenmiş rüzgâr ve kılıç; son istek ünlü strateji oyunlarının 5 ikonunu incelemek.</div></td><td><span class="p ok">1</span><div class="ans">Yeni ad *The Winds of the East*, karar K670; kod adı Kızılelma kalıyor. Elenenlerden ikisi Golden Horn ve Warcrown (Era of Sieges, Sic Transit ve Era of Sultans da elendi). İkonda son yön sanatsal işlenmiş bir kılıç ve rüzgâr. Önerim zeminsiz tek bir kılıç, tek bir rüzgâr kıvrımı ve tek bir kırmızı aksan; Emre'nin cevabı bekleniyor.</div></td><td><span class="p ok">1</span><div class="ans">Ad "The Winds of the East" oldu (K670). Elenenlerden ikisi Golden Horn ve Sic Transit; Kızılelma da kullanılmayacak. İkonun son yönü artistik biçimde işlenmiş bir rüzgâr ve kılıç (D-26). Önerim tek kılıç, tek rüzgâr kıvrımı ve tek kırmızı aksandı; bu, Emre'nin cevabını bekliyor.</div></td></tr><tr><td>20<span class="k">K</span></td><td>Oturum 543 nasıl kapanmalı ve başlık yazı tipiyle ilgili hangi iş açık?<div class="dg" style="margin-top:4px">kapanis_hukmu.py --kapsam calisma; oturumlar/2026-09-30-oturum-543.md günlüğü '## SIRADAKİ İŞ' ile; kilit silinir (oturum_ac.py --kilit-sil); commit yok. Noto Serif Google Fonts'tan geliyor (CDN yasağına aykırı); projeye indirmek için izin istenecek.</div></td><td><span class="p ok">1</span><div class="ans">Kapanış sırası şöyle:
+    - `kapanis_hukmu.py --kapsam calisma` çalıştırılır.
+    - `oturumlar/2026-09-30-oturum-543.md` günlüğü `## SIRADAKİ İŞ` ile biter.
+    - Gerekirse SISTEM-KAYDI satırı güncellenir.
+    - `oturum_ac.py --kilit-sil` çalıştırılır.
+    - Commit yapılmaz.
+    
+    Yazı tipiyle ilgili açık iş: fontun pakete gömülmesi, bunun için Emre'den indirme izni gerekiyor. Bunun özellikle başlık yazı tipi olduğunu hatırlamıyorum.</div></td><td><span class="p no">0</span><div class="ans">Hatırlamıyorum.</div></td></tr>
+</table>
+<h2>Yöntem</h2><ul>
+<li><b>A:</b> <code>forkSession(upTo = "Compacted")</code>, yani gerçek CLI'nin 3. sıkıştırmadan sonra yüklediği hâl: sınır, özet, korunan kesit. Bağlam 8.504 token, mesaj gönderilmeden ölçüldü. Soruların hepsi tek mesajda gitti.</li>
+<li><b>B:</b> Kayıt sıkıştırma sınırlarında üç kesite bölündü. Döküme kullanıcı mesajları, ara mesajlar, soru aracı cevapları, Claude'un metinleri ve araç çağrılarının tek satırı girdi; özetler girmedi. Her kesitte ayrı bir Claude, <code>defter.HEAD_PROMPT</code> talimatı ve defterin o anki hâliyle işlem listesi çıkardı. İşlemler ürünün <code>defter.apply</code>'ıyla geçici bir userData'ya yazıldı. Not <code>dogus.buildNote</code> ile kuruldu (defter özeti 20.000, ilk görev, son 6 tur). Yeni beden 1. mesajda notu, 2. mesajda soruları aldı. Çıkarıcı soruları görmedi.</li>
+<li><b>İkisi için ortak:</b> boş bir sahne klasörü, <code>tools: []</code>, <code>settingSources: []</code>, <code>persistSession: false</code>. Kızıl Elma'nın <code>CLAUDE.md</code>'si ve 8 Ekim'e kadar güncellenen <code>memory/</code> klasörü iki bedene de girmedi.</li>
+<li><b>Sınırlar:</b>
+<ul>
+<li>Defteri canlı baş değil, kaydı sonradan okuyan bir Claude tuttu.</li>
+<li>İçe aktarılan K-dosyaları ve mesaja uyan satırlar notta yoktu; bugünkü hâlleri sızıntı olurdu.</li>
+<li>Eski bedenin "eksikler" adımı yapılmadı (~614 bin tokenlık soğuk bağlam).</li>
+<li>Tek oturum, tek koşu; tekrarlanırsa cevaplar biraz değişebilir.</li>
+</ul></li>
+<li><b>Güvenlik:</b> asıl oturum dosyası ölçümden önce ve sonra aynı (135.319.805 bayt, aynı zaman). A dalı Kızıl Elma klasöründen hemen sahneye taşındı, sonra silindi. Geride dal ya da klasör kalmadı.</li></ul>
+<details><summary>B'nin devir notu (yeni bedenin ilk mesajı)</summary><pre>[Claude Panel devir notu] Yeni bir bedenle uyandın: Claude Panel'de bu projenin beyni (Octopus ahtapotunun başı) sensin, ama önceki konuşmayı görmüyorsun. Önceki beden bu notu 30 Eyl 18:53 bıraktı. Aşağıdakiler masanda, gerisi kayıtta duruyor.
+Önceki bedenin oturumu: 6e15a2f4-0e77-4083-92fe-f4dafb9c913d. Bir ayrıntı gerekirse önce `hatirla` ile ara, `hatirla_oku` ile oku; yetmezse `danis` ile ona sor (kaynak: { oturum: "6e15a2f4-0e77-4083-92fe-f4dafb9c913d" }).
+
+## Defter
+Beyin defteri (Claude Panel): bu projede kullanıcıyla vardığınız kurallar, retler, zevk, kararlar ve açık işler. Sıkıştırmalardan sonra da masana konur; buna göre çalış, değişen bir şey olursa `defter` ile güncelle.
+[D-16 kural] Referans oyunlar görselleri indirilip kare kare incelenir. Toplu video indirilmez; akıştan oyun başına birkaç kare çekmek yeterli. (30 Eyl)
+  neden: Emre: "inceleyeceğin örnekleri indirip kare kare analizini yaparak incele"; sonra: "bokunu çıkarma kaç tane video indiriyosun ya"
+[D-10 kural] Görsel bir iş sunulurken tezgâh açılır ve tam localhost linki (parametreleriyle) mesaja yazılır; yalnız PNG göndermek yetmez. (30 Eyl)
+  neden: Emre: "neden siteyi de vermiyorsun beni arattırıyorsun her seferinde?"
+[D-4 kural] HUD görünümünde önce iki uç çıpa kare kurulur (sade ve kalabalık); Emre onaylamadan panellerin geri kalanı üretilmez. (30 Eyl)
+  neden: KROM görünümü hiç onaylanmadı; K260 gereği oturum 543'te bu sıra kondu.
+[D-24 ret] Oyun ikonu ve HUD merkez nesnesi olarak rüzgârgülü reddedildi; ikon Doğu fikrini taşımalı. (30 Eyl)
+  neden: Emre: "yok ya, doğu temalı bir ikon lazım, doğu fikri"
+[D-23 ret] Reddedilen ad önerileri: Golden Horn, Sic Transit (fazla edebî ve felsefi). Ad, destansı tarihî RTS türüne oturmalı. (30 Eyl)
+  neden: Emre: "beğenmedim golden horn"; "bizim tarzdaki bir oyuna gitmez bu isim"
+[D-20 ret] 5. tur 'yüzen buzlu cam adalar' HUD reddedildi: altın kenarlı, bileşen kütüphanesi gibi kurulmuş. Ekran payı sorun değildi; marka kimliği yoktu. (30 Eyl)
+  neden: Emre: "bu, markasal bir oyun arayüzü gibi değil, bir mobil app arayüzü yapmışsın gibi"
+[D-18 ret] Total War: Three Kingdoms dilindeki 4. tur HUD reddedildi: mürekkep lekesi paneller, panelden taşan boyalı usta figürü, boyalı küre harita. Ekran fazla karanlık bulundu. (30 Eyl)
+  neden: Emre: "hayır ya bu ne böyle her yer kapkara olmuş."
+[D-15 ret] HUD referansı olarak Anno 117, Age of Empires IV ve Age of Mythology Retold reddedildi; fazla sade ve kahramanlıktan uzak bulundu. (30 Eyl)
+  neden: Emre: "üçünü de beğenmedim. daha heroik tematik olabilir daha sanatsal örnekler"
+[D-12 ret] Arayüzde Osmanlı görsel dili reddedildi; buna önerilen "modern-minimal Osmanlı" (Mirage yönü) de dahil. (30 Eyl)
+  neden: Emre: "osmanlı dili olmasın çünkü oyun general'a hitap edecek"
+[D-11 ret] İkinci BFME2 HUD uyarlaması reddedildi: tombak usturlap halka, cam küreler, rumi kartuş ve boyalı madalyonlar. Stil komple değişecek. (30 Eyl)
+  neden: Emre: "beğenmedim ya. tasarım stilini komple değiştirmek lazım. daha modern bir arayüz lazım, son derece şık."
+[D-7 ret] İlk BFME2 HUD uyarlaması reddedildi: palantır kümesi, SVG ile kodla üretilmiş tombak çerçeve, rumi tepelik, parşömen mini harita amatör bulundu. (30 Eyl)
+  neden: Emre: "amatör duruyor şu ana gördüğüm kadarıyla"
+[D-5 ret] HUD için Witcher 3 referanslı çıpa reddedildi (K667: koyu yarı saydam zemin, ince altın hat, serif başlıklar). (30 Eyl)
+  neden: Emre: "olmamış. bfme2 referanslarına bak."
+[D-25 zevk] Oyun ikonu ödül alabilecek kalitede olmalı. (30 Eyl)
+  neden: Emre: "ödül alabilecek bir ikon istiyorum o derece başarılı olsun"
+[D-19 zevk] Arayüz ekranı aşırı kaplamamalı. Şık, güçlü, anlaşılır ve zevkli olmalı; animasyonlu efektleri, dolguları, düğmeleri ve yerleşimiyle kusursuz görünmeli. (30 Eyl)
+  neden: Emre: "şık, güçlü, animatif efektler… kullanıcının ekranını aşırı kaplamaması lazım. şık, anlaşılır ve zevkli bir arayüz."
+[D-14 zevk] Arayüz 2026'da çıkacak premium bir oyun kalitesinde olmalı: efektli, gölgeli, yüksek görüntü kalitesi. AI slop görünümü kabul edilmez. Tarz kahramanca, tematik ve sanatsal olmalı; düz ve minimal "modern" olmamalı. (30 Eyl)
+  neden: Emre: "premium oyun kadar kaliteli… AI slop bir şey değil istediğim"; "daha heroik tematik olabilir daha sanatsal"
+[D-9 zevk] Arayüzde çıta profesyonel iş: verilen referansı kopyalamak yetmez, ondan daha iyisi beklenir. (30 Eyl)
+  neden: Emre: "bu referanstan bile daha iyi bir iş bekliyorum senden. profesyonel bir iş bekliyorum."
+[D-1 zevk] Tabur hareketinin çıtası Total War: döndürme, koşu ve cephe sürükleme hızlı ve canlı olmalı, taburlar yan yan kaymamalı. (30 Eyl)
+  neden: Emre: "taburlar yan yan kaymadan hızlı ve canlı olacak biçimde düzelt"
+[D-26 karar] İkon yönü değişti: doğan güneş ve kubbe madalyonu bırakıldı. Yeni yön, artistik biçimde işlenmiş bir rüzgâr ve kılıç. (30 Eyl)
+  neden: Emre: "sadece artistik bir şekilde işlenmiş bir rüzgar ve kılıç ikonu olabilir."
+[D-22 karar] K670: Oyunun adı "The Winds of the East" ("The" ile). Kızılelma adı ve Kızıl Elma küresi kullanılmayacak. 'Kızılelma' depoda kod adı olarak kalıyor. Resmî marka taraması Emre'de. (30 Eyl)
+  neden: Emre: "oyunun ismi de kızılelma olmayacak"; sonra: "evet, The Winds of the East olsun"
+[D-13 karar] K669: Oyunun sunumu genel kitleye yönelik olacak, Osmanlı odaklı olmayacak. Fraksiyonlar aynı kalıyor (Osmanlı, Doğu Roma, Safevîler…). K668 kısmen geçersiz. (30 Eyl)
+  neden: Emre: "temamız osmanlı odaklı olmayacak, çünkü bunu amerikadan da biri oynayabilir"
+[D-2 karar] K666 dizilme K665'in yerine geçti: hedefe 8 m kala tabur yerine konur, her er yeni yuvasına dönüp 1,6 kat hızla koşar, yollar kesişmez, yarım hızla yan kayma yok; tek tabur kendi ortası etrafında döner. (30 Eyl)
+  neden: Oturum 542'de Total War verisine bakılarak kuruldu; Emre "tamam g" deyip sıradaki işe geçti.
+[D-27 açık iş] Kılıç ve rüzgâr ikonunun yönü Emre'nin cevabını bekliyor. v1 (ikon_kilic.py) 32 ve 16 px'de 'Ø' gibi okunuyor. Beş RTS ikonu incelendi; öneri: tek kılıç, tek rüzgâr kıvrımı, zemin yok, tek kırmızı aksan. (30 Eyl)
+  neden: 15:50'de öneri sunuldu; Emre /compact verdi, cevap gelmedi.
+[D-21 açık iş] HUD, docs/HUD-PLANI.md'ye göre yeniden kurulacak. Plan BFME2 dosyalarının analizine dayanıyor: arayüz tek bir marka nesnesi olacak, çerçeve Blender'da modellenip resme dökülecek, iş gri kil maketlerle başlayacak. Merkez nesne ikon kararına bağlı. (30 Eyl)
+  neden: Emre BFME2 referansıyla profesyonel bir plan dosyası istedi; plan 15:04'te sunuldu.
+[D-3 açık iş] K666 dizilmesi ve yeni RUN koşu klibi Emre'nin tezgâhta denemesini ve onayını bekliyor (klip oyuncuya görünen içerik, K260). Oturum 542 değişiklikleri commit edilmedi. (30 Eyl)
+  neden: Oturum 542 kapanışında Emre'ye bırakıldı.
+Tamamı için: `defter listele`.
+
+## Oturumun ilk görevi
+SIRADAKİ İŞ: Döndürmeyi, koşuyu ve sürüklenen cepheyi Total War'a bakarak yeniden kur: önce Total War'da yerinde dönüşü, koşu adımını ve sağ tuş cephe çizimini ölç, sonra üçünü de taburlar yan yan kaymadan hızlı ve canlı olacak biçimde düzelt (K665'i yeniden aç) — Emre'nin verdiği hedef (oturum 541).
+
+## Son turlar (kayıttan, kelimesi kelimesine)
+### Kullanıcı · 30 Eyl 18:27
+The Winds of the East olmaz mı, The kullanarak
+
+### Claude
+Olur, "The Winds of the East" dilbilgisi açısından tamamen doğru.
+
+- **"The" ile:** daha destansı, kitap ya da film adı gibi okunur. *The Lord of the Rings* ve *The Battle for Middle-earth* de böyle. BFME2 havasına bu daha uygun.
+- **"The" olmadan:** daha kısa ve logoda daha sıkı durur.
+- Mağaza ve aramada ikisi de sorun çıkarmaz. Alfabetik listelerde genelde "The" atlanır, oyun "W" harfinde görünür.
+
+Önerim **"The" ile** gitmen: *The Winds of the East*. Logoda "The" küçük ve üstte durur, "Winds of the East" büyük yazılır.
+
+Bunu kesin ad olarak kaydedeyim mi? Evet dersen K670'i bu adla güncellerim ve rüzgârgülü ikonunun gri kil maketine başlarım.
+
+### Kullanıcı · 30 Eyl 18:27
+evet, The Winds of the East olsun
+
+### Claude
+Doğrulama: ad K670'e, GDD'ye, HUD planına ve hafızaya işlenecek. Kapılar koşup yeşil kaldıkları görülecek.
+
+Oyunun adı **The Winds of the East** olarak kaydedildi.
+
+- **K670:** yeni ad, sırayla elenen adlar ve açık kalan resmî marka taraması (BLOKE ETMEZ) yazıldı. "Kızılelma" kod adı olarak kalıyor.
+- **GDD:** ad paragrafına yeni adı yazan not düşüldü.
+- **[HUD-PLANI.md](docs/HUD-PLANI.md):** §4'te karar işlendi, §8'deki açık soru güncellendi.
+- **Kapılar:** durduran kırmızı yok. Belge biçimiyle ilgili 11 uyarı zaten vardı, bakım oturumuna kalıyor.
+
+**Sıradaki karar:** ikon ve arayüzün merkezindeki nesne **rüzgârgülü** olsun mu? — BLOKE EDER. Rüzgârgülü haritanın çevresini sarar, sekiz ucu düğme yuvası olur, doğu ucu altından yapılır. Evet dersen Blender'da gri kil maketini kurup ikonun 16, 32, 64 ve 256 px silüetini ve arayüz yerleşimini Isengard karesinin üstünde sana gösteririm.
+
+### Kullanıcı · 30 Eyl 18:29
+yok ya, doğu temalı bir ikon lazım, doğu fikri
+
+### Claude
+Önerim: **doğan güneş ve kubbe.**
+
+**Neden Doğu:** "Doğu" kelimesinin kökünde güneşin doğduğu yön var; İngilizcedeki "East" de "Orient" de aynı yönü, sabahı anlatır. Ad ile ikon aynı fikri söylüyor.
+
+**İkon:**
+- Yarısı ufuktan yükselmiş, yaldızlı bir **güneş**.
+- Önünde koyu bir **kubbe** silüeti. Kubbe Ayasofya'dan Safevi camilerine kadar Doğu Roma, Osmanlı ve İran'ın ortak mimarisi. Bu yüzden hilal ya da haç koymuyorum; hiçbir fraksiyonu öne çıkarmıyor.
+- Kubbenin tepesinde doğuya doğru rüzgârda dalgalanan bir **sancak**. Addaki "Winds" bu.
+- Bir tuzak var: güneş ışınlarını kırmızı-beyaz dönüşümlü yapmayacağım, çünkü Japonya'nın tartışmalı "rising sun" bayrağını çağrıştırır. Işınlar altın olacak.
+
+**Arayüzde:** harita altın güneş diskinin içinde durur, ışınların uçları düğme yuvası olur, kubbe silüeti de kaynak kartuşunun tepesini süsler.
+
+Öneriyi [HUD-PLANI.md](docs/HUD-PLANI.md) §4'e işledim; rüzgârgülünü düşen öneri olarak bıraktım.
+
+Olsun mu? Evet dersen Blender'da gri kil maketini kurup ikonun 16, 32, 64 ve 256 px silüetini sana gösteririm. Kararı görsel üzerinden vermen daha kolay olur.
+
+### Kullanıcı · 30 Eyl 18:31
+olsun ama ödül alabilecek bir ikon istiyorum o derece başarılı olsun
+
+### Claude
+Doğrulama: ikonu Blender'da kodla kurup Cycles ile işleyeceğim. Ölçütlerim şunlar:
+
+- 16, 32, 64 ve 256 px'de silüetin okunması (ödüllü ikonların temel sınavı).
+- Koyu ve açık zemin üstünde denenmesi.
+- Hilal, haç ya da kırmızı-beyaz ışın bulunmaması.
+
+İlk kil sürümü kuruyorum.
+
+Boyut sınavını geçiyor: 32 px'de hâlâ güneş ve kubbe okunuyor, koyu ve açık zeminde ayakta duruyor. Kanıtları kaydedip sunuyorum.
+
+İkonun ilk çıpası hazır: altın ve mineden kabartma bir madalyon.
+
+**İkonda neler var:**
+- Koyu kırmızı mine zeminden ufuk üstüne yükselen **altın güneş**. Işınlar uzun ve kısa sırayla diziliyor, hepsi altın; kırmızı-beyaz dönüşüm yok, Japon bayrağını çağrıştırmıyor.
+- Güneşin önünde siyah mineden **kubbe silüeti**: merkez kubbe, iki yarım kubbe, iki küçük kule. Hilal, haç ya da minare yok.
+- Kubbenin alemini süsleyen, **doğuya dalgalanan sancak**.
+- Ufkun altında soldan sağa esen, uçları kıvrılan **üç altın rüzgâr**. Addaki "Winds" bu.
+- Kenarda boncuk dizili yaldızlı bir halka.
+
+**Nasıl yapıldı:** Blender'da kodla modellenip Cycles ile işlendi (`game/tools/ikon/ikon_amblem.py`); üretken görüntü kullanılmadı. Işık kabartma maden kuralına göre kuruldu: pahlar parlıyor, düz yüzler koyu kalıyor.
+
+**Sınavlar:**
+- 32 px'de güneş ve kubbe hâlâ okunuyor.
+- Koyu ve açık zeminde ayakta duruyor.
+- 16 px'de yalnız "altın daire + kırmızı" kalıyor. Görev çubuğunda sadeleştirilmiş ayrı bir küçük sürüm gerekecek; ödül alan ikon ailelerinde de böyle yapılır.
+
+**Ödül ölçüsüne çıkmak için sıradaki adımlar:**
+- Kubbe silüetini daha zarif ve tanınır hâle getirmek.
+- Rüzgârın bir kıvrımını madalyonun kenarından taşırıp ikona hareket vermek.
+- Güneşe ince kazıma dokusu eklemek; şu an görünmüyor.
+- 16 ve 32 px için sadeleştirilmiş ikon sürümü.
+
+Kareler `docs/dogrulama/olcum/ikon/` altında. Nasıl buldun? Neyin tuttuğunu ya da tutmadığını söylersen o yönde yineleyeyim.
+
+### Kullanıcı · 30 Eyl 18:44
+sadece artistik bir şekilde işlenmiş bir rüzgar ve kılıç ikonu olabilir.
+
+### Claude
+Doğrulama öncekiyle aynı: Blender'da kodla, 1024 px çıpa, 256/64/32/16 px boyut sınavı, koyu ve açık zemin.
+
+Kurgu: çapraz duran eğri bir Doğu kılıcı. Namlunun uca doğru genişleyen "yelman" çıkıntısı bu kılıcı tek bakışta tanıtıyor, namluda şam çeliği dalgası var. Çevresinde fırça darbesi gibi incelip kalınlaşan altın rüzgâr kıvrımları dolanıyor; bazıları namlunun önünden, bazıları arkasından geçiyor.
+
+Düz çizginin sebebini buldum: şeridin sivri uçları sıfır genişliğe iniyor, pah işlemi o dar açıda sonsuza fırlıyor. Uçlara en küçük bir genişlik verip pahı inceltiyorum.
+
+Rüzgâr ve kılıç ikonunun ilk çıpası hazır. Blender'da kodla kurdum: `game/tools/ikon/ikon_kilic.py`.
+
+**İkonda neler var:**
+- **Kılıç:** çapraz duran eğri bir Doğu kılıcı. Namlu uca doğru genişliyor ("yelman"); bu çıkıntı kılıcı tek bakışta tanıtıyor. Namluda şam çeliği dalgası, altın balçak, deri kabza ve aşağı kıvrılan bir topuz var.
+- **Rüzgâr:** kılıcın çevresinde dönen altın fırça darbeleri. Her birinin ortası kalın, iki ucu sivri, ve dönerken daralıyorlar. Biri namlunun önünden, biri arkasından geçerek derinlik veriyor; iki kısa çırpıntı da hareketi artırıyor.
+
+**Dürüst değerlendirme — iki kusur var:**
+1. **Küçük boyutta yanlış okunuyor.** 32 ve 16 px'de ikon "Ø" işaretine, yani boş küme simgesine benziyor. Sebep, rüzgârın neredeyse kapalı bir halka gibi durması. Ödül ölçüsündeki bir ikonda bu kabul edilemez.
+2. **Rüzgârdan çok halka okunuyor.** Büyük boyutta bile ilk izlenim "kılıcın etrafında bir halka".
+
+**Önerdiğim düzeltme:** halkayı kırmak. Rüzgâr, kılıcın arkasından tek bir büyük hilal değil, **sağa doğru savrulan iki ya da üç açık fırça darbesi** olsun: soldan girip kılıcın çevresinden dolaşan ve sağ üstte ucu açık kalan, bir sancak gibi dalgalanan şeritler. Böylece silüet kapalı bir daire olmaz, hareket yönü (doğu) okunur ve küçük boyutta "Ø" izlenimi kaybolur.
+
+Bu düzeltmeyle ilerleyeyim mi, yoksa aklında başka bir rüzgâr biçimi var mı?
+
+Kareler `docs/dogrulama/olcum/ikon/` altında.
+
+### Kullanıcı · 30 Eyl 18:49
+ünlü tps strateji oyunlarının ikonlarına bak, 5 tanesini incele ve bana örnekler sun
+
+### Claude
+Doğrulama: ikonları Steam'in kendi dosyalarından alacağım. Tarayıcıda gördüğüm küçük önizlemelerle değil, oyunların masaüstü ikonlarıyla (256 px .ico) karşılaştıracağım. İndirmeler yalnız birkaç KB'lık ikon dosyası; scratchpad'e inecek, depoya girmeyecek (K634).
+
+"tps"i RTS, yani gerçek zamanlı strateji olarak anladım. Beş ünlü strateji oyununun Steam masaüstü ikonlarını (256 px) indirdim; yukarıda büyük ve 32 px hâlleriyle yan yana:
+
+1. **Age of Empires II DE: tek bir nesne.** Rengârenk tüylü bir şövalye miğferi; zemin yok, nesne kendi silüetiyle duruyor. Tüylerdeki dört renk oyundaki oyuncu renkleri. 32 px'de de tanınıyor.
+2. **Age of Empires IV: tipografi.** Koyu mavi kumaş üstünde altın, kabartma bir "IV". Serinin gücüne yaslanıyor; yeni bir marka için bu işe yaramaz.
+3. **Age of Mythology Retold: kahraman portresi.** Gözleri ışık saçan Zeus. Duygusu güçlü, ama 32 px'de yüz çamurlaşıyor.
+4. **Total War: Three Kingdoms: kültür imzası.** Siyah bir mürekkep lekesinin üstünde kırmızı mühürde "三國" hattı. En sade ve en sanatsal olanı; 32 px'de bile kırmızı mühür okunuyor.
+5. **Northgard: oyun içi nesne.** Metal kenarlı ahşap bir kalkan. Temiz ve oyuncak gibi, küçük boyutta çok net.
+
+**Ortak dersler:**
+- Hepsinde **tek bir odak** var. Hiçbiri iki şeyi birden anlatmıyor. Benim kılıç + rüzgâr denemem bu yüzden karıştı.
+- En iyi okunanlar, AoE II, Three Kingdoms ve Northgard, **silüeti güçlü ve kontrastı yüksek** olanlar.
+- **Zemin ya hiç yok ya da tek parça.**
+
+**Bizim için önerim** Three Kingdoms'un yaklaşımı ile AoE II'nin nesne gücünü birleştirmek: **tek bir kılıç**, üzerinden fırça darbesi gibi geçen **tek bir rüzgâr kıvrımı**, zemin yok ve tek bir kırmızı aksan (örneğin kabzadaki püskül ya da rüzgârın ucundaki kırmızı kurdele).
+
+Bu yönle ilerleyeyim mi, yoksa bu beş ikondan birinin tarzı daha mı yakın aklındakine?
+
+## Açık kollar
+Açık kol yok.
+
+Notu okuduğunu ve nerede kaldığınızı iki üç cümleyle söyle, sonra kullanıcıyı bekle; kendiliğinden yeni bir işe başlama.</pre></details>
+<p class="dg">Veriler: <code>docs/octopus/olcum/p71-sonuc.json</code>, soru seti <code>p71-soru-seti.json</code>, betikler <code>olcum/betikler/</code>.</p>
+</body></html>

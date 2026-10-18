@@ -24,9 +24,12 @@ const state = {
   active: null,
   newFolder: {},   // acctId -> "Yeni sohbet" ekranında seçili klasör
   newDraft: {},    // acctId -> yazılmış ama gönderilmemiş ilk mesaj
+  newAttach: {},   // acctId -> ilk mesajın ekleri (dosya ve fotoğraflar)
+  newWorktree: {}, // acctId -> yeni sohbet ayrı çalışma kopyasında mı (git worktree)
   view: {},        // acctId -> 'code' | 'chat'
   tabs: {},        // acctId -> [tab]
   activeTab: {},   // acctId -> tab | null  (null = başlatıcı)
+  lastTerm: {},    // acctId -> kullanıcının en son baktığı terminal sekmesi (Claude'un terminal aracı varsayılan olarak bunu okur)
   panes: {},       // acctId -> DOM refs
   fontSize: 13,
 };
@@ -34,7 +37,7 @@ const tabsById = new Map();
 const pendingData = new Map();
 
 const TERM_THEME = {
-  background: '#262624', foreground: '#f0eee6', cursor: '#d97757', cursorAccent: '#262624',
+  background: '#252422', foreground: '#eeece5', cursor: '#d97757', cursorAccent: '#252422',
   selectionBackground: '#4a453d',
   black: '#2a2824', red: '#e5645a', green: '#8fbf7f', yellow: '#e2b86b', blue: '#7aa2f7',
   magenta: '#c49be0', cyan: '#6fc1c1', white: '#d8d3ca',
@@ -56,6 +59,8 @@ function toast(msg, ms = 3200) {
 
 // ---------- Kenar çubuğu ve üst bar ----------
 
+// Hesaplar bir ağaç gibi: etkin hesabın altında iki görünümü (Yerel Code, Web) açılır.
+// Hesabın rengi etkin satırda "yanar"; aynı renk çalışma alanının üstündeki ışıkta da var.
 function renderSidebar() {
   const nav = $('#accounts');
   nav.innerHTML = '';
@@ -66,25 +71,31 @@ function renderSidebar() {
     const view = state.view[a.id] || 'code';
     const isActive = state.page === 'account' && state.active === a.id;
 
-    const chip = (v, ic, label) =>
+    const viewRow = (v, ic, label, count) =>
       h('button', {
-        class: `chip ${isActive && view === v ? 'on' : ''}`,
+        class: `acct-view ${isActive && view === v ? 'on' : ''}`,
+        title: v === 'code' ? 'Claude Code bu Mac\'te çalışır (⌘K ile geç)' : 'claude.ai: sohbet ve bulut oturumları (⌘K ile geç)',
         onclick: (e) => { e.stopPropagation(); selectAccount(a.id, v); },
-      }, icon(ic, 13), label);
+      }, icon(ic, 14), h('span', {}, label), count ? h('span', { class: 'acct-view-count' }, count) : null);
 
     nav.append(
-      h('div', { class: `acct ${isActive ? 'active' : ''}`, style: `--c:${a.color}`, onclick: () => selectAccount(a.id), title: tilde(a.configDir || '~/.claude') },
+      h('div', {
+        class: `acct ${isActive ? 'active' : ''}`, style: `--c:${a.color}`, onclick: () => selectAccount(a.id),
+        title: [a.note, tilde(a.configDir || '~/.claude')].filter(Boolean).join('\n'),
+      },
         h('div', { class: 'acct-row' },
-          h('div', { class: 'avatar' }, (a.name || '?').trim().charAt(0).toLocaleUpperCase('tr')),
-          h('div', { class: 'acct-meta' },
-            h('div', { class: 'acct-name' }, a.name),
-            h('div', { class: 'acct-note' }, a.note || tilde(a.configDir || '~/.claude'))),
+          h('span', { class: 'avatar' }, (a.name || '?').trim().charAt(0).toLocaleUpperCase('tr')),
+          h('span', { class: 'acct-name' }, a.name),
           attention ? h('span', { class: 'pulse', title: 'Claude sizi bekliyor' }) : null,
-          running ? h('span', { class: 'badge', title: `${running} açık oturum` }, running) : null,
+          running && !isActive ? h('span', { class: 'badge', title: `${running} açık oturum` }, running) : null,
           i < 9 ? h('span', { class: 'acct-kbd' }, `⌘${i + 1}`) : null),
-        h('div', { class: 'acct-views' }, chip('code', 'terminal', 'Yerel Code'), chip('chat', 'globe', 'Web')))
+        isActive
+          ? h('div', { class: 'acct-views' }, viewRow('code', 'terminal', 'Yerel Code', running), viewRow('chat', 'globe', 'Web'))
+          : null,
+        isActive ? octopusSidebar(a.id) : null) // renderer/octopus.js
     );
   });
+  refreshOctopusPanes(); // sekmeler ya da kayıt değişti: başın "Ahtapot" düğmesi ve açık ahtapot bölmeleri
 }
 
 function renderNav() {
@@ -93,28 +104,6 @@ function renderNav() {
   $('#navArtifacts').classList.toggle('on', onArtifacts);
   $('#navNew').classList.toggle('on', onNew);
   $('#artCount').textContent = art.items.length || '';
-}
-
-function renderTopbar() {
-  if (state.page === 'artifacts') {
-    $('#topDot').hidden = true;
-    $('#topName').textContent = 'Artifacts';
-    const open = art.openId && artById(art.openId);
-    $('#topNote').textContent = open ? open.title : `${art.items.length} artifact`;
-    $('#viewSeg').hidden = true;
-    return;
-  }
-  const a = acct(state.active);
-  if (!a) return;
-  $('#topDot').hidden = false;
-  $('#viewSeg').hidden = false;
-  $('#topDot').style.background = a.color;
-  $('#topName').textContent = a.name;
-  const view = state.view[a.id];
-  $('#topNote').textContent = view === 'code'
-    ? `Yerel Claude Code · ${tilde(a.configDir || '~/.claude')}`
-    : 'claude.ai · sohbet ve bulut oturumları';
-  for (const b of $('#viewSeg').children) b.classList.toggle('on', b.dataset.view === view);
 }
 
 // Statik HTML'deki data-icon yer tutucularını ikonlarla doldur
@@ -130,12 +119,15 @@ function ensurePane(a) {
   if (state.panes[a.id]) return state.panes[a.id];
 
   const tabsEl = h('div', { class: 'tabs' });
-  const addBtn = h('button', { class: 'tab-add', title: 'Yeni sohbet (⌘N)', onclick: () => showLauncher(a.id) }, icon('plus', 16));
+  // Yeni sohbet ekranı açıkken bu düğme kendisi bir sekme gibi görünür (etiketiyle)
+  const addBtn = h('button', { class: 'tab-add', title: 'Yeni sohbet (⌘N)', onclick: () => showLauncher(a.id) },
+    icon('plus', 15), h('span', { class: 'tab-add-label' }, 'Yeni sohbet'));
   const launcher = h('div', { class: 'launcher' });
   const termArea = h('div', { class: 'term-area' }, launcher);
   const code = h('div', { class: 'code-pane' }, h('div', { class: 'tabbar' }, tabsEl, addBtn), termArea);
   const chat = h('div', { class: 'chat-pane' });
-  const root = h('div', { class: 'acct-pane', 'data-acct': a.id, 'data-view': 'code' }, code, chat);
+  // .aura: hesabın renginde, alanın üstünden yayılan yumuşak ışık (hangi hesaptasınız, bir bakışta)
+  const root = h('div', { class: 'acct-pane', 'data-acct': a.id, 'data-view': 'code' }, h('div', { class: 'aura' }), code, chat);
   $('#stage').append(root);
 
   const pane = { root, code, tabsEl, addBtn, termArea, launcher, chat, webview: null };
@@ -165,7 +157,6 @@ function selectAccount(id, view) {
   if (!acctInfo[id]?.at && !acctInfo[id]?.loading) loadAccountInfo(id); // model listesi + kullanım
   renderSidebar();
   renderNav();
-  renderTopbar();
   focusCurrent();
   if (changed) window.panel.saveConfig({ lastAccount: id });
 }
@@ -231,28 +222,63 @@ function renderLauncher(acctId) {
     placeholder: folder ? 'Claude\'a bir görev verin… (Enter ile başlar)' : 'Önce aşağıdan bir klasör seçin',
     oninput: (e) => { state.newDraft[acctId] = e.target.value; autosize(); },
     onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); startNew(); } },
+    onpaste: (e) => {
+      const files = [...(e.clipboardData?.files || [])];
+      if (files.length) { e.preventDefault(); addAttachments(attachments, attachEl, files); }
+    },
   });
   input.value = state.newDraft[acctId] || '';
   const autosize = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 240) + 'px'; };
   requestAnimationFrame(autosize);
 
+  // Ayrı çalışma kopyası (git worktree) ve "Octopus olarak başlat" klasör menüsünde durur; açıkken düğmede küçük bir işaret görünür
+  const wtOn = !!state.newWorktree[acctId];
+  const oc = octoState(acctId, folder, wtOn); // renderer/octopus.js
   const folderBtn = h('button', {
-    class: 'pill-btn', title: folder || 'Klasör seç',
+    class: 'pill-btn folder-btn' + (wtOn ? ' wt-on' : ''),
+    title: (folder || 'Klasör seç') + (wtOn ? ' · ayrı çalışma kopyasında açılır' : ''),
     onclick: () => openMenu(folderBtn, [
       ...recents.map((d) => ({ icon: d === folder ? 'check' : 'folder', label: tilde(d), onclick: () => { state.newFolder[acctId] = d; renderLauncher(acctId); input.focus(); } })),
       recents.length ? '-' : null,
       { icon: 'plus', label: 'Başka klasör seç…', onclick: () => pickFolderForNew(acctId) },
+      '-',
+      { icon: 'layers', label: 'Ayrı kopyada çalış', desc: 'Sohbet kendi git dalında, ana klasöre dokunmadan', checked: wtOn,
+        onclick: () => { state.newWorktree[acctId] = !wtOn; renderLauncher(acctId); input.focus(); } },
+      { icon: 'octopus', label: 'Octopus olarak başlat', desc: oc.desc, checked: oc.on,
+        onclick: () => { toggleOctopus(acctId, folder, oc); state.panes[acctId].launcher.querySelector('.new-input')?.focus(); } },
+      // Geçmişi olan klasör: var olan oturumlardan biri beyin olur (renderer/kurulum.js; yalnız okunur)
+      oc.canImport ? { icon: 'octopus', label: 'Projeyi Octopus\'a al…', desc: 'Geçmiş oturumlardan biri beyin olur; panel yalnız okur',
+        onclick: () => openImportProject(acctId, folder) } : null,
+      { icon: 'book', label: 'Octopus nasıl çalışır?', onclick: openOctopusIntro }, // renderer/kurulum.js
     ]),
-  }, icon('folder', 15), h('span', {}, folder ? tilde(folder).split('/').pop() || folder : 'Klasör seç'), icon('chevronDown', 13));
+  }, icon('folder', 15), h('span', {}, folder ? tilde(folder).split('/').pop() || folder : 'Klasör seç'),
+  wtOn ? icon('layers', 13, 'wt-mark') : null, oc.on ? icon('octopus', 13, 'wt-mark octo-mark') : null, icon('chevronDown', 13));
+
+  // Ekler: "+" ile seçilen, yapıştırılan ya da ekrana bırakılan dosya ve fotoğraflar (renderer/chat.js → readAttachment)
+  const attachments = (state.newAttach[acctId] ||= []);
+  const attachEl = h('div', { class: 'composer-attach' });
+  renderAttachments(attachments, attachEl);
+  const fileInput = h('input', { type: 'file', multiple: true, hidden: true,
+    onchange: (e) => { addAttachments(attachments, attachEl, [...e.target.files]); e.target.value = ''; input.focus(); } });
+  pane.launcher.ondragover = (e) => e.preventDefault();
+  pane.launcher.ondrop = (e) => {
+    const files = [...(e.dataTransfer?.files || [])];
+    if (!files.length) return;
+    e.preventDefault();
+    addAttachments(attachments, attachEl, files);
+    input.focus();
+  };
 
   const startNew = async () => {
     const dir = newFolderOf(acctId) || (await pickFolderForNew(acctId));
     if (!dir) return;
     const text = input.value.trim();
+    const atts = attachments.splice(0);
     state.newDraft[acctId] = '';
     input.value = '';
     await rememberFolder(acctId, dir);
-    createChatTab(acctId, dir, 'new', null, text ? { send: text } : {});
+    const worktree = !!state.newWorktree[acctId];
+    createChatTab(acctId, dir, 'new', null, { ...(text || atts.length ? { send: text, attachments: atts } : {}), worktree, octopus: octopusForNew(acctId, dir, worktree) });
   };
 
   // Yeni sohbetin modeli ve eforu: hesabın kayıtlı tercihi (sohbet başlarken SDK'ya verilir)
@@ -262,11 +288,13 @@ function renderLauncher(acctId) {
     (patch) => { saveAcctPrefs(acctId, patch); picker.refresh(); });
 
   const composer = h('div', { class: 'new-composer' },
+    attachEl,
     input,
     h('div', { class: 'composer-bar' },
+      h('button', { class: 'pill-btn icon-only attach-btn', title: 'Dosya veya fotoğraf ekle', onclick: () => fileInput.click() }, icon('plus', 16)),
+      fileInput,
       folderBtn,
-      h('button', { class: 'pill-btn ghost', title: 'Bu klasördeki son oturuma devam et', disabled: !folder,
-        onclick: () => folder && createChatTab(acctId, folder, 'continue') }, icon('history', 15), h('span', {}, 'Devam et')),
+      envButton(acctId),
       h('button', { class: 'pill-btn ghost icon-only', title: 'Claude Code\'u bu klasörde terminalde aç', disabled: !folder,
         onclick: () => folder && launch(acctId, folder, 'new') }, icon('terminal', 15)),
       connectorsButton(acctId, () => newFolderOf(acctId)),
@@ -278,21 +306,21 @@ function renderLauncher(acctId) {
   const rows = recents.length
     ? recents.map((dir) =>
         h('div', { class: 'recent-row' + (dir === folder ? ' sel' : '') },
-          h('span', { class: 'recent-ic' }, icon('folder', 16)),
+          h('span', { class: 'recent-ic' }, icon('folder', 15)),
           h('div', { class: 'recent-path', title: dir }, pathLabel(dir)),
           h('div', { class: 'recent-actions' },
             h('button', { class: 'mini main', title: 'Yeni Claude oturumu (sohbet görünümü)', onclick: () => createChatTab(acctId, dir, 'new') }, 'Yeni'),
             h('button', { class: 'mini', title: 'Bu klasördeki son oturuma devam et', onclick: () => createChatTab(acctId, dir, 'continue') }, 'Devam et'),
             h('button', { class: 'mini', title: 'Geçmiş oturumlardan seç', onclick: () => showSessionPicker(acctId, dir) }, 'Geçmiş'),
             h('button', { class: 'mini', title: 'Claude Code\'u terminalde aç', onclick: () => launch(acctId, dir, 'new') }, 'Terminal'),
-            h('button', { class: 'icon-btn', title: 'Listeden kaldır', onclick: () => removeRecent(acctId, dir) }, icon('close', 14)))))
+            h('button', { class: 'icon-btn', title: 'Listeden kaldır', onclick: () => removeRecent(acctId, dir) }, icon('close', 13)))))
     : [h('div', { class: 'empty-recent' }, 'Henüz klasör yok. ', h('button', { class: 'link-btn', onclick: () => pickFolderForNew(acctId) }, 'Bir klasör seçin'), '; burada listelenir.')];
 
   // Son artifact'ler (bu hesabın ürettikleri)
   const recentArts = art.items.filter((x) => x.source?.accountId === acctId).slice(0, 4);
 
   pane.launcher.innerHTML = '';
-  pane.launcher.style.setProperty('--c', a.color);
+  pane.root.style.setProperty('--c', a.color);
   pane.launcher.append(
     h('div', { class: 'launcher-inner' },
       !state.info.ptyOk
@@ -301,11 +329,15 @@ function renderLauncher(acctId) {
             h('code', {}, 'npm install'), ' çalıştırıp paneli yeniden açın.')
         : null,
       h('div', { class: 'new-hero' },
-        h('div', { class: 'new-eyebrow' }, h('span', { class: 'dot', style: `background:${a.color}` }), `${a.name} · Yerel Claude Code`),
-        h('h1', { class: 'new-title' }, h('span', { class: 'new-mark' }, '✳'), `${greeting()}, ne üzerinde çalışalım?`)),
+        h('span', { class: 'new-mark' }, '✳'),
+        h('h1', { class: 'new-title' }, `${greeting()}, ne üzerinde çalışalım?`)),
       composer,
+      // Kimlik satırı: hangi hesap, hangi ayar klasörü (klasör zaten yazma kutusunda)
       h('div', { class: 'new-hint' },
-        folder ? ['Klasör ', h('code', {}, tilde(folder)), ' · ayar klasörü ', h('code', {}, tilde(a.configDir || '~/.claude'))] : 'Klasör seçilmedi'),
+        h('span', { class: 'dot' }), h('b', {}, a.name),
+        a.note ? [h('span', { class: 'sep' }, '·'), a.note] : null,
+        h('span', { class: 'sep' }, '·'), h('code', {}, tilde(a.configDir || '~/.claude')),
+        oc.short ? [h('span', { class: 'sep' }, '·'), h('span', { class: 'octo-hint' + (oc.on ? ' on' : ''), title: oc.desc }, icon('octopus', 13), 'Octopus ' + oc.short)] : null),
       h('div', { class: 'recent-title' }, 'Son klasörler'),
       h('div', { class: 'recent' }, rows),
       recentArts.length
@@ -317,9 +349,116 @@ function renderLauncher(acctId) {
                h('span', { class: 'mini-art-title' }, x.title))))]
         : null,
       h('div', { class: 'tip' },
-        h('b', {}, 'Giriş: '), 'Sohbet görünümü bu hesabın Claude Code girişini kullanır. Henüz giriş yapmadıysanız bir kez ',
-        h('b', {}, 'Terminal'), ' ile açıp ', h('code', {}, '/login'), ' yapın.'))
+        'Sohbet bu hesabın Claude Code girişini kullanır. Giriş yapılmadıysa bir kez ',
+        h('b', {}, 'Terminal'), '\'de açıp ', h('code', {}, '/login'), ' yazın.'))
   );
+}
+
+// ---------- Ortamlar (ana süreçte environments.js) ----------
+// Ortamlar panel genelindedir (config.json → environments); hangisinin kullanılacağı hesap başına seçilir (chatPrefs[hesap].env).
+
+const environmentsList = () => state.cfg.environments || [];
+
+// Hesabın seçili ortamı; silinmişse yok sayılır
+function envOf(acctId) {
+  const id = state.cfg.chatPrefs?.[acctId]?.env;
+  return (id && environmentsList().find((e) => e.id === id)) || null;
+}
+
+function selectEnv(acctId, id) {
+  saveAcctPrefs(acctId, { env: id || '' });
+  renderLauncher(acctId);
+}
+
+function envSummary(e) {
+  const n = e.vars.split('\n').filter((l) => /^\s*(export\s+)?[A-Za-z_]\w*\s*=/.test(l)).length;
+  return [n ? `${n} değişken` : 'Değişken yok', e.setup.trim() ? 'kurulum betiği' : null].filter(Boolean).join(' · ');
+}
+
+function envButton(acctId) {
+  const env = envOf(acctId);
+  const btn = h('button', {
+    class: 'pill-btn env-btn' + (env ? ' on' : ''),
+    title: env ? `Ortam: ${env.name} (${envSummary(env)})` : 'Ortam seç: değişkenler ve kurulum betiği',
+    onclick: () => openMenu(btn, [
+      { header: 'Ortam' },
+      { label: 'Ortam yok', desc: 'Yalnız giriş kabuğunun değişkenleri', checked: !env, onclick: () => selectEnv(acctId, '') },
+      ...environmentsList().map((e) => ({ icon: 'box', label: e.name, desc: envSummary(e), checked: e.id === env?.id, onclick: () => selectEnv(acctId, e.id) })),
+      '-',
+      env ? { icon: 'pencil', label: `"${env.name}" ortamını düzenle…`, onclick: () => editEnvironment(env.id, acctId) } : null,
+      { icon: 'plus', label: 'Ortam ekle…', onclick: () => editEnvironment(null, acctId) },
+    ], 'env-menu'),
+  }, icon('box', 15), h('span', {}, env ? env.name : 'Ortam'), icon('chevronDown', 13));
+  return btn;
+}
+
+// Ortam ekleme/düzenleme penceresi. Yeni ortam, açıldığı hesapta seçili olur.
+function editEnvironment(id, acctId) {
+  const list = environmentsList();
+  const cur = list.find((e) => e.id === id) || null;
+  const field = (tag, attrs, value) => { const el = h(tag, { class: 'dlg-input', spellcheck: 'false', ...attrs }); el.value = value || ''; return el; };
+  const nameEl = field('input', { type: 'text', placeholder: 'örn. Node 22 · staging' }, cur?.name);
+  const varsEl = field('textarea', { class: 'dlg-input env-code env-vars', rows: 7,
+    placeholder: 'ANAHTAR=değer\nPATH=$HOME/.local/bin:$PATH\n# yorum satırı' }, cur?.vars);
+  const setupEl = field('textarea', { class: 'dlg-input env-code env-setup', rows: 5,
+    placeholder: '# Her oturum başında seçili klasörde çalışır\nnpm install --silent\nexport API_URL=https://staging.ornek.com' }, cur?.setup);
+  const errEl = h('div', { class: 'env-error', hidden: true });
+  for (const el of [nameEl, varsEl]) el.addEventListener('input', () => { errEl.hidden = true; });
+
+  const close = () => { modal.remove(); document.removeEventListener('keydown', onKey, true); focusCurrent(); };
+  const onKey = (e) => {
+    if (document.querySelector('.modal.dlg')) return; // üstte silme onayı açık
+    if (e.key === 'Escape') { e.stopPropagation(); close(); }
+    else if (e.key === 'Enter' && (e.metaKey || e.target === nameEl)) { e.preventDefault(); save(); }
+  };
+  const refresh = () => accounts().forEach((a) => renderLauncher(a.id));
+
+  const save = async () => {
+    const name = nameEl.value.trim();
+    const errors = name ? await window.panel.envCheck(varsEl.value) : ['Ortama bir ad verin.'];
+    if (environmentsList().some((e) => e.id !== cur?.id && e.name.toLowerCase() === name.toLowerCase())) errors.push(`"${name}" adında bir ortam zaten var.`);
+    if (errors.length) { errEl.textContent = errors.join('\n'); errEl.hidden = false; return; }
+    const next = { id: cur?.id || 'env' + Date.now().toString(36), name, vars: varsEl.value, setup: setupEl.value };
+    const all = environmentsList();
+    state.cfg = await window.panel.saveConfig({ environments: cur ? all.map((e) => (e.id === cur.id ? next : e)) : [...all, next] });
+    close();
+    if (!cur && acctId) saveAcctPrefs(acctId, { env: next.id });
+    refresh();
+    toast(cur ? 'Ortam kaydedildi. Açık oturumlar eski değerlerle sürer; yeni oturumlarda geçerli.' : `"${name}" ortamı eklendi ve seçildi.`);
+  };
+
+  const remove = async () => {
+    const ok = await dialogModal({
+      title: 'Ortam silinsin mi?',
+      body: `"${cur.name}" bütün hesaplardan kaldırılır. Bu ortamla açık oturumlar etkilenmez.`,
+      okLabel: 'Sil', danger: true,
+    });
+    if (!ok) return;
+    state.cfg = await window.panel.saveConfig({ environments: environmentsList().filter((e) => e.id !== cur.id) });
+    close();
+    refresh();
+    toast('Ortam silindi.');
+  };
+
+  const label = (text, hint) => h('label', { class: 'env-label' }, text, hint ? h('small', {}, hint) : null);
+  const modal = h('div', { class: 'modal env-modal' },
+    h('div', { class: 'modal-card dlg-card env-card' },
+      h('h2', {}, cur ? 'Ortamı düzenle' : 'Ortam ekle'),
+      h('p', { class: 'dlg-body' }, 'Bu ortamla açılan sohbetler ve terminaller aşağıdaki değişkenleri alır. Ortamlar bütün hesaplarda ortaktır; hangisinin kullanılacağı hesap başına seçilir.'),
+      label('Ad'), nameEl,
+      label('Ortam değişkenleri', '.env biçimi · $PATH gibi değişkenler açılır, tek tırnak açılmaz'), varsEl,
+      label('Kurulum betiği', 'isteğe bağlı · export ettikleri oturuma geçer · hata verirse oturum başlamaz'), setupEl,
+      errEl,
+      h('p', { class: 'env-note' }, icon('lock', 13), 'Değerler bu Mac\'te panelin config.json dosyasında düz metin olarak saklanır.'),
+      h('div', { class: 'modal-actions' },
+        cur ? h('button', { class: 'ghost-btn danger env-del', onclick: remove }, icon('trash', 14), 'Sil') : null,
+        h('span', { class: 'spacer' }),
+        h('button', { class: 'ghost-btn', onclick: close }, 'Vazgeç'),
+        h('button', { class: 'primary-btn env-save', onclick: save }, cur ? 'Kaydet' : 'Ekle'))));
+  modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
+  document.addEventListener('keydown', onKey, true);
+  document.body.append(modal);
+  nameEl.focus();
 }
 
 async function pickFolderForNew(acctId) {
@@ -355,16 +494,19 @@ function showLauncher(acctId) {
 
 // ---------- Terminaller ----------
 
-async function launch(acctId, cwd, mode, resumeId) {
+// background: Claude'un açtığı sekme; kullanıcının baktığı sekme ve hesap değişmez
+async function launch(acctId, cwd, mode, resumeId, envId = envOf(acctId)?.id, { background = false } = {}) {
   const a = acct(acctId);
   const pane = state.panes[acctId];
   if (!a || !pane) return;
-  if (state.active !== acctId || state.view[acctId] !== 'code') selectAccount(acctId, 'code');
+  if (!background && (state.active !== acctId || state.view[acctId] !== 'code')) selectAccount(acctId, 'code');
 
-  const host = h('div', { class: 'term-host active' });
+  const host = h('div', { class: 'term-host' + (background ? '' : ' active') });
   pane.termArea.append(host);
-  pane.launcher.classList.remove('active');
-  for (const t of state.tabs[acctId]) t.host.classList.remove('active');
+  if (!background) {
+    pane.launcher.classList.remove('active');
+    for (const t of state.tabs[acctId]) t.host.classList.remove('active');
+  }
 
   const term = new Terminal({
     fontFamily: '"SF Mono", Menlo, Monaco, "Courier New", monospace',
@@ -396,12 +538,13 @@ async function launch(acctId, cwd, mode, resumeId) {
     exited: false, activity: false, attention: false, termTitle: '',
   };
 
-  const res = await window.panel.ptyCreate({ accountId: acctId, cwd, mode, resumeId, cols: term.cols, rows: term.rows });
+  const res = await window.panel.ptyCreate({ accountId: acctId, cwd, mode, resumeId, envId, cols: term.cols, rows: term.rows });
   if (!res.ok) {
     term.dispose();
     host.remove();
     toast('Terminal açılamadı: ' + res.error, 6000);
     renderTabs(acctId);
+    if (background) throw new Error(res.error);
     return;
   }
 
@@ -424,14 +567,18 @@ async function launch(acctId, cwd, mode, resumeId) {
   });
 
   state.tabs[acctId].push(tab);
-  state.activeTab[acctId] = tab;
+  if (!background) {
+    state.activeTab[acctId] = tab;
+    state.lastTerm[acctId] = tab;
+  }
 
   // Son klasörleri ana süreç güncelledi; yeniden oku
   state.cfg = await window.panel.getConfig();
   renderLauncher(acctId);
   renderTabs(acctId);
   renderSidebar();
-  focusCurrent();
+  if (!background) focusCurrent();
+  return tab;
 }
 
 function renderTabs(acctId) {
@@ -463,6 +610,7 @@ function renderTabs(acctId) {
 
 function activateTab(acctId, tab) {
   state.activeTab[acctId] = tab;
+  if (tab?.kind === 'term') state.lastTerm[acctId] = tab;
   clearFlags(tab);
   renderTabs(acctId);
   renderSidebar();
@@ -475,6 +623,7 @@ function closeTab(tab, force) {
     if (!force && tab.busy && !confirm(`"${tab.title}" sohbetinde Claude hâlâ çalışıyor. Kapatılsın mı? (Sonra "Devam et" ile dönebilirsiniz.)`)) return;
     if (tab.chatId) { window.panel.chatClose(tab.chatId); chatsById.delete(tab.chatId); }
     closeArtifactInChat(tab);
+    closeOctopusInChat(tab);
   } else {
     if (!force && !tab.exited && !confirm(`"${tab.title}" terminali kapatılsın mı? İçindeki Claude oturumu sonlanır (sonra "Devam et" ile dönebilirsiniz).`)) return;
     window.panel.ptyKill(tab.ptyId);
@@ -556,9 +705,78 @@ window.panel.onPtyExit((id, code) => {
   renderSidebar();
 });
 
+// Ayrı çalışma kopyası değişiklik içerdiği için silinmedi (chat-main.js → closeChat)
+window.panel.onWorktreeKept((w) => {
+  const why = w.error ? 'silinemedi: ' + w.error : [w.dirty ? 'kaydedilmemiş değişiklik' : null, w.ahead ? `${w.ahead} yeni commit` : null].filter(Boolean).join(', ');
+  toast(`Ayrı kopya korunuyor (${why}). Dal: ${w.branch} · ${tilde(w.path)}`, 9000);
+});
+
+// ---------- Claude'un terminal aracı (terminals.js) ----------
+// Ana süreç sorar; yanıt xterm arabelleğinden. Yalnız sohbetin hesabının sekmeleri.
+function termTabs(acctId) { return (state.tabs[acctId] || []).filter((t) => t.kind === 'term' && t.ptyId); }
+function defaultTerm(acctId) {
+  const list = termTabs(acctId);
+  const last = state.lastTerm[acctId];
+  return list.includes(last) ? last : list.at(-1) || null;
+}
+function ownTerm(acctId, tabId) {
+  const tab = tabId == null ? defaultTerm(acctId) : tabsById.get(tabId);
+  if (!tab || tab.acctId !== acctId) throw new Error(tabId == null ? 'Bu hesapta açık terminal sekmesi yok' : `Sekme ${tabId} bu hesabın terminali değil`);
+  return tab;
+}
+function termText(tab, lines) {
+  const buf = tab.term.buffer.active;
+  const out = [];
+  for (let i = Math.max(0, buf.length - lines); i < buf.length; i++) out.push(buf.getLine(i)?.translateToString(true) ?? '');
+  while (out.length && !out.at(-1).trim()) out.pop();
+  return out.join('\n');
+}
+const TERM_QUERIES = {
+  list({ acctId }) {
+    const def = defaultTerm(acctId);
+    return {
+      default: def?.ptyId ?? null,
+      tabs: termTabs(acctId).map((t) => ({ id: t.ptyId, title: t.title, cwd: tilde(t.cwd), exited: t.exited, last: t === def, visible: isVisible(t) })),
+    };
+  },
+  read({ acctId, tabId, lines }) {
+    const tab = ownTerm(acctId, tabId);
+    return { id: tab.ptyId, title: tab.title, cwd: tilde(tab.cwd), exited: tab.exited, text: termText(tab, lines) };
+  },
+  async open({ acctId, cwd, envId, command }) {
+    const tab = await launch(acctId, cwd, 'shell', null, envId || null, { background: true });
+    if (!tab) throw new Error('Terminal açılamadı');
+    window.panel.ptyWrite(tab.ptyId, command + '\r');
+    return { id: tab.ptyId, title: tab.title };
+  },
+  write({ acctId, tabId, data }) {
+    const tab = ownTerm(acctId, tabId);
+    if (tab.exited) throw new Error(`Sekme ${tab.ptyId} kapanmış`);
+    window.panel.ptyWrite(tab.ptyId, data);
+    return { title: tab.title };
+  },
+};
+window.panel.onTermQuery(async (id, op, args) => {
+  try {
+    if (!TERM_QUERIES[op]) throw new Error('Bilinmeyen istek: ' + op);
+    window.panel.termReply(id, { ok: true, ...(await TERM_QUERIES[op](args || {})) });
+  } catch (err) {
+    window.panel.termReply(id, { ok: false, error: err?.message || String(err) });
+  }
+});
+
 // ---------- Chat ----------
 
-function ensureWebview(acctId) {
+// Hesabın Web görünümünü bir claude.ai sayfasında aç (bağlayıcı dizini, bağlayıcı ayarları…)
+function openWeb(acctId, url) {
+  const pane = state.panes[acctId];
+  if (!pane) return;
+  if (pane.webview) pane.webview.src = url;
+  else ensureWebview(acctId, url);
+  selectAccount(acctId, 'chat');
+}
+
+function ensureWebview(acctId, startUrl = 'https://claude.ai/new') {
   const pane = state.panes[acctId];
   if (!pane || pane.webview) return;
 
@@ -588,7 +806,7 @@ function ensureWebview(acctId) {
 
   const wv = document.createElement('webview');
   wv.setAttribute('partition', `persist:chat-${acctId}`);
-  wv.setAttribute('src', 'https://claude.ai/new');
+  wv.setAttribute('src', startUrl);
   wv.setAttribute('allowpopups', '');
 
   // claude.ai/code'daki "Local" seçeneği sadece resmi masaüstü uygulamasında çalışıyor.
@@ -694,6 +912,24 @@ function openSettings() {
   };
 
   render();
+  // Genel ayar: anında kaydedilir (hesap listesinden bağımsız)
+  const awake = h('input', { type: 'checkbox', id: 'keepAwake', onchange: (e) => window.panel.saveConfig({ keepAwake: e.target.checked }).then((c) => { state.cfg = c; }) });
+  awake.checked = state.cfg.keepAwake !== false;
+  form.append(h('label', { class: 'acct-form-opt' }, awake, h('span', {}, 'Claude çalışırken Mac uyumasın'),
+    h('small', {}, 'Bir sohbette tur sürerken sistem uykusu engellenir; ekran yine kararabilir.')));
+  // Editör: Claude'un "editörde aç" aracı ve Değişiklikler bölmesindeki düğme (opener.js)
+  const editorSel = h('select', { id: 'editorChoice', onchange: (e) => window.panel.saveConfig({ editor: e.target.value }).then((c) => { state.cfg = c; }) });
+  form.append(h('label', { class: 'acct-form-opt acct-form-select' }, h('span', {}, 'Editör'), editorSel,
+    h('small', {}, 'Claude bir dosyayı "editörde aç" dediğinde ve Değişiklikler bölmesinde kullanılır.')));
+  window.panel.editorList().then((r) => {
+    const auto = r.editors[0]?.name || 'varsayılan metin düzenleyici';
+    editorSel.replaceChildren(h('option', { value: '' }, `Otomatik (${auto})`),
+      ...r.editors.map((e) => h('option', { value: e.id }, e.name)),
+      h('option', { value: 'default' }, 'Varsayılan metin düzenleyici'));
+    editorSel.value = [...editorSel.options].some((o) => o.value === r.choice) ? r.choice : '';
+  });
+  // Octopus: otomatik sıkıştırma, maliyet eşikleri, hafıza kapsamı, kol sınırı, "Hafızayı sil" (renderer/kurulum.js)
+  form.append(octopusSettings());
   $('#modal').hidden = false;
 }
 
@@ -725,6 +961,24 @@ window.panel.onMenu((cmd, arg) => {
     case 'newChat': newChat(); break;
     case 'artifacts': state.page === 'artifacts' && !art.openId ? selectAccount(state.active) : showArtifacts(null); break;
     case 'account': selectAccount(arg); break;
+    case 'simulator': {
+      const t = state.page === 'account' && state.view[state.active] === 'code' && state.activeTab[state.active];
+      if (t?.kind === 'chat') toggleSimulatorInChat(t);
+      else toast('Simülatör bir sohbetin yanında açılır. Önce bir sohbet açın.');
+      break;
+    }
+    case 'changes': {
+      const t = state.page === 'account' && state.view[state.active] === 'code' && state.activeTab[state.active];
+      if (t?.kind === 'chat') toggleChangesInChat(t);
+      else toast('Değişiklikler bir sohbetin yanında açılır. Önce bir sohbet açın.');
+      break;
+    }
+    case 'browser': {
+      const t = state.page === 'account' && state.view[state.active] === 'code' && state.activeTab[state.active];
+      if (t?.kind === 'chat') toggleBrowserInChat(t);
+      else toast('Tarayıcı bir sohbetin yanında açılır. Önce bir sohbet açın.');
+      break;
+    }
     case 'toggle': setView(state.view[state.active] === 'code' ? 'chat' : 'code'); break;
     case 'view': setView(arg); break;
     case 'newTab': newChat(); break;
@@ -733,6 +987,7 @@ window.panel.onMenu((cmd, arg) => {
       break;
     case 'nextTab': if (state.view[state.active] === 'code') cycleTab(arg); break;
     case 'settings': $('#modal').hidden ? openSettings() : closeSettings(); break;
+    case 'octopusIntro': openOctopusIntro(); break;
     case 'font':
       if (state.view[state.active] === 'chat') {
         const wv = state.panes[state.active]?.webview;
@@ -751,11 +1006,8 @@ async function init() {
   document.documentElement.style.setProperty('--chat-font', state.fontSize + 3.5 + 'px');
 
   accounts().forEach(ensurePane);
+  accounts().forEach((a) => loadOctopi(a.id)); // renderer/octopus.js
 
-  $('#viewSeg').addEventListener('click', (e) => {
-    const v = e.target.closest('button')?.dataset.view;
-    if (v) setView(v);
-  });
   hydrateIcons();
   $('#navNew').onclick = newChat;
   $('#navArtifacts').onclick = () => showArtifacts(null);
@@ -767,7 +1019,7 @@ async function init() {
     if (e.key !== 'Escape') return;
     if (openMenu.el) closeMenu();
     else if (!$('#modal').hidden) closeSettings();
-    else if (state.page === 'artifacts' && art.openId && !document.querySelector('.modal:not([hidden])')) { art.openId = null; renderArtifactsPage({ animate: true }); renderTopbar(); }
+    else if (state.page === 'artifacts' && art.openId && !document.querySelector('.modal:not([hidden])')) { art.openId = null; renderArtifactsPage({ animate: true }); }
   });
   window.addEventListener('focus', () => {
     const t = state.activeTab[state.active];
@@ -777,6 +1029,7 @@ async function init() {
   const start = acct(state.cfg.lastAccount) ? state.cfg.lastAccount : accounts()[0].id;
   selectAccount(start);
   loadArtifacts();
+  if (state.cfg.firstRun) openWelcome(); // ilk açılış sihirbazı (renderer/kurulum.js)
 }
 
 init();
