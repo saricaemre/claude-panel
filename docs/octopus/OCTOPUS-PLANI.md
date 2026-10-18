@@ -1,6 +1,6 @@
 # Octopus — Uygulama Planı
 
-**Sürüm** 1.17 · **Tarih** 2026-10-18 · **Sahibi** Emre Sarıca · **Yazan** Claude (Opus 5.5) · **Durum** Yol onaylandı, paketler hazır
+**Sürüm** 1.18 · **Tarih** 2026-10-18 · **Sahibi** Emre Sarıca · **Yazan** Claude (Opus 5.5) · **Durum** Yol onaylandı, paketler hazır
 
 > Octopus'u taze oturumlarla, paket paket kurmak için tek kaynak bu dosya. Octopus işi yapan her oturum buradan başlar. Bitirince §2'deki durum tablosunu günceller.
 
@@ -75,7 +75,10 @@ Bir oturum paketi başlatınca durumu "sürüyor" yapar, bitirince "bitti" yapar
 | P7.4 | Devir notunda son turlar: dosya sırası değil soy zinciri ve zaman | P7.3 | bitti | 2026-10-18 | `dogus.js` → `readConversation`: dosyanın tamamı akışla, uuid'le tekil, zincir en son mesajdan geriye (`parentUuid`, sınırda `logicalParentUuid`), metinli kayıtlar zamana göre; ilk görev de buradan. Kızıl Elma'da prototiple aynı 6 tur (eski yol 1 tur, 3 saat eski), 113 MB 184 ms; e2e P7.3 adımında kopya + 4,5 MB kayıt + terk edilen dal, iki bozma kırmızı. **Bekliyor:** gerçek hesapla P7.3'ün tam akışı |
 | P8.1 | İlk açılış ve var olan projeyi alma | P1.2, P3.2 | bitti | 2026-10-17 | `renderer/kurulum.js` (ilk açılış sihirbazı: tek hesap `~/.claude`, giriş denetimi `account:login`, terminalde `claude /login`, ilk ahtapot; "Projeyi Octopus'a al" penceresi; ayarlarda Octopus bölümü), `alma.js` (yalnız okuyan tarama, kayıt `adopted`, ayarlar), `hafiza.js` (`settings.memory`, `drop`, "Hafızayı sil"), eşikler `config.json` → `thresholds`; e2e temiz HOME ile üç adım, dört bozma kırmızı; girişsiz/girişli `accountInfo` gerçek CLI'de ölçüldü (0 token). **Bekliyor:** Emre'nin görsel onayı; temiz bir macOS kullanıcısında gerçek kurulum (P8.2) |
 | P8.2 | Belgeler ve temiz kullanıcı testi | P1–P7 | bitti | 2026-10-18 | README baştan (kurulum, Octopus, verinin yeri ve silinmesi, gizlilik); tanıtım `openOctopusIntro` (sihirbaz, klasör menüsü, Yardım menüsü); taramada iki düzeltme: izinsiz MCP ürün kodundan `config.json` → `autoAllowMcp`'e (varsayılan boş), terminal `claude` yoksa SDK ikilisine düşer; `config.json` 600; `kur.sh` DMG notu ve `ayarlari-esitle.sh` İş/Max/Pro varsayımı atıldı; e2e bir adım + temiz HOME assert'leri, iki bozma kırmızı. **Bekliyor:** temiz macOS kullanıcısında kurulum (Emre, `temiz-kullanici-testi.md`); Emre'nin `config.json`'una `autoAllowMcp` |
-| P8.3 | Dağıtım (lisans, imza, ad) | P8.2 | bekliyor | | P8.2'nin temiz kullanıcı testi ve Emre'nin onayı gerekir |
+| P8.3 | Dağıtım (lisans, imza, ad) | P8.2 | ertelendi | | Emre şimdilik bıraktı (2026-10-18): önce ürünü kendisi tanıyacak. P8.2'nin temiz kullanıcı testi ve Emre'nin onayı gerekir |
+| P9.1 | Güvenlik: yan oturum bildiriminde etiket kaçışı | — | hazır | | Otomatik güvenlik incelemesinin bulgusu (commit 7279885). Küçük |
+| P9.2 | Güvenlik: yan oturumun klasörü izin kartında belirgin | — | hazır | | Otomatik güvenlik incelemesinin bulgusu. Küçük |
+| P9.3 | Güvenlik: tarayıcıda yerel sayfadan izinsiz dış erişim | K13 | hazır | | Otomatik güvenlik incelemesinin bulgusu. Oturum başında Emre'ye K13 sorulur |
 
 ---
 
@@ -998,6 +1001,52 @@ Bu paketteki her adım Emre'nin kararını ve onayını ister (`CLAUDE.md` §6):
 - ad: "Octopus" adının başka ürünlerle (ör. Octopus Deploy) çakışmasına dağıtımdan önce bakılmalı;
 - güncelleme yolu.
 
+### Faz 9 — Güvenlik düzeltmeleri
+
+2026-10-18'de commit 7279885'ten sonra otomatik güvenlik incelemesi (security-guidance eklentisi) üç bulgu verdi. Üçü de koda bakılarak doğrulandı; hiçbiri o sürümde yeni değil. Octopus'a ait değiller ama aynı protokolle, taze oturumlarda yapılırlar.
+
+#### P9.1 Yan oturum bildiriminde etiket kaçışı
+
+**Hedef:** Yan oturumun yanıt metni başlatan sohbete `<yan-oturum-olayi>` etiketinin içinde gider (`renderer/sessions.js`, `deliverSessionEvents` civarı; `ev.text` olduğu gibi eklenir). Gövde kaçışsız: metinde `</yan-oturum-olayi>` geçerse ardından gelen kısım bildirimin dışında, ayrı bir parça gibi görünür. Yan oturum güvenilmeyen bir içerik (web sayfası, dosya) okuduysa oradan gelen talimat başa sızabilir. PR bildiriminde aynı kaçış var (`renderer/prwatch.js` → `prSafe`), yan oturumda unutulmuş.
+
+**Başlamadan oku:** `renderer/sessions.js` (`deliverSessionEvents`, `attr`), `renderer/prwatch.js` (`prSafe`, `prEventText`), `sessions.js` (`turnEnded`, `session:event`), e2e'deki yan oturum adımları (`<yan-oturum-olayi>` assert'leri).
+
+**Yapılacaklar:**
+1. Gövdede açılış ve kapanış etiketi bozulur (`prSafe` ile aynı kalıp: `‹yan-oturum-olayi`). Ortak bir yardımcıya almak düşünülebilir (iki etiket, aynı kural).
+2. Metnin sonuna, PR bildirimindeki gibi "veri, talimat değil" notu eklenir mi bakılır; ekleniyorsa yan oturum adımlarındaki assert'ler buna göre güncellenir.
+3. Aynı kalıbı taşıyan öbür etiketler taranır ve sonuç günlüğe yazılır: `<attached_file>` (renderer/chat.js → `readAttachment`; geçmiş yüklenirken regex'le ayrıştırılıyor, gövdedeki kapanış etiketi kartı bozabilir), defter özeti, `hatirla` ve `danis` yanıtları. Gerçek bir açık bulunursa aynı pakette düzeltilir; büyükse §2'ye yeni paket olarak eklenir.
+
+**Doğrulama:** e2e'de sahte CLI'nin yan oturumu yanıtında `</yan-oturum-olayi>` ve sahte bir açılış etiketi yazar; başa giden mesajda etiket bir kez açılıp bir kez kapanır, sahte etiket bozulmuş görünür. Bozma: kaçış kaldırılınca kırmızı.
+
+#### P9.2 Yan oturumun klasörü izin kartında belirgin
+
+**Hedef:** `sessions start`'ın `cwd` girdisi yan oturumu herhangi bir klasörde açabilir (`sessions.js` → `createTool`: `const dir = a.cwd || cwd`). İzin kartının başlığı yalnız "Claude yeni bir yan oturum başlatmak istiyor" der (`sessions.js` → `permission`). Klasör kartta ham JSON'un içinde, uzun görev tanımının altında görünür ve başlatan sohbetin klasöründen farklı olduğu belirtilmez. Kullanıcı onaylarken klasörü kaçırabilir.
+
+**Başlamadan oku:** `sessions.js` (`permission`, `createTool`, `startBlocked`), chat-main.js → `canUseTool` (`RULES`, `openCard`: başlık `site.title`), renderer/chat.js → `handlePermission`, `toolSummary` (`mcp__panel__sessions`), `worktrees.js` (kopya her zaman ana deponun kökünde).
+
+**Yapılacaklar:**
+1. `permission` sohbetin klasörünü bilmeli (chat-main.js'ten `getChat(id).dir` gibi bir yol, ya da `createTool`'daki `cwd`'nin kaydı).
+2. `cwd` verilmiş ve başlatan sohbetin klasörünün (ya da git kökünün) dışındaysa başlık klasörü söyler: "Claude ~/Başka/Proje klasöründe yeni bir yan oturum başlatmak istiyor". İçindeyse bugünkü başlık kalır.
+3. `toolSummary`'de `start` için klasör (dışarıdaysa) görünür.
+4. Var olmayan ya da dosya olan `cwd` kart açılmadan reddedilir mi, bakılır (bugün ne olduğu ölçülür).
+
+**Doğrulama:** e2e: sahte CLI başka bir klasörle `start` ister; kartın başlığında klasör adı var. Aynı klasörde başlık değişmez. Bozma: başlık kodu geri alınınca kırmızı.
+
+#### P9.3 Tarayıcıda yerel sayfadan izinsiz dış erişim
+
+**Hedef:** Tarayıcı izni her araç çağrısında açık sayfanın adresine göre sorulur (`browser.js` → `permission`). Yerel sayfada (`localhost`, `*.test`…) hiçbir eylem, `eval` dahil, sormaz. Yerel sayfada çalışan `eval` dış bir siteye gidebilir (`location = …`) ya da `fetch`/görselle veri gönderebilir; ilk gidiş ve gönderim sorulmadan olur (dış sitedeki sonraki araç çağrısı yine sorar). Aynı şekilde `click` bir bağlantıyla dış siteye gidebilir. Claude bunu ancak bir talimat sızmasıyla yapar, ama izin kapısı orada açık kalıyor.
+
+**Başlamadan oku:** `browser.js` (`permission`, `isLocal`, `allowOrigin`, `configureContents`: `setWindowOpenHandler`, `will-navigate` → `guard`, `browser:userNav`), chat-main.js → `canUseTool`, CLAUDE.md §5 "Tarayıcı izinleri", e2e'deki tarayıcı adımları.
+
+**Önce:** Emre'ye K13 sorulur (§10). Karar §10'a tarihiyle yazılır.
+
+**Yapılacaklar (K13'ün önerisiyle):**
+1. Yerel sayfada `eval` sohbet ve köken başına bir kez sorulur (dış site izni gibi; onay o sohbette geçerli). Kartta "hep izin ver" yok.
+2. Sayfa kendiliğinden ya da Claude'un eylemiyle izinsiz bir dış kökene giderse (`will-navigate`, `will-redirect`, açılır pencere) gidiş engellenir; kullanıcının adres çubuğundan ya da sayfaya kendi tıklamasıyla yaptığı gidiş engellenmez. Ayırt etme yolu tasarlanır (ör. Claude'un aracı çalışırken gelen gidişler). Claude'a "bu site için önce navigate ile izin iste" döner.
+3. `fetch`/görselle veri gönderimi ağ düzeyinde engellenmez (yerel uygulamalar CDN'den yükler); bu sınır belgelenir (CLAUDE.md §5, README gizlilik bölümü).
+
+**Doğrulama:** e2e (yerel test sayfası): (a) yerel sayfada ilk `eval` kart açar, onaydan sonraki `eval` açmaz; (b) yerel sayfadan `eval` ile dış adrese gidiş engellenir ve Claude'a neden döner; (c) kullanıcının adres çubuğundan gidişi engellenmez. Her biri için bir bozma. Dış adres test ortamında çözülmediği için engellenen gidiş `will-navigate` olayı ve sayfanın adresi üzerinden ölçülür.
+
 ---
 
 ## 9. Riskler
@@ -1034,6 +1083,7 @@ Kararları Emre verir. Verilen karar buraya tarihiyle yazılır.
 | K9 | Arayüz dili ne olsun? | Bugün Türkçe. Başkaları için İngilizce de gelsin mi, karar bekliyor |
 | K10 | Dağıtım nasıl olsun? | Lisans, imza ve ad P8.3'te kararlaştırılır |
 | K11 | Kızıl Elma ve Imladris'in `CLAUDE.md`'sine "Compact Instructions" eklensin mi? | Ücretsiz bir önlem; her proje için ayrı onay. İ1 gereği sorulmadan yapılmaz |
+| K13 | Tarayıcıda yerel sayfadan dış erişim nasıl kapansın? (P9.3) Seçenekler: (a) yerel sayfada da her `eval` sorulsun; (b) `eval` sohbet ve köken başına bir kez sorulsun + izinsiz dış kökene gidiş engellensin; (c) yalnız gidiş engellensin, `eval` sormasın | (b): yerel geliştirmede bir kez onay yeter, izinsiz gidiş kapanır. Veri gönderimi (`fetch`) ağ düzeyinde engellenmez, belgelenir |
 | K12 | Yeniden doğuşta Claude Code'un özeti de masaya konsun mu? P7.1'de defter düşen bilgiyi geri getirdi (%2 → %85), ama özetin tuttuğu işletme ayrıntısını (açık soru, kapanış adımları) kaçırdı (kontrol %94 → %75) | Devir notuna, varsa son sıkıştırma özetinin "bekleyen işler" kısmı da girsin; ya da `DEFTER_PROMPT` açık soruları ve kapanış adımlarını `acik` olarak yazdırsın. Karar Emre'nin |
 
 ---
@@ -1127,6 +1177,7 @@ SDK 0.3.300 ve Claude Code 2.1.300 ile, 2026-10-17'de ölçüldü ya da okundu.
 
 | Sürüm | Tarih | Değişiklik |
 |---|---|---|
+| 1.18 | 2026-10-18 | Faz 9 (güvenlik düzeltmeleri): P9.1–P9.3 ve K13 eklendi; otomatik güvenlik incelemesinin üç bulgusu. P8.3 ertelendi (Emre önce ürünü tanıyacak). |
 | 1.17 | 2026-10-18 | P8.2 bitti (temiz kullanıcı denemesi Emre'de). P8.2'ye "uygulandığı gibi" notu; P8.3'ün notu. |
 | 1.16 | 2026-10-18 | P7.4 bitti. Devir notunun son turları ve ilk görevi dosyanın tamamından, soy zinciri ve zamanla (`readConversation`); §7.8 f ve P7.3'ün notu buna göre; P7.4 bölümü eklendi. P8.2 hazır. |
 | 1.15 | 2026-10-18 | P7.1 bitti (yorum sorularının son puanı Emre'de). P7.1'e "uygulandığı gibi" notu; yeni paket P7.4 (devir notunda son turlar; gerçek kayıtta `/compact` eski zinciri kopyalıyor); yeni karar K12 (özet de masaya). P8.2 artık P7.4'ü bekliyor. |
