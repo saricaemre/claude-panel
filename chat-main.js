@@ -302,7 +302,7 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
           let site = null;
           const RULES = { mcp__panel__browser: browser, mcp__panel__terminal: terminals, mcp__panel__sessions: sessions, mcp__panel__pr: prwatch };
           if (RULES[toolName]) {
-            site = RULES[toolName].permission(id, input);
+            site = RULES[toolName].permission(id, input, { cwd: dir, project });
             if (!site) return Promise.resolve({ behavior: 'allow', updatedInput: input });
           }
           const suggestions = site ? undefined : o.suggestions;

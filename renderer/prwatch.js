@@ -40,16 +40,13 @@ function prMenu(tab) {
   ]);
 }
 
-// Yorum gövdesi etiketi kapatıp Claude'a sahte bir bildirim yazamasın
-const prSafe = (s) => String(s || '').replace(/<\/?ci-izleme-olayi/gi, '‹ci-izleme-olayi');
-
 function prEventText(ev) {
   let body = '';
   if (ev.kind === 'ci_failed') body = `CI kırıldı (commit ${ev.sha}):\n` + ev.checks.map((c) => `- ${c.name}: ${c.conclusion}${c.url ? ' ' + c.url : ''}`).join('\n');
   else if (ev.kind === 'conflict') body = `Birleştirme çakışması: ${ev.branch} dalı taban dalla çakışıyor.`;
   else if (ev.kind === 'review') body = `${ev.comments.length} yeni yorum:\n` + ev.comments.map((c) =>
     `--- ${c.author || '?'}${c.review ? ' (' + c.review + ')' : ''}${c.where ? ' · ' + c.where : ''}${c.url ? ' · ' + c.url : ''}\n${c.body}`).join('\n');
-  return `<ci-izleme-olayi pr="${ev.number}" tur="${ev.kind}" adres="${attr(ev.url)}">\n${prSafe(body)}\n</ci-izleme-olayi>`;
+  return `<ci-izleme-olayi pr="${ev.number}" tur="${ev.kind}" adres="${attr(ev.url)}">\n${eventSafe(body)}\n</ci-izleme-olayi>`;
 }
 
 function prNote(tab, ev) {

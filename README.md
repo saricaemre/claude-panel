@@ -81,6 +81,7 @@ Bir projeyi hafızadan çıkarmak için Hesap ayarları → Octopus'ta o ahtapot
 - Bilinen gizli anahtar biçimleri (API anahtarları, erişim belirteçleri) hafıza dizinine girmeden maskelenir. Bu bir güvenlik ağıdır, garanti değildir. Oturum kayıtlarının kendisi Claude Code'un klasöründe olduğu gibi durur.
 - Panelin kendisinin ağa çıktığı yerler: Web görünümü (claude.ai), sizin ya da Claude'un tarayıcı bölmesinde açtığı siteler, PR izlemede `gh`. Artifact küçük resimleri ağı kapalı bir oturumda çizilir; yalnız bilinen CDN'lerden betik, stil ve yazı tipi gelir.
 - Claude'un tarayıcı bölmesinde dış bir siteyi açması, bir uygulamayı simülatörde başlatması, terminalde komut çalıştırması ve yan oturum açması izin kartı ister.
+- Tarayıcıda Claude'un JavaScript çalıştırması dış sitede her seferinde, yerel sayfada (`localhost` gibi) sohbet ve site başına bir kez sorulur. Claude'un tıklaması ya da çalıştırdığı kod sayfayı izin verilmemiş bir siteye götürmek isterse gidiş engellenir; sizin adres çubuğundan ya da sayfaya tıklayarak yaptığınız gidişler engellenmez. Sınır: onay verdiğiniz bir sayfada çalışan kod `fetch` gibi isteklerle dışarıya veri gönderebilir; bu ağ düzeyinde engellenmez.
 
 ## Birden çok hesap
 

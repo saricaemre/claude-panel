@@ -252,7 +252,8 @@ async function start(chatId) {
 
     // 3. Eski beden notu okur, eksikleri söyler
     ev('step', { step: 'audit' });
-    const r3 = await ctl.turn(AUDIT_PROMPT + '\n\n<devir-notu>\n' + note + '\n</devir-notu>');
+    // Nottaki son turlar etiketi kapatamasın (kayıttan birebir alıntı)
+    const r3 = await ctl.turn(AUDIT_PROMPT + '\n\n<devir-notu>\n' + note.replace(/<(\/?devir-notu)/gi, '‹$1') + '\n</devir-notu>');
     if (!r3) throw new Error('Sohbet kapandı.');
     const said = (r3.result?.subtype === 'success' ? r3.text : '').trim();
     const additions = /^["“]?eksik yok\.?["”]?$/i.test(said) ? '' : clipMid(said, ADD_MAX);

@@ -80,7 +80,7 @@ contextBridge.exposeInMainWorld('panel', {
   onSimOpen: (cb) => ipcRenderer.on('sim:open', (_e, chatId) => cb(chatId)),
 
   browserAttach: (chatId, wcId) => ipcRenderer.invoke('browser:attach', chatId, wcId),
-  browserUserNav: (chatId, url) => ipcRenderer.send('browser:userNav', chatId, url),
+  browserUserNav: (chatId, url, wcId) => ipcRenderer.send('browser:userNav', chatId, url, wcId),
   browserViewport: (chatId, opts) => ipcRenderer.invoke('browser:viewport', chatId, opts),
   browserScreenshot: (chatId) => ipcRenderer.invoke('browser:screenshot', chatId),
   onBrowserOpen: (cb) => ipcRenderer.on('browser:open', (_e, chatId) => cb(chatId)),

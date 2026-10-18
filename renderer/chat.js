@@ -161,6 +161,19 @@ function relPath(tab, p) {
   return tilde(p);
 }
 
+// Yan oturumun klasörü sohbetin klasörünün dışındaysa özette görünür (P9.2); göreli yol ve ~ sohbetin klasörüne göre çözülür
+function outsideDir(tab, cwd) {
+  let p = String(cwd || '').trim();
+  if (!p || !tab.cwd) return '';
+  const home = state.info.home;
+  if (home && (p === '~' || p.startsWith('~/'))) p = home + p.slice(1);
+  if (!p.startsWith('/')) p = tab.cwd + '/' + p;
+  const parts = [];
+  for (const s of p.split('/')) if (s === '..') parts.pop(); else if (s && s !== '.') parts.push(s);
+  p = '/' + parts.join('/');
+  return p === tab.cwd || p.startsWith(tab.cwd + '/') ? '' : 'klasör ' + tilde(p);
+}
+
 function toolLabel(name) {
   if (name === PUBLISH_TOOL) return 'Artifact yayımlandı';
   if (name === SIM_TOOL) return 'Simülatör';
@@ -208,7 +221,8 @@ function toolSummary(tab, name, input = {}) {
     case 'mcp__panel__wrap_up':
       return String(input.recap || '').slice(0, 120);
     case 'mcp__panel__sessions':
-      return [{ start: 'başlat', list: 'liste', send: 'mesaj', read: 'okuma' }[input.action] || input.action || '', input.title || (input.id != null ? 'oturum ' + input.id : ''), input.message || ''].filter(Boolean).join(' · ').slice(0, 200);
+      return [{ start: 'başlat', list: 'liste', send: 'mesaj', read: 'okuma' }[input.action] || input.action || '', input.title || (input.id != null ? 'oturum ' + input.id : ''),
+        input.action === 'start' ? outsideDir(tab, input.cwd) : '', input.message || ''].filter(Boolean).join(' · ').slice(0, 200);
     case 'mcp__panel__open':
       return `${input.action === 'reveal' ? 'Finder' : 'editör'} · ${relPath(tab, input.path)}${input.line ? ':' + input.line : ''}`;
     case 'mcp__panel__defter':
@@ -1304,10 +1318,13 @@ function fileChipBody(name, sub) {
 const xmlAttr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 const xmlUnattr = (s) => s.replace(/&lt;/g, '<').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
 
+// Dosyanın içindeki etiket bloğu kapatamasın: ardından gelen kısım Claude'a kullanıcının mesajı gibi görünürdü
+const fileSafe = (s) => String(s).replace(/<(\/?attached_file)/gi, '‹$1');
+
 function fileBlockText(a) {
   const attrs = `name="${xmlAttr(a.name)}"` + (a.path ? ` path="${xmlAttr(a.path)}"` : '');
   return a.kind === 'text'
-    ? `<attached_file ${attrs}>\n${a.text}\n</attached_file>`
+    ? `<attached_file ${attrs}>\n${fileSafe(a.text)}\n</attached_file>`
     : `<attached_file ${attrs}>İçerik eklenmedi; gerekirse dosyayı bu yoldan okuyun.</attached_file>`;
 }
 

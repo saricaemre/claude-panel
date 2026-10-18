@@ -17,9 +17,11 @@ function browserAddress(raw) {
 function browserView(tab) {
   const safe = (fn, fallback) => { try { return fn(); } catch { return fallback; } }; // dom-ready'den önce webview yöntemleri hata verir
   const btn = (ic, title, onclick) => h('button', { class: 'icon-btn', title, onclick }, icon(ic, 16));
-  const back = btn('back', 'Geri', () => safe(() => cur.wv.canGoBack() && cur.wv.goBack()));
-  const fwd = btn('forward', 'İleri', () => safe(() => cur.wv.canGoForward() && cur.wv.goForward()));
-  const reload = btn('refresh', 'Yenile', () => safe(() => (cur.wv.isLoading() ? cur.wv.stop() : cur.wv.reload())));
+  // Kullanıcının gidişi: ana süreç sayfayı artık Claude'un saymaz (browser.js → gidiş engeli), adres verilirse site izinli olur
+  const userNav = (url) => { if (tab.chatId) window.panel.browserUserNav(tab.chatId, url, safe(() => cur.wv.getWebContentsId(), null)); };
+  const back = btn('back', 'Geri', () => safe(() => cur.wv.canGoBack() && (userNav(null), cur.wv.goBack())));
+  const fwd = btn('forward', 'İleri', () => safe(() => cur.wv.canGoForward() && (userNav(null), cur.wv.goForward())));
+  const reload = btn('refresh', 'Yenile', () => safe(() => (cur.wv.isLoading() ? cur.wv.stop() : (userNav(null), cur.wv.reload()))));
   const addr = h('input', { class: 'br-addr', spellcheck: 'false', placeholder: 'Adres yazın (ör. localhost:3000)', 'aria-label': 'Adres' });
   const head = h('div', { class: 'br-head' },
     back, fwd, reload, addr,
@@ -97,7 +99,7 @@ function browserView(tab) {
     go(raw) {
       const url = browserAddress(raw);
       if (!url) return toast('Geçersiz adres. Yalnız http ve https adresleri açılır.');
-      if (tab.chatId) window.panel.browserUserNav(tab.chatId, url);
+      userNav(url);
       cur.wv.loadURL(url).catch(() => {});
       cur.wv.focus();
     },

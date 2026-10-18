@@ -4,6 +4,9 @@
 // Yan oturum bir izin kartında (soru, plan onayı) kullanıcıyı beklerken de başlatan sohbete kart gider; Claude'a iletilmez.
 // Başlatan sohbet bir ahtapotun başıysa yan oturum onun koludur: durumu kayda da yazılır, kol kol açamaz (OCTOPUS-PLANI.md İ5).
 const { ipcMain } = require('electron');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const octopus = require('./octopus');
 const defter = require('./defter');
 
@@ -101,11 +104,34 @@ const own = (chatId, id) => {
   return c;
 };
 
+const tilde = (p) => { const home = os.homedir(); return p === home || p.startsWith(home + path.sep) ? '~' + p.slice(home.length) : p; };
+const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+
+// start'ın cwd'si (P9.2): sohbetin klasörüne göre çözülür (~, göreli yol); var olmayan ya da dosya olan klasör reddedilir.
+// Reddedilmezse chat:start var olmayan klasörü sessizce ev klasörüne çevirirdi (kartta yazan klasörle açılan farklı olurdu), dosya ENOTDIR verirdi.
+function resolveDir(input, cwd) {
+  let p = String(input || '').trim();
+  if (!p) return { dir: cwd, real: real(cwd) };
+  if (p === '~' || p.startsWith('~/')) p = path.join(os.homedir(), p.slice(1));
+  p = path.resolve(cwd, p);
+  let r;
+  try { r = fs.realpathSync(p); } catch { return { error: `${tilde(p)} klasörü yok` }; }
+  if (!fs.statSync(r).isDirectory()) return { error: `${tilde(p)} bir klasör değil` };
+  return { dir: p, real: r };
+}
+
 // İzin: başlatmak her seferinde kartla (yeni bir Claude oturumu açar, kullanım harcar); gerisi kendi yan oturumlarında sormadan.
-// Reddedilecek başlatma (kol, sınır) kart açmadan araca gider; araç nedeniyle reddeder.
-function permission(chatId, input = {}) {
-  if (input.action === 'start' && !startBlocked(chatId)) return { title: 'Claude yeni bir yan oturum başlatmak istiyor' };
-  return null;
+// Reddedilecek başlatma (kol, sınır, olmayan klasör) kart açmadan araca gider; araç nedeniyle reddeder.
+// Klasör sohbetin klasörünün ve projesinin (git kökü; ayrı kopyada ana depo) dışındaysa başlık onu söyler: kartta ham girdinin içinde, uzun görev
+// tanımının altında kalıyordu. Gösterilen yol gerçek yoldur (symlink içeride görünüp dışarıyı açmasın).
+function permission(chatId, input = {}, { cwd, project } = {}) {
+  if (input.action !== 'start' || startBlocked(chatId)) return null;
+  const title = 'Claude yeni bir yan oturum başlatmak istiyor';
+  if (!input.cwd || !cwd) return { title };
+  const r = resolveDir(input.cwd, cwd);
+  if (r.error) return null;
+  const inside = [cwd, project].filter(Boolean).map(real).some((b) => r.real === b || r.real.startsWith(b + path.sep));
+  return { title: inside ? title : `Claude ${tilde(r.real)} klasöründe yeni bir yan oturum başlatmak istiyor` };
 }
 
 function createTool(sdk, z, { chatId, cwd }) {
@@ -138,7 +164,9 @@ function createTool(sdk, z, { chatId, cwd }) {
             if (!title || !prompt) throw new Error('title ve prompt gerekli');
             const blocked = startBlocked(chatId);
             if (blocked) throw new Error(blocked);
-            const dir = a.cwd || cwd;
+            const target = resolveDir(a.cwd, cwd);
+            if (target.error) throw new Error(target.error);
+            const dir = target.dir;
             // Ahtapotun kolu: ilk mesajına başın defterinden kural, ret ve zevk eklenir (P5.2); kol da reddedilenleri bilsin
             const role = octopus.roleOf(chatId);
             const note = role?.role === 'head' ? defter.armNote(role.octoId) : '';
