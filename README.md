@@ -125,6 +125,18 @@ Liste hem sohbete hem terminaldeki `claude`'a gider. Kod çalıştıran bir sunu
 
 Proje Claude Code ile geliştiriliyor. Kurallar, mimari ve öğrenilmiş tuzaklar `CLAUDE.md`'de, geçmiş `GUNLUK.md`'de, Octopus'un planı `docs/octopus/OCTOPUS-PLANI.md`'de.
 
+Depoyu alıp kendi dalınızda çalışmak için:
+
+```bash
+git clone https://github.com/saricaemre/claude-panel.git "Claude Panel"
+cd "Claude Panel"
+git switch -c <adiniz>/<is>     # main'e doğrudan değil, kendi dalınıza yazın
+# … değişiklik, npm run check, npm test …
+git push -u origin HEAD          # sonra GitHub'da pull request açın
+```
+
+`ayarlari-esitle.sh` Emre'nin üç hesaplı düzeni için yazıldı; tek hesapla çalışıyorsanız gerekmez.
+
 ```bash
 npm install
 npm start        # geliştirme modunda aç

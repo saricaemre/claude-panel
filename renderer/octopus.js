@@ -91,6 +91,27 @@ function openArm(acctId, rec, arm) {
   createChatTab(acctId, arm.cwd || rec.project.cwd, 'resume', arm.sessionId, { title: arm.title });
 }
 
+// Kolu kapatmak (sağ tık "Kolu kapat"): açık sekmesi kapanır (çalışıyorsa sorulur), kol "kesildi" olur, bitmişse "bitti" kalır;
+// ikisi de ahtapotta artık çizilmez. Sekmesi açık değilse yalnız kayıt (octopus:closeArm).
+async function closeArm(acctId, rec, arm) {
+  const t = armTab(acctId, arm);
+  if (t) return closeTab(t);
+  const r = await window.panel.octopusCloseArm(rec.id, arm.id);
+  if (!r?.ok) toast(r?.error || 'Kol kapatılamadı.');
+}
+
+// Kenar çubuğunda, bölmedeki kolda ve "Diğer kollar"da sağ tık menüsü
+function armMenu(e, acctId, rec, arm) {
+  const t = armTab(acctId, arm);
+  const closable = !!t || (arm.state !== 'cut' && arm.state !== 'done');
+  openMenuAt(e, [
+    { header: arm.title || arm.id },
+    { icon: 'chat', label: t ? 'Sekmeye geç' : 'Devam et', desc: t ? null : 'Kol olarak yeniden açılır', onclick: () => openArm(acctId, rec, arm) },
+    closable ? { icon: 'close', label: 'Kolu kapat', danger: true,
+      desc: t ? 'Sekmesi kapanır; ahtapotta artık çizilmez' : 'Ahtapotta artık çizilmez', onclick: () => closeArm(acctId, rec, arm) } : null,
+  ], 'octo-arm-menu');
+}
+
 // Fosil: başın önceki bedeni (yeniden doğuşla ya da yeni kimlikle "Devam et"le geride kalan oturum; dogus.js). Açılınca düz bir sohbet olur
 // (ahtapota bağlanmaz); baş ona danis ile danışır.
 function openFossil(acctId, rec, body) {
@@ -129,6 +150,7 @@ function octopusSidebar(acctId) {
                 class: 'octo-arm' + (t && t === active ? ' on' : ''), 'data-state': arm.state, 'data-live': t ? '1' : null,
                 title: `${arm.title} · ${label}${todos}${arm.worktree ? '\nDal: ' + arm.worktree.branch : ''}${arm.brief ? '\n\n' + arm.brief.slice(0, 300) : ''}`,
                 onclick: (e) => { e.stopPropagation(); openArm(acctId, rec, arm); },
+                oncontextmenu: (e) => armMenu(e, acctId, rec, arm),
               }, h('span', { class: 'octo-dot' }), h('span', { class: 'octo-arm-title' }, arm.title || arm.id), h('span', { class: 'octo-arm-state' }, label));
             }))
           : null);
@@ -164,7 +186,7 @@ async function adoptChat(tab) {
 // bekleyen `sessions start` kartı için bir tomurcuk. Azaltılmış hareket tercihinde ve bölme görünmezken döngü durur,
 // çizim durağan pozlarla bir kez yapılır; döngü kıpırdayan bir şey kalmayınca da kendiliğinden durur (en çok 30 kare/sn).
 // Aynı anda en çok 8 kol çizilir: önce bekleyen ve çalışanlar, sonra rapor verenler, sonra bitenler (yenisi önce);
-// kesilen kollar çizilmez. Çizilmeyenler bölmenin altındaki "Diğer kollar" listesinde.
+// kesilen kollar ve sekmesi kapanmış biten kollar çizilmez (kapatılan kol ahtapottan kalkar). Çizilmeyenler bölmenin altındaki "Diğer kollar" listesinde.
 
 const OC_NS = 'http://www.w3.org/2000/svg';
 const OC_W = 700, OC_H = 468, OC_HX = 350, OC_N = 48, OC_DRAWN = 8, OC_SUCKERS = 12, OC_FPS = 30;
@@ -207,8 +229,8 @@ function armStatus(arm, t) {
   return { label, todos: arm.todos?.total ? `${arm.todos.done}/${arm.todos.total} iş` : '' };
 }
 
-function drawnArms(rec) {
-  const live = rec.arms.filter((a) => a.state !== 'cut');
+function drawnArms(rec, acctId) {
+  const live = rec.arms.filter((a) => a.state !== 'cut' && (a.state !== 'done' || armTab(acctId, a)));
   const chosen = new Set([...live]
     .sort((a, b) => (OC_ORDER[a.state] ?? 5) - (OC_ORDER[b.state] ?? 5) || String(b.createdAt).localeCompare(String(a.createdAt)))
     .slice(0, OC_DRAWN));
@@ -429,8 +451,13 @@ function octopusView(tab) {
     };
     const enter = () => { hoverId = m.id; infoFor(m); m.el.classList.add('hover'); m.lbl.classList.add('on'); kick(); };
     const leave = () => { if (hoverId === m.id) hoverId = null; m.el.classList.remove('hover'); m.lbl.classList.remove('on'); kick(); };
+    const menu = (e) => {
+      if (m.kind === 'bud' || m.cutting) return;
+      armMenu(e, tab.acctId, rec, m.arm);
+    };
     for (const x of [m.el, m.lbl]) {
       x.addEventListener('click', open);
+      x.addEventListener('contextmenu', menu);
       x.addEventListener('mouseenter', enter);
       x.addEventListener('mouseleave', leave);
     }
@@ -484,7 +511,7 @@ function octopusView(tab) {
     const animate = canAnimate();
     const first = !drawnOnce; // bölme açılırken var olan kollar büyümeden görünür
     const now = Date.now();
-    const arms = drawnArms(rec);
+    const arms = drawnArms(rec, tab.acctId);
     const ids = new Set(arms.map((a) => a.id));
 
     // Tomurcuklar: bekleyen ya da yeni onaylanmış "yeni kol" kartları
@@ -966,7 +993,7 @@ function octopusView(tab) {
         h('div', { class: 'oc-tx' },
           h('div', { class: 't' }, 'Beyin · ' + rec.project.name),
           h('div', { class: 'd' }, rec.arms.length
-            ? 'Projenin ana oturumu. Kola tıklayınca o kolun sekmesi açılır; açık değilse "Devam et" ile açılır.'
+            ? 'Projenin ana oturumu. Kola tıklayınca o kolun sekmesi açılır; açık değilse "Devam et" ile açılır. Sağ tıklayınca kapatılır.'
             : 'Henüz kol yok. Baş bir yan oturum açınca kol burada belirir.'),
           h('div', { class: 'm' }, `${typeof pct === 'number' ? `bağlam %${pct} · ` : ''}${rec.exam ? `sınav ${rec.exam.hit}/${rec.exam.total} · ` : ''}${active} kol${parts.length ? ` (${parts.join(', ')})` : ''} · bitti ${n('done')} · kesilen ${n('cut')}`)));
       return;
@@ -982,7 +1009,7 @@ function octopusView(tab) {
   }
 
   function drawMore() {
-    const shown = new Set(drawnArms(rec));
+    const shown = new Set(drawnArms(rec, tab.acctId));
     const rest = rec.arms.filter((a) => !shown.has(a));
     more.replaceChildren();
     if (!rest.length) return;
@@ -992,7 +1019,7 @@ function octopusView(tab) {
         const st = armStatus(arm, t);
         return h('button', {
           class: 'octo-arm oc-more-arm', 'data-id': arm.id, 'data-state': arm.state, 'data-live': t ? '1' : null,
-          title: arm.title, onclick: () => openArm(tab.acctId, rec, arm),
+          title: arm.title, onclick: () => openArm(tab.acctId, rec, arm), oncontextmenu: (e) => armMenu(e, tab.acctId, rec, arm),
         }, h('span', { class: 'octo-dot' }), h('span', { class: 'octo-arm-title' }, arm.title || arm.id), h('span', { class: 'octo-arm-state' }, st.label));
       }));
   }

@@ -23,15 +23,22 @@ const SESSION_QUERIES = {
     return { cwd: tilde(tab.cwd), branch: tab.worktree?.branch || '' };
   },
   // Kullanıcının o sekmede yazdığı taslağa dokunmadan mesajı gönderir
-  send({ childId, text }) {
+  send({ childId, text, parentId }) {
     const tab = chatsById.get(childId);
     if (!tab || !tab.chatId) throw new Error(`Yan oturum ${childId} açık değil`);
     const content = messageContent(text, []);
     markStarted(tab);
     userBubble(tab, content, tab.busy);
     window.panel.chatSend(tab.chatId, content);
-    chatsById.get(tab.parentId)?.octoView?.pulse(childId, 'down'); // ahtapotta baştan kola atım
+    chatsById.get(parentId || tab.parentId)?.octoView?.pulse(childId, 'down'); // ahtapotta baştan kola atım
     if (!tab.busy) setBusy(tab, true);
+    return {};
+  },
+  // Başın `sessions close`'u: çalışıyorsa izin kartı zaten soruldu (sessions.js → permission), burada ayrıca sorulmaz
+  close({ childId }) {
+    const tab = chatsById.get(childId);
+    if (!tab) throw new Error(`Yan oturum ${childId} açık değil`);
+    closeTab(tab, true);
     return {};
   },
 };

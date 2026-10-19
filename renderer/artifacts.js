@@ -57,6 +57,14 @@ function openMenu(anchor, items, cls = '') {
   openPopover(anchor, menu);
 }
 
+// Sağ tık menüsü: imlecin sağ altında (sığmazsa sola, üste kayar)
+function openMenuAt(e, items, cls = '') {
+  e.preventDefault();
+  e.stopPropagation();
+  const x = e.clientX, y = e.clientY;
+  openMenu({ point: true, getBoundingClientRect: () => ({ left: x, right: x, top: y, bottom: y }), contains: () => false }, items, cls);
+}
+
 // Bir öğeyi düğmenin altında (sığmazsa üstünde) açar; dışarı tıklanınca ya da Esc ile kapanır
 function openPopover(anchor, el) {
   closeMenu();
@@ -65,8 +73,9 @@ function openPopover(anchor, el) {
     const r = anchor.getBoundingClientRect();
     const w = el.offsetWidth;
     const hgt = el.offsetHeight;
-    el.style.left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8)) + 'px';
-    el.style.top = Math.max(8, r.bottom + 6 + hgt > window.innerHeight ? r.top - hgt - 6 : r.bottom + 6) + 'px';
+    const gap = anchor.point ? 2 : 6;
+    el.style.left = Math.max(8, Math.min(anchor.point ? r.left + gap : r.right - w, window.innerWidth - w - 8)) + 'px';
+    el.style.top = Math.max(8, r.bottom + gap + hgt > window.innerHeight ? r.top - hgt - gap : r.bottom + gap) + 'px';
   };
   el.place();
   openMenu.el = el;

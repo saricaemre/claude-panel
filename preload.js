@@ -93,6 +93,7 @@ contextBridge.exposeInMainWorld('panel', {
   octopusList: (accountId) => ipcRenderer.invoke('octopus:list', accountId),
   octopusFolder: (accountId, cwd) => ipcRenderer.invoke('octopus:folder', accountId, cwd),
   octopusAdopt: (chatId) => ipcRenderer.invoke('octopus:adopt', chatId),
+  octopusCloseArm: (octoId, armId) => ipcRenderer.invoke('octopus:closeArm', octoId, armId),
   onOctopusChanged: (cb) => ipcRenderer.on('octopus:changed', (_e, accountId) => cb(accountId)),
   // "Projeyi Octopus'a al" (alma.js): klasörü yalnız okuyarak tara, ahtapotu kur; ahtapotun ayarları (kol sınırı, hafıza)
   octopusSurvey: (accountId, cwd) => ipcRenderer.invoke('octopus:survey', accountId, cwd),

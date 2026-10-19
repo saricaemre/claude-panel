@@ -10,6 +10,7 @@ const path = require('path');
 const octopus = require('./octopus');
 const hafiza = require('./hafiza');
 const hooks = require('./hooks');
+const compaction = require('./compaction');
 const { norm } = require('./hafiza-isci');
 
 const TYPES = { karar: 'karar', ret: 'ret', zevk: 'zevk', kural: 'kural', acik: 'açık iş', bilgi: 'bilgi' };
@@ -291,10 +292,12 @@ function collect(projectRoot, patterns, prev) {
 // SessionStart startup/resume callback'i gerçek CLI'de gelmiyor (P2.1), bu yüzden açılış ilk mesajda. Compact callback'i gerçek CLI'de
 // denenmedi: gelmezse compact_boundary'den sonraki ilk mesajda özet yeniden konur (noteCompacted).
 // Sonraki mesajlarda mesaja uyan en çok 5 satır. Kola: ilk mesajının sonuna kural, ret ve zevk (sessions.js → armNote).
-const TABLE_MAX = 9000, ARM_MAX = 4000, RELEVANT_N = 5, RELEVANT_MAX = 2000, TABLE_WHY = 240;
+// Uyan satır, aynı metniyle bağlamın son RELEVANT_FRESH tokeni içinde zaten masaya konduysa yinelenmez, yalnız kimliği anılır
+// (konuşma aynı konuda sürerken her mesaja aynı 2.000 karakter ekleniyordu). Uzaklık tur sonundaki ölçümden (compaction.last).
+const TABLE_MAX = 9000, ARM_MAX = 4000, RELEVANT_N = 5, RELEVANT_MAX = 2000, TABLE_WHY = 240, RELEVANT_FRESH = 25000;
 const ARM_MARK = '\n\n---\nBeyin defterinden';
 const COMPACT_NOTE = 'Bağlamın az önce sıkıştırıldı. Özette olmayan bir ayrıntı gerekirse `hatirla` ile ara, `hatirla_oku` ile kelimesi kelimesine oku.';
-const tabled = new Map(); // chatId -> { octoId, via: 'prompt' | 'compact', at }: bu süreçte masaya kondu
+const tabled = new Map(); // chatId -> { octoId, via: 'prompt' | 'compact', at, seen }: bu süreçte masaya kondu; seen: uyan satırlar (id -> { text, tokens })
 
 // Özet: açık satırlar (dosyadan gelenler yalnız sabitse), view sırasıyla: sabit > kural > ret > zevk > karar > açık > bilgi.
 // Sığmayan satırlar sayılır; dosya satırlarının sayısı ve "tamamı için" notu her zaman sonda.
@@ -328,8 +331,12 @@ function armNote(octoId) {
   const d = armDigest(octoId);
   return d ? ARM_MARK + d : '';
 }
-// Kolun görev tanımı (octopus.js → brief) eklenen kısım olmadan saklanır
-const stripArmNote = (text) => { const i = String(text).indexOf(ARM_MARK); return i >= 0 ? text.slice(0, i) : text; };
+// Kolun görev tanımı (octopus.js → brief) eklenen kısımlar (defter, öbür kollar: octopus.js → peerNote) olmadan saklanır
+const stripArmNote = (text) => {
+  const s = String(text);
+  const i = Math.min(...[ARM_MARK, octopus.PEER_MARK].map((m) => s.indexOf(m)).filter((x) => x >= 0));
+  return Number.isFinite(i) ? s.slice(0, i) : s;
+};
 
 // Kullanıcının mesajına uyan satırlar: Türkçe arama biçimiyle (norm) kelime başları (en çok 5 harf, ekler düşsün) aranır;
 // az satırda geçen kelime daha ağır basar, satırların yarısından çoğunda geçen sayılmaz. Mesajda geçen kimlik (D-3, K667) doğrudan eşleşir.
@@ -370,17 +377,26 @@ function withSuccessors(octoId, picked) {
   return [...out.values()];
 }
 
-function relevantText(octoId, prompt) {
+// seen: bu bağlamda (son sıkıştırmadan beri) masaya konan uyan satırlar; tokens: o anki bağlam büyüklüğü (bilinmiyorsa null, yinelenir;
+// bağlam küçüldüyse sıkıştırma olmuştur, yine yinelenir)
+function relevantText(octoId, prompt, seen = new Map(), tokens = null) {
   if (AUTO_PROMPT.test(prompt || '')) return '';
   const rows = withSuccessors(octoId, relevant(octoId, prompt));
   if (!rows.length) return '';
   let out = 'Defterden bu mesaja uyan satırlar (dosya satırları projenin kendi kayıtlarıdır):';
+  const fresh = [];
   for (const r of rows) {
-    const l = '\n' + line(r, TABLE_WHY);
+    const text = line(r, TABLE_WHY);
+    const was = seen.get(r.id);
+    if (was && was.text === text && tokens != null && was.tokens != null && tokens >= was.tokens && tokens - was.tokens < RELEVANT_FRESH) { fresh.push(r.id); continue; }
+    const l = '\n' + text;
     if (out.length + l.length > RELEVANT_MAX) break;
     out += l;
+    seen.set(r.id, { text, tokens });
   }
-  return out;
+  if (!fresh.length) return out;
+  const note = `${fresh.join(', ')} az önce masaya kondu, değişmedi.`;
+  return out.includes('\n') ? out + '\nBunlar da uyuyor: ' + note : 'Defterden bu mesaja uyan satırlar: ' + note;
 }
 
 // Sınavda (sinav.js, P7.2) hatırlanmayan satırlar: sonraki ilk mesajda masaya konur, sonra silinir.
@@ -418,7 +434,8 @@ function provideHooks() {
       const d = headDigest(where.octoId);
       return join(d, missedText(chatId, where.octoId, d, Math.min(MISSED_MAX, 9900 - d.length)));
     }
-    return join(missedText(chatId, where.octoId), relevantText(where.octoId, input?.prompt));
+    t.seen ||= new Map();
+    return join(missedText(chatId, where.octoId), relevantText(where.octoId, input?.prompt, t.seen, compaction.last(chatId)?.totalTokens ?? null));
   });
   hooks.provide('SessionStart', (input, { chatId }) => {
     if (input?.source !== 'compact') return null;

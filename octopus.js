@@ -200,6 +200,40 @@ function armStarted(chatId, parentChatId, { title, cwd, worktree }) {
   return { octoId: p.octoId, armId: arm.id };
 }
 
+// "Devam et" ile açılan oturum bir kolunsa (kenar çubuğu, ahtapot bölmesi, geçmiş) sohbet yeniden o kol olur: baş onu yine görür,
+// raporu başa gider, kapanınca kayıtta "kesildi" olur. Eskiden düz sohbet açılıyordu; baş yeniden açılınca kollarını göremiyor,
+// bitiremiyor, kapatamıyordu (2026-10-19, Kızıl Elma). Aynı kola bağlı açık bir sohbet varsa bağlanmaz. Yalnız arar; bağlama bindArm.
+function findArm(accountId, sessionId) {
+  if (!sessionId) return null;
+  load();
+  for (const rec of records.values()) {
+    if (rec.accountId !== accountId) continue;
+    const arm = rec.arms.find((a) => a.sessionId === sessionId);
+    if (arm) return armChat(rec.id, arm.id) == null ? { octoId: rec.id, armId: arm.id } : null;
+  }
+  return null;
+}
+function bindArm(chatId, ref) {
+  if (ref && get(ref.octoId)) live.set(chatId, { octoId: ref.octoId, role: 'arm', armId: ref.armId });
+}
+// Ahtapotun açık baş sohbeti ve kolun açık sohbeti (yoksa null)
+function headChat(octoId) {
+  for (const [id, b] of live) if (b.role === 'head' && !b.draft && b.octoId === octoId) return id;
+  return null;
+}
+function armChat(octoId, armId) {
+  for (const [id, b] of live) if (b.role === 'arm' && b.octoId === octoId && b.armId === armId) return id;
+  return null;
+}
+// Sekmesi açık olmayan kolu kapatmak (sağ tık "Kolu kapat", başın `sessions close`'u): bitmemişse "kesildi" olur, ahtapotta çizilmez.
+// Bitmiş kol zaten çizilmez (sekmesi kapalı); dokunulmaz.
+function closeArm(octoId, armId) {
+  const arm = get(octoId)?.arms.find((a) => a.id === armId);
+  if (!arm) return null;
+  if (arm.state !== 'done' && arm.state !== 'cut') setArm(octoId, armId, { state: 'cut', endedAt: now() });
+  return arm;
+}
+
 // Kolun durumu (sessions.js): working, waiting, reported, stopped, done. Panel kapanırken yazılmaz (kayıt olduğu gibi kalır).
 function updateArm(ref, patch) {
   if (!ref || shuttingDown) return;
@@ -213,6 +247,61 @@ function roleOf(chatId) {
   const b = live.get(chatId);
   if (!b || b.draft || !get(b.octoId)) return null;
   return { octoId: b.octoId, role: b.role, armId: b.armId || null };
+}
+
+// Başın sistem istemine eklenen görev tanımı (chat-main.js → systemPrompt.append; hafiza.js ve defter.js → HEAD_PROMPT ile).
+// Yoksa baş, sessions aracının "küçük işleri burada yap" açıklamasına uyup verilen işi kendisi yapıyordu (2026-10-18, Kızıl Elma).
+const HEAD_PROMPT = 'Baş olarak işi kendin yapmazsın: yönü tutar, işi kollara böler, sonuçları doğrularsın. Kullanıcı birden çok adım sürecek bir iş ' +
+  'verdiğinde (kod yazmak, dosya değiştirmek, varlık üretmek, uzun bir araştırma) onu `sessions start` ile bir kola ver; birbirinden bağımsız ' +
+  'parçalar varsa her birine ayrı kol aç (aynı depoda dosya yazan paralel kollara `worktree: true`). Kolun `prompt`\'u bu konuşmayı görmeyen bir ' +
+  'oturum için eksiksiz olsun: amaç, ilgili dosyalar, verilen kararlar ve kısıtlar, bitti ne demek, nasıl doğrulanacak. Kendin yalnız kısa işleri ' +
+  'yap: soruyu yanıtlamak, plan ve karar, işi bölmek için gereken okumalar, defter ve hafıza. Kullanıcı açıkça kendin yapmanı isterse yap. ' +
+  'Kollar kısa ve sabit biçimde rapor verir (sonuç, değişenler, doğrulama, açık); başka biçim gerekiyorsa `prompt`\'ta açıkça iste. ' +
+  'Kol rapor verince (`<yan-oturum-olayi>`: kolun son mesajının kendisi; kesildiyse sonunda yazar) sonucu doğrula: rapordaki doğrulamaya, ' +
+  'gerekirse değişen dosyalara bak. `read` aynı raporu yeniden getirir, yalnız rapor kesildiyse gerekir. Eksikse `send` ile geri gönder, tamamsa `done`. ' +
+  'Böylece masan uzun süre temiz kalır, sıkıştırma gecikir.\n' +
+  'Kollar aynı anda çalışır ve birbirini yalnız ilk mesajlarına eklenen açık kollar listesinden bilir; çakışmayı önlemek senin işin, kullanıcının ' +
+  'bunu her seferinde söylemesi gerekmez. Kol açmadan önce alanını ayır: hangi dosya, klasör ve kayıtlara yazacağını `prompt`\'a açıkça yaz, iki ' +
+  'kola aynı dosyayı verme. Projenin ortak kayıtları (numaralı oturum ya da sürüm, günlük, durum tablosu, kilit, sayaç) tek elde kalsın: ya ' +
+  'kendin güncelle ya da tek bir kola ver ve öbürlerine "buna yazma" de. Yeni kolun işi çalışan bir kolun alanına değiyorsa önce o kola `send` ' +
+  'ile haber ver ya da bitmesini bekle. Kol ortak bir şeye yazması gerektiğini söylerse sen karar ver.';
+
+// Kolun raporu: her turun son mesajı başa bu kadar karakterle gider (sessions.js → turnEnded; kayıttaki lastReport da)
+const REPORT_MAX = 1500;
+// Kolun sistem istemine eklenen rapor biçimi (chat-main.js → systemPrompt.append). Rapor başın bağlamına girer ve orada her turda yeniden
+// okunur; başın masası kolunkinden pahalıdır. Kısalık yalnız yazıya: işin, okumanın ve doğrulamanın kendisi kısalmaz (2026-10-18, Emre).
+const ARM_PROMPT = 'Bu sohbet bir Octopus kolu: görevi ahtapotun başı (ana oturum) verdi, sonucu baş kullanıcıyla tartışacak. Her turunun son mesajı ' +
+  `başa rapor olarak gider (ilk ${REPORT_MAX.toLocaleString('tr-TR')} karakteri); okuyan kullanıcı değil baş. Raporu düz ve kısa yaz, en önemlisi başta:\n` +
+  'Sonuç: bitti, yarım ya da takıldı (tek cümle).\n' +
+  'Değişenler: dosya yolları ve her biri için tek satır; dosya değişmeyen işte bulgular, kısa maddeler ve kaynaklarıyla.\n' +
+  'Doğrulama: çalıştırdığın komut ve sonucu; yapamadıysan nedeni.\n' +
+  'Açık: başın kararını bekleyen soru, risk ya da yapılmayan; yoksa bu satırı yazma.\n' +
+  'Görevi yeniden anlatma; gerekçe öyküsü, kod ya da diff alıntısı, selam ve kapanış cümlesi yazma: baş ayrıntı isterse dosyaya bakar ya da sorar. ' +
+  'Çalışırken ara mesajların da kısa olsun. Baş görev tanımında başka bir rapor biçimi istediyse ona uy. ' +
+  'Kısalık yalnız yazıda: okumayı, düşünmeyi, işin kendisini ve doğrulamayı kısaltma.';
+
+// Kolun ilk mesajına eklenen koordinasyon notu (sessions.js → start; defter.js → stripArmNote görev tanımından atar).
+// Kollar birbirini bilmiyordu; Kızıl Elma'da baş iki kolun aynı numaralı kayda yazmaması için kendi kilidini uyduruyordu (2026-10-18).
+// Durum adlarında "rapor" yok: sahte CLI turu mesajdaki kelimeyle seçer.
+const PEER_MARK = '\n\n---\nAhtapotun öbür kolları';
+const PEER_STATES = { working: 'çalışıyor', waiting: 'izin bekliyor', reported: 'turu bitti', stopped: 'durdu' };
+function peerNote(octoId) {
+  const rec = get(octoId);
+  if (!rec) return '';
+  const root = rec.project?.key || '';
+  const where = (a) => {
+    if (a.worktree?.branch) return `ayrı kopya, dal ${a.worktree.branch}`;
+    const rel = root && a.cwd ? path.relative(root, a.cwd) : '';
+    return !a.cwd || a.cwd === root ? 'proje klasörü' : rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? `proje içinde ${rel}` : a.cwd;
+  };
+  // Yalnız şu an açık sekmesi olan kollar: panel kapanırken durum yazılmadığı için kayıtta eski "çalışıyor"lar kalabilir
+  const open = new Set([...live.values()].filter((b) => b.role === 'arm' && b.octoId === octoId).map((b) => b.armId));
+  const list = rec.arms.filter((a) => open.has(a.id) && PEER_STATES[a.state])
+    .map((a) => `- ${a.title || a.id} (${PEER_STATES[a.state]}; ${where(a)})${a.brief ? ': ' + a.brief.replace(/\s+/g, ' ').slice(0, 240) : ''}`);
+  return PEER_MARK + (list.length ? ' (seninle aynı anda çalışıyorlar; başın onlara verdiği görevler):\n' + list.join('\n')
+    : ': şu an açık başka kol yok, ama sen çalışırken baş yenilerini açabilir.') +
+    '\nGörev tanımın açıkça vermedikçe başka bir kolun alanına ya da projenin ortak kayıtlarına (numaralı oturum ya da sürüm, günlük, durum ' +
+    'tablosu, kilit, sayaç) yazma; gerekiyorsa son mesajında başa söyle, o halletsin.';
 }
 
 // Başın aynı anda çalışabilecek kol sınırı (İ5); baş değilse null
@@ -259,9 +348,14 @@ function setup({ getWindow }) {
     if (w && !w.isDestroyed()) w.webContents.send(...args);
   };
   ipcMain.handle('octopus:list', (_e, accountId) => listForAccount(accountId));
+  // Sağ tık "Kolu kapat" (renderer/octopus.js), sekmesi açık olmayan kol için; açık sekmeyi arayüz kendisi kapatır
+  ipcMain.handle('octopus:closeArm', (_e, octoId, armId) => {
+    if (armChat(octoId, armId) != null) return { ok: false, error: 'Kolun sekmesi açık.' };
+    return closeArm(octoId, armId) ? { ok: true } : { ok: false, error: 'Kol bulunamadı.' };
+  });
 }
 
 module.exports = {
   setup, get, create, setHead, addArm, setArm, setSettings, setExam, forProject, listForAccount, privateDir, root,
-  bindHead, adopt, noteSession, expectBody, armStarted, updateArm, isArm, roleOf, maxArms, noteTodos, noteBrief, chatClosed, shutdown, onChange, now,
+  HEAD_PROMPT, ARM_PROMPT, REPORT_MAX, PEER_MARK, peerNote, bindHead, adopt, noteSession, expectBody, armStarted, findArm, bindArm, headChat, armChat, closeArm, updateArm, isArm, roleOf, maxArms, noteTodos, noteBrief, chatClosed, shutdown, onChange, now,
 };

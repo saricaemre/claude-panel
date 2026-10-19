@@ -1182,6 +1182,9 @@ async function waitUntil(fn, ms, msg) {
     assert.ok(childId, 'yan oturum başlamadı');
     assert.match(ssLog, new RegExp(`SESSMCP list "${childId} · Testleri yaz · `));
     assert.match(ssLog, /SESSMCP read ".*Alt görev bitti: alt görev: testleri yaz/);
+    // Ahtapotun kolu olmayan yan oturum: tur sonu kutusu (wrap_up) var, kolun rapor biçimi yok
+    assert.match(ssLog, /^ARACLAR .*\bwrap_up\b/m, 'yan oturumda wrap_up yok');
+    assert.doesNotMatch(ssLog, /^APPEND "Bu sohbet bir Octopus kolu/m, 'kol olmayan yan oturuma kolun rapor biçimi gitti');
     assert.equal([...ssLog.matchAll(/SESSEVENT \d+ ".*<yan-oturum-olayi oturum=\\"\d+\\" baslik=\\"Testleri yaz\\" durum=\\"rapor verdi\\">/g)].length, 2, 'iki tur sonu bildirimi iletilmedi');
     // Yan oturumun yanıtı etiketi kapatıp sahte bildirim açamaz (P9.1): ikinci bildirimde etiket bir kez açılıp bir kez kapanır
     const ev2Text = JSON.parse((ssLog.match(/SESSEVENT 2 (".*")/) || [])[1] || '""');
@@ -1198,13 +1201,24 @@ async function waitUntil(fn, ms, msg) {
     await page.screenshot({ path: path.join(OUT, '6m-yan-oturum.png') });
     // Kullanıcı yazmadan art arda sınır: bildirim bekletilir, Claude'a gitmez
     await page.evaluate(() => { window.__sohbet.autoTurns = 5; });
-    await page.evaluate((id) => SESSION_QUERIES.send({ childId: id, text: 'alt görev: son' }), childId);
+    await page.evaluate((id) => SESSION_QUERIES.send({ childId: id, text: 'alt görev: son, uzun yaz' }), childId);
     await page.waitForFunction(() => document.querySelectorAll('.acct-pane.active .chat-host.active .session-note').length === 3, null, { timeout: 15000 });
     assert.equal(await page.locator(C + '.session-note .sn-status').nth(2).textContent(), 'bekliyor: siz yazınca iletilecek', 'sınırdan sonra bildirim bekletilmedi');
+    // 1.500 karakteri aşan son yanıt: bildirim kesilir ve sonunda söyler (tamamı read ile)
+    const cutEv = await page.evaluate(() => window.__sohbet.pendingEvents[0]?.text || '');
+    const cutBody = cutEv.slice(cutEv.indexOf('>\n') + 2, cutEv.indexOf('\n…[kesildi'));
+    assert.match(cutEv, new RegExp(`\\n…\\[kesildi: yanıt 1821 karakter; tamamı için sessions read ${childId}\\]\\n</yan-oturum-olayi>`), 'kesilen bildirimde işaret yok: ' + cutEv.slice(-200));
+    assert.ok(cutBody.startsWith('Uzun yanıt başı. ') && cutBody.length === 1500, 'bildirim 1.500 karakterde kesilmedi: ' + cutBody.length);
     await page.waitForTimeout(500);
     assert.equal([...fakeLog().slice(ssMark).matchAll(/SESSEVENT/g)].length, 2, 'sınırdan sonra bildirim iletildi');
     // Yan oturumdan başlatan sohbete dönüş
     await page.evaluate((id) => activateTab('max', chatsById.get(id)), childId);
+    // Arka planda açılıp ilk mesajı gizliyken giden yan oturumun yazma alanı kapanmamış olmalı
+    const childInput = await page.locator(P + '.chat-host.active .composer-input').boundingBox();
+    assert.ok(childInput && childInput.height >= 16, 'yan oturumun yazma alanı kapalı: ' + JSON.stringify(childInput));
+    await page.fill(P + '.chat-host.active .composer-input', 'kola elle yazıldı');
+    assert.ok((await page.locator(P + '.chat-host.active .composer-input').boundingBox()).height >= 16, 'yazınca da kapalı');
+    await page.fill(P + '.chat-host.active .composer-input', '');
     await page.click(P + '.chat-host.active .top-btn:has-text("Başlatan sohbet")');
     assert.equal(await page.evaluate(() => state.activeTab.max === window.__sohbet), true);
     await page.evaluate((id) => { window.__sohbet.pendingEvents = []; window.__sohbet.autoTurns = 0; closeTab(chatsById.get(id), true); activateTab('max', window.__sohbet); }, childId);
@@ -1720,6 +1734,7 @@ async function waitUntil(fn, ms, msg) {
     await waitUntil(async () => (await octoHint()) === 'Octopus açık', 15000, 'yeni klasörde Octopus açık gelmedi: ' + (await octoHint()));
     assert.equal(await page.isVisible(P + '.folder-btn .octo-mark'), true);
     await page.screenshot({ path: path.join(OUT, '7a-octopus-baslat.png') });
+    const octoStart = fakeLog().length;
     await page.fill(P + '.new-input', 'iki kol aç');
     await page.press(P + '.new-input', 'Enter');
     for (const [i, t] of ['Kol A', 'Kol B'].entries()) {
@@ -1747,6 +1762,22 @@ async function waitUntil(fn, ms, msg) {
     });
     assert.match(octoTabs.id || '', /^oc_[0-9a-f]{16}$/, 'baş sekmesi ahtapota bağlı değil');
     assert.deepEqual(octoTabs.arms.map((a) => a.title), ['Kol A', 'Kol B']);
+    // Kolların ilk mesajı: öbür açık kollar ve ortak kayıt kuralı (octopus.js → peerNote); görev tanımına girmez (aşağıda brief)
+    const armFirst = (t) => page.evaluate((title) => state.tabs.max.find((x) => x.title === title).list.querySelector('.msg-user .user-text')?.textContent || '', t);
+    assert.match(await armFirst('Kol A'), /^alt görev: A\n\n---\nAhtapotun öbür kolları: şu an açık başka kol yok.*\nGörev tanımın açıkça vermedikçe başka bir kolun alanına ya da projenin ortak kayıtlarına/s,
+      'ilk kolun mesajı: ' + (await armFirst('Kol A')));
+    assert.match(await armFirst('Kol B'), /^alt görev: B\n\n---\nAhtapotun öbür kolları \([^\n]*\):\n- Kol A \((çalışıyor|turu bitti); proje klasörü\): alt görev: A\nGörev tanımın açıkça/,
+      'ikinci kola öbür kol gitmedi: ' + (await armFirst('Kol B')));
+    // Kolların sistem istemi: kısa rapor biçimi (octopus.js → ARM_PROMPT); kolda tur sonu kutusu (wrap_up) yok, başa kolun istemi gitmez
+    const octoLog = fakeLog().slice(octoStart);
+    const armAppends = octoLog.split('\n').filter((l) => l.startsWith('APPEND "Bu sohbet bir Octopus kolu'));
+    assert.equal(armAppends.length, 2, 'iki kola rapor biçimi gitmedi');
+    assert.match(armAppends[0], /son mesajı başa rapor olarak gider \(ilk 1\.500 karakteri\).*Sonuç: .*Değişenler: .*Doğrulama: .*Açık: .*Kısalık yalnız yazıda/,
+      'kolun rapor biçimi: ' + armAppends[0]);
+    assert.doesNotMatch(octoLog.split('\n').find((l) => l.startsWith('APPEND "Bu sohbet, Claude Panel\'de projenin beyni')) || '', /Octopus kolu/, 'başa kolun istemi gitti');
+    const armTools = [...octoLog.matchAll(/^ARACLAR (.*)$/gm)].map((m) => m[1].split(','));
+    assert.equal(armTools.length, 2, 'kolların araçları günlükte yok');
+    assert.ok(armTools.every((x) => x.includes('sessions') && !x.includes('wrap_up')), 'kolda wrap_up var: ' + armTools.map(String).join(' | '));
     const octoDir = path.join(OCTO_ROOT, octoTabs.id);
     const readOcto = () => JSON.parse(fs.readFileSync(path.join(octoDir, 'ahtapot.json'), 'utf8'));
     // Kollar turunu bitirdi: "rapor verdi" ve son raporları kayıtta
@@ -1987,18 +2018,18 @@ async function waitUntil(fn, ms, msg) {
     await page.evaluate((id) => { for (const t of state.tabs.max.filter((x) => x.parentId === id)) closeTab(t, true); }, headChat);
     await page.waitForSelector(OC + '.oc-debris', { state: 'attached', timeout: 5000 });
     await waitUntil(() => readOcto().arms.slice(2).every((a) => a.state === 'cut'), 10000, 'kapanan kollar kesildi olmadı');
-    // Açık bölme kayıtla birlikte güncellenir: kesilenler çizimden düşer, bitmiş A kalır
-    await waitUntil(async () => JSON.stringify(await ocArms()) === JSON.stringify([['kol-1', 'done', false]]), 5000, 'ahtapot bölmesi güncellenmedi: ' + JSON.stringify(await ocArms()));
+    // Açık bölme kayıtla birlikte güncellenir: kesilenler çizimden düşer; bitmiş A'nın sekmesi kapalı, o da çizilmez (kapatılan kol ahtapottan kalkar)
+    await waitUntil(async () => JSON.stringify(await ocArms()) === '[]', 5000, 'ahtapot bölmesi güncellenmedi: ' + JSON.stringify(await ocArms()));
     assert.equal((await ocStats()).cuts - cutsBefore, 8, 'kesilen kollar sayılmadı');
     await waitUntil(async () => (await page.locator(OC + '.oc-debris').count()) === 0, 5000, 'kopan parçalar kalkmadı');
-    assert.equal((await ocMore()).length, 9);
+    assert.equal((await ocMore()).length, 10);
     // Baş yeni kol ister: kart beklerken tomurcuk, onaylanınca kol tomurcuktan büyür
     const growsBefore = (await ocStats()).grows;
     await page.fill(C + '.composer-input', 'dört kol aç');
     await page.press(C + '.composer-input', 'Enter');
     await page.waitForSelector(OC + '.oc-bud', { timeout: 15000 });
     assert.match(await page.textContent(OC + '.oc-bud-lbl'), /Öneri · Kol 9\s*onayını bekliyor/);
-    assert.equal((await ocArms()).length, 1, 'tomurcuk kol sayıldı');
+    assert.equal((await ocArms()).length, 0, 'tomurcuk kol sayıldı');
     await page.waitForTimeout(400);
     await page.screenshot({ path: path.join(OUT, '7j-octopus-tomurcuk.png') });
     for (let i = 9; i <= 12; i++) {
@@ -2015,12 +2046,12 @@ async function waitUntil(fn, ms, msg) {
     await headIdle();
     assert.equal((await ocStats()).grows - growsBefore, 4, 'yeni kollar büyümedi');
     await waitUntil(async () => (await page.locator(OC + '.oc-arm[data-grow]').count()) === 0, 5000, 'kollar büyümeyi bitirmedi');
-    assert.deepEqual(await ocArms(), [['kol-1', 'done', false], ...['kol-11', 'kol-12', 'kol-13', 'kol-14'].map((id) => [id, 'reported', true])]);
+    assert.deepEqual(await ocArms(), ['kol-11', 'kol-12', 'kol-13', 'kol-14'].map((id) => [id, 'reported', true]));
     assert.deepEqual(await labelsOverlap(), [], '5 kolda ahtapot etiketleri üst üste');
     await waitUntil(async () => !(await ocStats()).running, 6000, 'büyüme bitince döngü durmadı');
     await page.screenshot({ path: path.join(OUT, '7k-octopus-5-kol.png') });
     await page.evaluate((id) => { for (const t of state.tabs.max.filter((x) => x.parentId === id)) closeTab(t, true); }, headChat);
-    await waitUntil(async () => JSON.stringify(await ocArms()) === JSON.stringify([['kol-1', 'done', false]]), 5000, 'yeni kollar kesilince çizimden düşmedi');
+    await waitUntil(async () => JSON.stringify(await ocArms()) === '[]', 5000, 'yeni kollar kesilince çizimden düşmedi');
     await page.click(OC + '.icon-btn[title="Kapat"]');
     assert.equal(await page.locator(C + '.oc-pane').count(), 0, 'ahtapot bölmesi kapanmadı');
 
@@ -2132,6 +2163,9 @@ async function waitUntil(fn, ms, msg) {
       && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
     const memLog = fakeLog().slice(memMark);
     assert.match(memLog, /^APPEND ".*projenin beyni.*önce `hatirla` ile ara; tahmin etme/m, 'başın sistem istemine hafıza talimatı gitmedi');
+    assert.match(memLog, /^APPEND ".*işi kollara böler.*`sessions start` ile bir kola ver/m, 'başın sistem istemine kollara iş verme talimatı gitmedi');
+    assert.match(memLog, /^APPEND ".*Kollar kısa ve sabit biçimde rapor verir.*`read` aynı raporu yeniden getirir, yalnız rapor kesildiyse gerekir/m, 'başın istemine kısa rapor ve read talimatı gitmedi');
+    assert.match(memLog, /^APPEND ".*çakışmayı önlemek senin işin.*iki kola aynı dosyayı verme.*ortak kayıtları.*tek elde kalsın/m, 'başın sistem istemine kolların koordinasyonu gitmedi');
     assert.ok(!/HAFIZAPERM/.test(memLog), 'hatirla izin sormamalı');
     const memCalls = memLog.split('\n').map((l) => l.match(/^HAFIZAMCP +("(?:[^"\\]|\\.)*")\s*(HATA)?/)).filter(Boolean).map((m) => [JSON.parse(m[1]), !!m[2]]);
     assert.equal(memCalls.length, 4, 'hafıza araç çağrıları: ' + JSON.stringify(memCalls));
@@ -2321,6 +2355,11 @@ async function waitUntil(fn, ms, msg) {
     assert.ok(rel.length > 0 && rel.length <= 2000, 'uyan satırlar yok ya da uzun: ' + rel.length);
     assert.deepEqual(rel.split('\n').filter((l) => l.startsWith('[')).map((l) => l.split(' ')[0]), ['[D-1', '[K12', '[K13', '[D-2'], 'uyan satırlar: ' + rel);
     assert.match(rel, /\[K12 karar, dosya docs\/kararlar\/K12-arayuz-referansi\.md, yerini K13 aldı\] Arayüz referansı The Witcher 3 \(30 Eyl\)\n  kapanış: Dosyada: Geçersiz/);
+    // Aynı konuda sonraki mesaj: satırlar az önce (bağlamın son 25 bin tokeninde) masaya kondu, yalnız kimlikleri anılır
+    const p52r = fakeLog().length;
+    await headSend('alt görev: witcher arayüzü yine', 'Alt görev bitti: alt görev: witcher arayüzü yine');
+    const [againCtx] = hookCtx(p52r, 'UserPromptSubmit');
+    assert.equal(againCtx.slice(againCtx.indexOf('Defterden')), 'Defterden bu mesaja uyan satırlar: D-1, K12, K13, D-2 az önce masaya kondu, değişmedi.', 'uyan satırlar yinelendi: ' + againCtx);
     // Sıkıştırma: SessionStart (compact) özeti ve hatirla notunu verir; sonraki mesajda yinelenmez
     const p52c = fakeLog().length;
     await page.fill(C + '.composer-input', '/compact defteri koru');
@@ -2333,8 +2372,10 @@ async function waitUntil(fn, ms, msg) {
     await page.waitForFunction(() => !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
     await page.waitForSelector(C + '.exam-card.done', { timeout: 20000 }); // başın sıkıştırmasından sonra sınav (P7.2; ayrıntısı kendi adımında)
     const p52d = fakeLog().length;
-    await headSend('alt görev: sonra', 'Alt görev bitti: alt görev: sonra');
-    assert.ok(!hookCtx(p52d, 'UserPromptSubmit')[0].includes('Beyin defteri (Claude'), 'compact sonrası özet ikinci kez kondu');
+    await headSend('alt görev: sonra witcher', 'Alt görev bitti: alt görev: sonra witcher');
+    const [afterCtx] = hookCtx(p52d, 'UserPromptSubmit');
+    assert.ok(!afterCtx.includes('Beyin defteri (Claude'), 'compact sonrası özet ikinci kez kondu');
+    assert.ok(afterCtx.includes('\n[D-1 ret] Witcher 3') && afterCtx.includes('\n[K12 karar'), 'sıkıştırmadan sonra uyan satırlar yeniden konmadı: ' + afterCtx.slice(0, 300));
     // Kol: ilk mesajında başın defterinden kural/ret/zevk (karar yok); görev tanımı (brief) eklenen kısım olmadan
     const reported = () => page.$$eval(C + '.msg-assistant', (o) => o.filter((x) => x.textContent.includes('Kollar rapor verdi')).length);
     const reportedBefore = await reported();
@@ -2736,6 +2777,87 @@ async function waitUntil(fn, ms, msg) {
     // Hafıza dizini diskte kalır: yeniden açılışta arama aynı sonucu verir
     // Yeniden doğan bedenin kaydı (devir notu: defterde "Witcher 3") sayılmaz (P7.3)
     assert.deepEqual((await page2.evaluate((p) => window.panel.hafizaAra({ query: 'witcher', project: p }), PROJECT)).hits.filter((h) => h.session !== rebornSid).map((h) => [h.uuid, h.place]), [['h2', 'dusmus']]);
+    assert.deepEqual(errors, [], 'arayüz hataları');
+    assert.deepEqual(await mainErrors(app2), [], 'ana süreç hataları (2)');
+
+    step('Octopus: kolları kapatmak. Bölmede ve kenar çubuğunda sağ tık "Kolu kapat"; yeniden açılan baş açık kollarını görür, "done" + "close" ile kapatır; "Devam et"le açılan kol yine kol; sekmesi kapalı kol kimliğiyle (kol-N)');
+    const OC2 = C + '.chat-octo ';
+    const ocArms2 = () => page2.$$eval(OC2 + '.oc-arm', (o) => o.map((x) => [x.dataset.id, x.dataset.state, 'live' in x.dataset]));
+    const headOf2 = () => page2.evaluate(() => state.activeTab.max.chatId);
+    const idle2 = (id) => page2.waitForFunction((i) => { const t = chatsById.get(i); return t && !t.busy && !t.pendingEvents.length; }, id, { timeout: 30000 });
+    const armMenuItems = () => page2.$$eval('.octo-arm-menu .pop-item .pop-label > span', (o) => o.map((x) => x.textContent));
+    // Baş iki yeni kol açar: kol-15 (Kol A), kol-16 (Kol B)
+    const answered0 = await page2.locator(C + '.perm-card.answered').count();
+    await page2.fill(C + '.composer-input', 'iki kol aç');
+    await page2.press(C + '.composer-input', 'Enter');
+    for (let i = 1; i <= 2; i++) {
+      const card = C + '.perm-card:not(.answered)';
+      await page2.waitForSelector(card + ':has-text("yan oturum başlatmak")', { timeout: 15000 });
+      await page2.click(card + ' .primary-btn');
+      await page2.waitForFunction((n) => document.querySelectorAll('.acct-pane.active .chat-host.active .perm-card.answered').length === n, answered0 + i, { timeout: 5000 });
+    }
+    await waitUntil(() => { const a = readOcto().arms; return a.length === 16 && a.slice(14).every((x) => x.sessionId && x.state === 'reported'); }, 15000, 'yeni iki kol rapor vermedi');
+    const head2a = await headOf2();
+    await idle2(head2a);
+    // Bölmede sağ tık: kol "Kolu kapat" ile sekmesiyle kapanır, kesilir, çizimden düşer (bitmiş A sekmesi kapalı olduğu için zaten çizilmiyor)
+    await page2.click(C + '.octo-toggle');
+    await page2.waitForSelector(OC2 + '.oc-arm[data-id="kol-16"]', { timeout: 5000 });
+    assert.deepEqual(await ocArms2(), [['kol-15', 'reported', true], ['kol-16', 'reported', true]]);
+    await page2.click(OC2 + '.oc-lbl[data-id="kol-16"]', { button: 'right' });
+    await page2.waitForSelector('.octo-arm-menu', { timeout: 3000 });
+    assert.deepEqual(await armMenuItems(), ['Sekmeye geç', 'Kolu kapat']);
+    await page2.waitForTimeout(200); // menünün açılış animasyonu (.12 sn) bitsin
+    await page2.screenshot({ path: path.join(OUT, '7x-octopus-kol-sag-tik.png') });
+    await page2.click('.octo-arm-menu .pop-item:has-text("Kolu kapat")');
+    await waitUntil(() => readOcto().arms[15].state === 'cut', 5000, 'sağ tıkla kapatılan kol kesilmedi');
+    await waitUntil(async () => JSON.stringify(await ocArms2()) === JSON.stringify([['kol-15', 'reported', true]]), 5000, 'kapatılan kol çizimden düşmedi: ' + JSON.stringify(await ocArms2()));
+    const kolASid = readOcto().arms[14].sessionId, kolBSid = readOcto().arms[15].sessionId;
+    assert.deepEqual(await page2.evaluate(() => state.tabs.max.map((t) => t.sessionId)).then((l) => [l.includes(kolASid), l.includes(kolBSid)]), [true, false], 'kapatılan kolun sekmesi kapanmadı');
+    // Baş kapanıp kenar çubuğundan yeniden açılır (yeni sohbet kimliği); Kol A'nın sekmesi açık kalır
+    await page2.evaluate((id) => closeTab(chatsById.get(id), true), head2a);
+    await page2.click('.acct.active .octo-row:has-text("Imladris")');
+    await page2.waitForFunction(([old, oc]) => state.activeTab.max?.chatId && state.activeTab.max.chatId !== old && state.activeTab.max.octopusId === oc, [head2a, octoBefore.id], { timeout: 15000 });
+    const head2b = await headOf2();
+    // Panel kapanırken yazılmayan eski durum: sekmesi kapalı ama kayıtta "rapor verdi" olan iki kol (Kol 2 = kol-4, Kol 3 = kol-5)
+    await app2.evaluate((_e, oc) => { const o = process.mainModule.require('./octopus.js'); for (const id of ['kol-4', 'kol-5']) o.setArm(oc, id, { state: 'reported' }); }, octoBefore.id);
+    const sideArm = (n) => `.acct.active .octo[data-id="${octoBefore.id}"] .octo-arm >> nth=${n}`;
+    await page2.waitForSelector(`.acct.active .octo[data-id="${octoBefore.id}"] .octo-arm[data-state="reported"]:not([data-live])`, { timeout: 5000 });
+    // Kenar çubuğunda sağ tık: sekmesi kapalı kol yalnız kayıtta kesilir
+    await page2.click(sideArm(4), { button: 'right' });
+    assert.deepEqual(await armMenuItems(), ['Devam et', 'Kolu kapat']);
+    await page2.click('.octo-arm-menu .pop-item:has-text("Kolu kapat")');
+    await waitUntil(() => readOcto().arms[4].state === 'cut', 5000, 'kenar çubuğundan kapatılan kol kesilmedi');
+    // Kesilmiş Kol B sağ tıkla "Devam et": yine kol olarak açılır (rapor biçimi, başa bağlı)
+    const contMark = fakeLog().length;
+    await page2.click(sideArm(15), { button: 'right' });
+    assert.deepEqual(await armMenuItems(), ['Devam et'], 'kesilmiş ve sekmesi kapalı kolda "Kolu kapat" olmamalı');
+    await page2.click('.octo-arm-menu .pop-item:has-text("Devam et")');
+    await page2.waitForFunction((sid) => state.tabs.max.find((t) => t.sessionId === sid)?.chatId, kolBSid, { timeout: 15000 });
+    await waitUntil(() => fakeLog().slice(contMark).includes('--resume=' + kolBSid), 10000, 'kol kendi oturumuyla açılmadı');
+    await waitUntil(() => fakeLog().slice(contMark).split('\n').some((l) => l.startsWith('APPEND "Bu sohbet bir Octopus kolu')), 10000, '"Devam et"le açılan kol, kol olarak açılmadı');
+    // Kullanıcı başa "kolları kapat" der: baş listede açık iki kolu ve sekmesi kapalı kol-4'ü görür, hepsini kapatır
+    await page2.evaluate((id) => activateTab('max', chatsById.get(id)), head2b);
+    const closeMark = fakeLog().length;
+    await page2.fill(C + '.composer-input', 'kolları kapat');
+    await page2.press(C + '.composer-input', 'Enter');
+    await page2.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Kolları kapattım')
+      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 30000 });
+    const closeLog = fakeLog().slice(closeMark);
+    const listLine = closeLog.split('\n').find((l) => l.startsWith('KAPATMCP list')) || '';
+    assert.match(listLine, /\(kol-15\) · Kol A · rapor verdi/, 'yeniden açılan baş açık kolunu görmedi: ' + listLine);
+    assert.match(listLine, /\(kol-16\) · Kol B · durdu/, '"Devam et"le açılan kol başa bağlanmadı: ' + listLine);
+    assert.match(listLine, /kol-4 · Kol 2 · rapor verdi · sekmesi kapalı/, 'sekmesi kapalı kol listede yok: ' + listLine);
+    assert.doesNotMatch(listLine, /kol-5 ·/, 'kapatılan kol listede');
+    assert.doesNotMatch(closeLog, /^KAPATMCP .*HATA$/m, 'kapatma işlemlerinden biri reddedildi:\n' + closeLog);
+    await waitUntil(() => { const a = readOcto().arms; return a[14].state === 'done' && a[15].state === 'done' && a[3].state === 'cut'; }, 10000,
+      'kollar kapanınca kayıt: ' + JSON.stringify(readOcto().arms.slice(3, 5).concat(readOcto().arms.slice(14)).map((a) => [a.id, a.state])));
+    await page2.waitForFunction(() => state.tabs.max.length === 1, null, { timeout: 5000 }).catch(() => {});
+    assert.deepEqual(await page2.evaluate(() => state.tabs.max.map((t) => t.octopusId ? 'baş' : t.title)), ['baş'], 'kol sekmeleri kapanmadı');
+    // Bölmede hiç kol kalmaz
+    await page2.click(C + '.octo-toggle');
+    await page2.waitForSelector(OC2 + '.oc-pane', { timeout: 5000 });
+    await waitUntil(async () => (await ocArms2()).length === 0, 5000, 'kapanan kollar bölmede: ' + JSON.stringify(await ocArms2()));
+    await page2.screenshot({ path: path.join(OUT, '7y-octopus-kollar-kapandi.png') });
     assert.deepEqual(errors, [], 'arayüz hataları');
     assert.deepEqual(await mainErrors(app2), [], 'ana süreç hataları (2)');
 

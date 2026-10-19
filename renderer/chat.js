@@ -1155,7 +1155,9 @@ function wireComposer(tab) {
   const { input } = tab;
   const autosize = () => {
     input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 300) + 'px';
+    // Gizli sekmede (arka planda açılan yan oturum, kol) scrollHeight 0'dır: yükseklik
+    // verilmez, yoksa yazma alanı 0 px kalır ve sekmeye geçince yazılamaz.
+    if (input.scrollHeight) input.style.height = Math.min(input.scrollHeight, 300) + 'px';
     if (tab.busy) tab.sendBtn.hidden = !input.value.trim();
   };
   tab.autosize = autosize;

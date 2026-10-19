@@ -244,6 +244,11 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
           resolve({ behavior: 'deny', message: 'İptal edildi' });
         });
       });
+      // Ahtapotun kolu (başın açtığı yan oturum): sistem istemine rapor biçimi (octopus.js → ARM_PROMPT) gider, wrap_up verilmez:
+      // kolun okuru baştır, kutuyu (ve içindeki soruyu) baş görmez; rapor son mesajdır (sessions.js → turnEnded)
+      // "Devam et" ile açılan kol da koldur (octopus.findArm): baş yeniden açılınca onu görür, bitirir, kapatır
+      const armRef = !parentId && !wantOctopus && mode === 'resume' ? octopus.findArm(accountId, resumeId) : null;
+      const asArm = parentId ? octopus.roleOf(parentId)?.role === 'head' : !!armRef;
       // Artifacts: Claude'un yazdığı .html/.svg dosyaları ve publish_artifact aracı galeriye düşer
       const onArtifact = (info) => send('chat:artifact', id, info);
       const track = artifacts.createTracker({ cwd: dir, accountId, onArtifact });
@@ -255,7 +260,7 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
         terminals.createTool(sdk, z, { chatId: id, accountId, cwd: dir, envId }),
         changes.createTool(sdk, z, { chatId: id, cwd: dir }),
         sessions.createTool(sdk, z, { chatId: id, cwd: dir }),
-        wrapup.createTool(sdk, z),
+        ...(asArm ? [] : [wrapup.createTool(sdk, z)]),
         opener.createTool(sdk, z, { cwd: dir }),
         prwatch.createTool(sdk, z, { chatId: id, cwd: dir, env }),
         ...hafiza.createTools(sdk, z, { accountId, project, getSessionId: () => sessionId }), // hatirla, hatirla_oku
@@ -274,13 +279,17 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
       const octoId = wantOctopus && !worktree && !parentId
         ? octopus.bindHead(id, { octopus: wantOctopus, accountId, project: { key: project, cwd: dir, name: path.basename(project) || project } })
         : null;
+      if (octoId) sessions.relink(id, octoId); // baş yeniden açıldı: açık kolları yeni sohbete bağlanır
+      if (armRef) octopus.bindArm(id, armRef);
 
       const options = {
         cwd: dir,
         env,
-        // Başa hafıza ve defter talimatı (hafiza.js, defter.js → HEAD_PROMPT): bağlamda olmayanı önce hatirla ile arasın; ret, zevk, karar,
+        // Başa hafıza, görev ve defter talimatı (hafiza.js, octopus.js, defter.js → HEAD_PROMPT): bağlamda olmayanı önce hatirla ile arasın; işi kollara versin; ret, zevk, karar,
         // kural ve açık işi deftere yazsın. "Beyin yap" ile baş olan sohbet bunları ancak yeniden açılınca alır (sistem istemi süreç açılırken verilir).
-        systemPrompt: { type: 'preset', preset: 'claude_code', ...(octoId ? { append: hafiza.HEAD_PROMPT + '\n\n' + defter.HEAD_PROMPT } : {}) },
+        // Kola rapor biçimi (octopus.js → ARM_PROMPT).
+        systemPrompt: { type: 'preset', preset: 'claude_code',
+          ...(octoId ? { append: [hafiza.HEAD_PROMPT, octopus.HEAD_PROMPT, defter.HEAD_PROMPT].join('\n\n') } : asArm ? { append: octopus.ARM_PROMPT } : {}) },
         settingSources: ['user', 'project', 'local'], // CLAUDE.md, hook'lar, izinler, skill'ler
         mcpServers: { panel: panelMcp },
         allowedTools: ['mcp__panel__publish_artifact', 'mcp__panel__show', 'mcp__panel__show_widget', 'mcp__panel__wrap_up', 'mcp__panel__open',
@@ -420,6 +429,7 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
       });
       // Yan oturum (sessions.js): başlatan sohbet açıksa ona bağlanır; her tur sonunda ona bildirim gider
       if (parentId && chats.has(parentId)) sessions.register(id, parentId, title, dir, worktree);
+      else if (armRef) sessions.rebind(id, armRef, dir);
 
       return { ok: true, id, cwd: dir, title: folderTitle, worktree: worktree && { branch: worktree.branch, path: worktree.path }, octopus: octoId };
     } catch (err) {

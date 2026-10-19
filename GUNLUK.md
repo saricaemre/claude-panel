@@ -5,6 +5,96 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 
 ---
 
+## 2026-10-19 — GitHub'a gönderildi, arkadaşla paylaşım
+
+**İstek:** Emre: projeyi GitHub'a gönder, arkadaşı (`kibritci`) kendi kopyasında çalışacak.
+
+**Yapılan:** Gizli depo `saricaemre/claude-panel` açıldı, `main` `panel-gelistirmeleri`'ne ileri sarıldı (ikisi de gönderildi; `claude/*` worktree dalları gönderilmedi), `kibritci` yazma izniyle davet edildi. README → Geliştirme'ye klonlama ve kendi dalında çalışma adımları eklendi.
+
+**Kararlar:** Depo gizli: `docs/octopus/olcum/` ve günlük Kızıl Elma oturumlarından alıntı içeriyor. Göndermeden önce izlenen dosyalarda anahtar taraması yapıldı (yalnız e2e'deki sahte `sk-ant-…` çıktı).
+
+**Doğrulama:** `npm run check`, `npm test` (tümü geçti); push sonrası uzak dalların yerel commit'le aynı olduğu ve davetin durduğu `gh` ile denetlendi.
+
+**Bekleyen:** `kibritci` daveti e-postadan ya da github.com/saricaemre/claude-panel/invitations adresinden kabul etmeli.
+
+---
+
+## 2026-10-19 — Kollar kapanmıyordu; sağ tıkla "Kolu kapat"
+
+**İstek:** Emre (Kızıl Elma ekran görüntüsüyle): "kolları kapat demiştim yine de duruyor. çöz şunu" ve "hatta kollara sağ tıklayınca kapayabilmem lazım".
+
+**Neden:** Baş ile kolları arasındaki bağ (`sessions.js` → `children[].parent`) bellekte ve başın sohbet kimliğine bağlıydı. Baş "Devam et" ile yeniden açılınca yeni kimlik aldı. Kollar eski kimliğe bağlı kaldı, baş `list`'te "yan oturum yok" gördü, `done` "bu sohbetin başlattığı bir yan oturum değil" diye reddedildi. Kenar çubuğundan açılan kol da düz sohbet oluyordu. Araçta sekme kapatma işlemi yoktu. Bölme de bitmiş kolları sekmeleri kapansa bile çiziyordu.
+
+**Yapılan:**
+- `sessions.relink`: yeniden açılan baş, ahtapotun açık kollarını devralır. `octopus.findArm` / `bindArm` + `sessions.rebind`: "Devam et" ile açılan kol oturumu yine kol olur (rapor biçimi, başa bağlı).
+- `sessions` aracına `close` eklendi (sekmeyi kapatır; çalışan ya da bekleyen kolda kartla). Başta `list` sekmesi kapalı kolları `kol-N` kimliğiyle de verir; `read`/`done`/`close` bu kimliği alır.
+- Sağ tık menüsü (kenar çubuğu, bölmedeki kol ve etiket, "Diğer kollar"): "Sekmeye geç"/"Devam et", "Kolu kapat". Sekmesi kapalı kol için `octopus:closeArm` kullanılır. İmleçte açılan menü için `openMenuAt` eklendi.
+- Bölme kesilen kolları ve sekmesi kapalı biten kolları çizmez.
+
+**Doğrulama:** `npm run check`, `npm test` (tümü geçti). Yeni e2e adımı panel yeniden açıldıktan sonra koşar. İçinde şunlar var: bölmede sağ tıkla kapatma, baş kapanıp kenar çubuğundan yeniden açılınca açık kolunu `list`'te görmesi, kesilmiş kolun sağ tıkla "Devam et" ile kol olarak açılması (`APPEND` kol istemi), sekmesi kapalı `kol-4`'ün kimlikle kapatılması, sonunda tek sekme ve boş bölme. `relink` kapatılınca adım "yeniden açılan baş açık kolunu görmedi" diye kırmızıya döndü. Eski adımlardaki üç assert güncellendi: bitmiş, sekmesi kapalı Kol A artık çizilmiyor. Ekran görüntüleri: `7x-octopus-kol-sag-tik.png`, `7y-octopus-kollar-kapandi.png`.
+
+**Bekleyen:** Gerçek hesapla Kızıl Elma'da deneme. Panel `kur.sh` ile yeniden kurulduktan sonra baş "kolları kapat" desin ya da kollar sağ tıkla kapatılsın. Şu an açık olan eski kol sekmeleri yeni panelde "Devam et" ile açılırsa kol olarak bağlanır.
+
+---
+
+## 2026-10-18 — Kolun yazma alanı kapalı kalıyordu
+
+**İstek:** Emre: "octopus beyni bir kol açınca o kola geçip bir şey yazamıyorum kutucuk kapalı."
+
+**Neden:** Kol (yan oturum) arka planda, gizli sekmede açılır. İlk mesajı `submit` ile gider, `submit` de yazma alanını boşaltıp `autosize` çağırır. Gizli öğede `scrollHeight` 0 olduğu için yazma alanı `height: 0px` alıyordu. Sekmeye geçilince alan görünmüyor, tıklanamıyordu.
+
+**Yapılan:** `renderer/chat.js` → `wireComposer` / `autosize`: `scrollHeight` 0 ise yükseklik yazılmaz (`auto` kalır, `rows: 1`). Arka plan sekmesine konan taslak (`setDraft`) için de geçerli.
+
+**Doğrulama:** `npm run check`, `npm test`. e2e'nin yan oturum adımına assert eklendi: yan oturum sekmesine geçince yazma alanının yüksekliği ≥ 16 px, yazınca da öyle. Düzeltmeden önce koşuldu, `height: 0` ile kırmızıya döndü; düzeltmeyle geçti.
+
+**Bekleyen:** Gerçek hesapla bir kol açıp sekmesine geçme denemesi (Emre).
+
+---
+
+## 2026-10-18 — Kolların kısa raporu ve Octopus'ta token tasarrufu
+
+**İstek:** Emre: "Octopus'un böldüğü kollar çıktılarını olabildiğince sade ve az karakterle versin ki token tasarrufu olsun; nasıl olsa işleri ana beyinde tartışacağız. Bir de token tasarrufu için Octopus'ta (işin kalitesini gram bozmadan) bir şeyler yapabilir miyiz, kontrol et."
+
+**Ölçüm (gerçek kayıt, yalnız okundu):** Kızıl Elma'nın iki kol raporu 1.125 ve 1.165 karakter; ikisi de başa değil Emre'ye yazılmış ("Humbaracı'yı onayladınız", "Emre, aklında … var mı?"). Baş bunlardan sonra bir kez `sessions read` çağırmış: 1.500'ün altındaki raporda aynı metin bağlama ikinci kez girer. Başın son sıkıştırmadan sonraki bağlamında (~271 bin karakter) kol bildirimleri %1,4, defterin masaya koyduğu satırlar %1,8; çoğu Claude Code'un kendi ekleri (araç listesi, talimatlar) ve başın `Bash` çıktıları. Uyan satır blokları 5 tane, art arda yinelenen yok (iki satır iki mesaj arayla). Abonelikte başın önbelleği 1 saat yaşıyor (CLI'de `s_e` → `reason: "subscriber"`); bir saatten kısa kol işleri başı önbelleksiz uyandırmıyor.
+
+**Yapılan:**
+- `octopus.ARM_PROMPT` kolun sistem istemine (chat-main.js → `asArm`): son mesaj başa rapordur, okuru baş; sabit biçim Sonuç / Değişenler (ya da bulgular) / Doğrulama / Açık; görevi yeniden anlatma, alıntı, selam yok; ara mesajlar da kısa; baş başka biçim isterse ona uy; "kısalık yalnız yazıda: okuma, düşünme, iş ve doğrulama kısalmaz". İlk mesaja değil sistem istemine: `send` ile gelen sonraki turlarda ve kolun sıkıştırmasından sonra da geçerli.
+- Kola `wrap_up` verilmez: kutuyu ve içindeki soruyu baş görmüyordu, rapor son mesajdır.
+- Bildirim `octopus.REPORT_MAX` (1.500) karakterde kesilince sonunda `…[kesildi: yanıt N karakter; tamamı için sessions read <id>]` yazar. Başın istemi: raporu rapordaki doğrulamayla ve gerekirse dosyalarla doğrula, `read` yalnız kesildiyse; kollara uzun rapor istemek gerekiyorsa `prompt`'ta açıkça iste. `sessions` aracının açıklamasında `read` "tamamını okur (bildirim ilk 1500'ünü taşır)".
+- Defter: uyan satır aynı metniyle bağlamın son 25 bin tokeninde konduysa yinelenmez, yalnız kimliği anılır (`RELEVANT_FRESH`, `tabled.seen`, uzaklık `compaction.last`). Sıkıştırmada sıfırlanır. §7'deki "uyan satırlar her mesajda yinelenebilir" maddesi.
+
+**Kararlar:** Kollara daha ucuz model, başın uyanışlarını birleştirme (gecikme), istemleri kısaltma yapılmadı. İlki kaliteyi etkiler, ikincisi gecikme getirir ve nadiren işe yarar, üçüncüsü önbellekte zaten ucuz (~2.900 karakter). Kızıl Elma'nın kendi kapanış kuralları (ör. "SIRADAKİ İŞ") projenin `CLAUDE.md`'sinden kola gelir; onlara dokunulmadı (İ1).
+
+**Doğrulama:** `npm run check`; e2e: yan oturum adımında kol olmayan yan oturumda `wrap_up` var ve kol istemi yok, 1.821 karakterlik yanıtın bildirimi 1.500'de kesilip işaretli; Octopus adımında iki kola `ARM_PROMPT` gitti, başa gitmedi, kolların araçlarında `wrap_up` yok (sahte CLI `ARACLAR`); hafıza adımında başın isteminde `read` talimatı; P5.2'de aynı konudaki üçüncü mesajda satırlar yinelenmiyor, yalnız kimlikleri; sıkıştırmadan sonra yeniden geliyor. Yedi bozma ayrı ayrı koşuldu, her biri kendi assert'inde kırmızı: işaret yok, yan oturumda `wrap_up` yok, kola istem gitmiyor, kolda `wrap_up` var, başın `read` cümlesi yok, eşik 0, sıkıştırmada sıfırlanmıyor (sonuncusu küçülen bağlam denetimiyle birlikte bozuldu). İlk koşu P9.3 tarayıcı adımında düştü (bilinen kararsızlık, bu işten önce koşan adım), sonraki tam koşular 81 adımda yeşil. P5.2 assert'i ilk yazılışta test kancasının yankısını hesaba katmıyordu; düzeltildi.
+
+**Bekleyen:** gerçek hesapla deneme: kolların raporu bu biçime ne kadar uyuyor, başın doğrulaması kısa raporla yetiyor mu (yetmezse `read` ya da dosya okumaları artar, kazanç geri gider). İstem yalnız yeni açılan kollara gider; açık kollar ve Kızıl Elma başı `kur.sh` sonrası yeniden açılınca alır. 25 bin token eşiği ölçülmedi.
+
+## 2026-10-18 — Kolların koordinasyonu
+
+**İstek:** Emre: "8 kol açılsa bile birbirlerinin işlerini karıştırmamaları Octopus'un ana olayı değil mi, bunu her seferinde promptta söylemem gerekiyor mu?" Kızıl Elma'da baş iki kolun aynı numaralı oturum kaydına yazmaması için kendi "ortak kilidini" uyduruyordu.
+
+**Neden:** kollar yalnız konuşma olarak ayrıydı. Çakışmaya karşı tek şey `sessions` aracının açıklamasındaki "dosya yazan paralel işlerde worktree: true" cümlesiydi (K3: kararı baş verir). Kollar birbirinden habersizdi; ortak kayıtları (oturum numarası, günlük) ayrı kopya da çözmüyor.
+
+**Yapılan:** `octopus.HEAD_PROMPT`'a koordinasyon: çakışmayı önlemek başın işi, kullanıcının her seferinde söylemesi gerekmez; kol açmadan alanını (dosya, klasör, kayıt) `prompt`'a yaz, iki kola aynı dosyayı verme; ortak kayıtlar tek elde; yeni kol çalışan kolun alanına değiyorsa önce `send` ile haber ver. `octopus.peerNote`: kolun ilk mesajına (defter notundan sonra) şu an açık öbür kollar (durum, klasör/dal, görev tanımının başı) ve "görev tanımın vermedikçe başka kolun alanına ya da ortak kayıtlara yazma, başa söyle" kuralı. `stripArmNote` iki işareti de keser. Liste kayıttan değil `live`'dan süzülür (panel kapanırken durum yazılmıyor).
+
+**Doğrulama:** `npm run check`; e2e Octopus adımında Kol A'nın mesajında "açık başka kol yok", Kol B'nin mesajında Kol A ve görevi; hafıza adımında `APPEND` koordinasyon assert'i. İkisi ayrı ayrı bozuldu, kırmızı görüldü ("ilk kolun mesajı", "kolların koordinasyonu gitmedi"); `npm test` geçti. Sahte CLI'nin "Alt görev bitti" yansıması nottan öncesiyle sınırlandı.
+
+**Bekleyen:** gerçek hesapla deneme (açık Kızıl Elma başı istemi ancak `kur.sh` sonrası "Devam et"le alır). Panel çakışmayı zorlamıyor (kilit, dosya sahipliği denetimi yok); gerçek Claude'un kuralı ne kadar tuttuğu ölçülmedi. Sonradan açılan kolu eski kollar ancak başın `send`'iyle öğrenir.
+
+## 2026-10-18 — Baş işi kollara vermiyordu
+
+**İstek:** Emre (ekran görüntüsüyle): Kızıl Elma'nın başına "Humbaracı'ya başla" deyince baş kol açmadı, işi kendisi yapmaya başladı.
+
+**Neden:** başın sistem istemine yalnız hafıza (`hafiza.HEAD_PROMPT`) ve defter (`defter.HEAD_PROMPT`) talimatı gidiyordu. Planın "baş yönü tutar, işi kollara böler, sonuçları doğrular" tanımı (§5) Claude'a hiç söylenmemişti; `sessions` aracının açıklaması da "küçük işleri burada yap, kullanıcı ayrı/paralel iş istediğinde kullan" diyordu.
+
+**Yapılan:** `octopus.js` → `HEAD_PROMPT`: birden çok adım süren işi (kod, dosya değişikliği, varlık üretimi, uzun araştırma) `sessions start` ile kola ver, bağımsız parçalara ayrı kol aç, kolun `prompt`'u eksiksiz olsun, kendin yalnız kısa işleri yap (soru, plan, karar, okuma, defter, hafıza), kullanıcı açıkça isterse kendin yap, rapor gelince doğrula → `send` / `done`. `chat-main.js` başın istemini hafıza + görev + defter sırasıyla kurar. Yeniden doğuş seçenekleri kopyaladığı için yeni bedene de gider.
+
+**Doğrulama:** `npm run check`; e2e'nin hafıza adımına `APPEND` assert'i (talimat istemden çıkarılınca "kollara iş verme talimatı gitmedi" ile kırmızı görüldü); `npm test` geçti.
+
+**Bekleyen:** gerçek hesapla deneme. Sistem istemi süreç açılırken verildiği için açık Kızıl Elma başı bunu ancak `kur.sh` sonrası yeniden açılınca ("Devam et") alır. Gerçek Claude'un talimata ne sıklıkla uyduğu ve "kısa iş" sınırını nerede çizdiği ölçülmedi; uymazsa her mesajda `UserPromptSubmit` ile kısa bir hatırlatma eklenebilir.
+
+---
+
 ## 2026-10-18 — P9.3: tarayıcıda yerel sayfadan izinsiz dış erişim
 
 **İstek:** Emre: "docs/octopus/OCTOPUS-PLANI.md'deki P9.3 paketini yap." (otomatik güvenlik incelemesinin bulgusu). K13 soruldu, Emre (b)'yi seçti.
