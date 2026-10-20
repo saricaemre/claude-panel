@@ -104,7 +104,7 @@ function usageLevel(pct) {
   return pct >= 90 ? 'high' : pct >= 70 ? 'mid' : 'low';
 }
 
-// 18 px halka: bar.setPct(0–100) ile dolar (kullanım ve bağlam göstergesi)
+// 18 px halka: bar.setPct(0–100) ile dolar (bağlam göstergesi, renderer/compaction.js)
 function ringSvg() {
   const svgNS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(svgNS, 'svg');
@@ -124,10 +124,31 @@ function ringSvg() {
   return { svg, bar };
 }
 
-function usageButton(acctId) {
-  const { svg, bar } = ringSvg();
+// Plan kullanımı: ince çerçeveli dolu dilim (pasta). Bağlam göstergesi halka + yüzde olduğu için ikisi karışmaz;
+// bilinmiyorken çerçeve kesikli, yüklenirken hafifçe söner (dönmez: dönen halka yükleme simgesi gibi görünüyordu)
+function pieSvg() {
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', '0 0 18 18');
+  svg.setAttribute('width', '18');
+  svg.setAttribute('height', '18');
+  const rim = document.createElementNS(svgNS, 'circle');
+  rim.setAttribute('class', 'pie-rim');
+  for (const [k, v] of [['cx', 9], ['cy', 9], ['r', 7.4], ['fill', 'none'], ['stroke-width', 1.3]]) rim.setAttribute(k, v);
+  // Dilim: yarıçapı 3,3 olan dairenin 6,6 kalınlıkta çizgisi merkezi de kaplar; dasharray dilimin açısıdır
+  const PIE_C = 2 * Math.PI * 3.3;
+  const slice = document.createElementNS(svgNS, 'circle');
+  slice.setAttribute('class', 'pie-slice');
+  for (const [k, v] of [['cx', 9], ['cy', 9], ['r', 3.3], ['fill', 'none'], ['stroke-width', 6.6], ['transform', 'rotate(-90 9 9)']]) slice.setAttribute(k, v);
+  svg.append(rim, slice);
+  slice.setPct = (pct) => slice.setAttribute('stroke-dasharray', `${PIE_C * Math.min(100, Math.max(0, pct)) / 100} ${PIE_C}`);
+  return { svg, slice };
+}
 
-  const btn = h('button', { class: 'usage-btn', 'data-acct-widget': acctId, onclick: () => {
+function usageButton(acctId) {
+  const { svg, slice } = pieSvg();
+
+  const btn = h('button', { class: 'usage-btn', 'data-acct-widget': acctId, 'aria-label': 'Plan kullanımı', onclick: () => {
     if (openMenu.anchor === btn) return closeMenu();
     openUsage(btn, acctId);
     loadAccountInfo(acctId, true);
@@ -138,8 +159,9 @@ function usageButton(acctId) {
     btn.classList.toggle('loading', !!info.loading && pct == null);
     btn.classList.toggle('unknown', pct == null);
     btn.dataset.level = pct == null ? '' : usageLevel(pct);
-    bar.setPct(pct ?? 0);
-    btn.title = pct == null ? 'Kullanım' : `Oturum limiti: %${Math.round(pct)} kullanıldı`;
+    slice.setPct(pct ?? 0);
+    btn.title = pct == null ? 'Plan kullanımı (hesabın limitleri)'
+      : `Plan kullanımı · 5 saatlik limit: %${Math.round(pct)} kullanıldı\nTıklayın: haftalık ve model bazlı limitler`;
     if (openMenu.anchor === btn) openMenu.el.refresh?.();
   };
   btn.refresh();

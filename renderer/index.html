@@ -12,8 +12,6 @@
 </head>
 <body>
   <div id="app">
-    <!-- Kenar çubuğunu açıp kapatır; pencere düğmelerinin yanında, kenar çubuğu kapalıyken de görünür -->
-    <button id="sidebarToggle" class="sidebar-toggle" title="Kenar çubuğunu gizle (⌘B)" aria-pressed="true" data-icon="sidebar"></button>
     <aside id="sidebar">
       <!-- Pencere düğmelerinin satırı: sürüklenir, yanında uygulamanın adı -->
       <div class="drag">
@@ -30,8 +28,8 @@
       <div class="section-label">Hesaplar</div>
       <div id="accounts"></div>
       <div class="sidebar-footer">
-        <button id="settingsBtn" class="nav-item" title="Hesap ayarları (⌘,)">
-          <span class="nav-ic" data-icon="settings"></span><span>Hesap ayarları</span><kbd>⌘,</kbd>
+        <button id="settingsBtn" class="nav-item" title="Ayarlar (⌘,)">
+          <span class="nav-ic" data-icon="settings"></span><span>Ayarlar</span><kbd>⌘,</kbd>
         </button>
       </div>
     </aside>
@@ -43,25 +41,46 @@
         <div id="artifactsPage"></div>
       </section>
     </main>
+
+    <!-- Kenar çubuğunu açıp kapatır; pencere düğmelerinin yanında, kenar çubuğu kapalıyken de görünür.
+         Sürükleme şeritlerinden (.drag, .tabbar) sonra durmalı: Electron sürükleme bölgelerini belge sırasıyla
+         üst üste koyar, önce gelen no-drag düğme sonraki şeridin altında kalır ve tıklanmaz (z-index etkisiz) -->
+    <button id="sidebarToggle" class="sidebar-toggle" title="Kenar çubuğunu gizle (⌘B)" aria-pressed="true" data-icon="sidebar"></button>
   </div>
 
+  <!-- Ayarlar: solda sekmeler (renderer/app.js → openSettings). Hesaplar "Kaydet" ile, diğer sekmeler değişince kaydedilir -->
   <div id="modal" class="modal" hidden>
-    <div class="modal-card">
+    <div class="modal-card settings-card">
       <div class="modal-head">
-        <h2>Hesap ayarları</h2>
+        <h2>Ayarlar</h2>
         <button class="icon-btn" id="modalClose" title="Kapat">✕</button>
       </div>
-      <p class="muted small">
-        Her hesabın kendi <b>ayar klasörü</b> var; Claude Code girişi ve geçmişi orada tutulur.
-        Bir hesabın klasörünü boş bırakırsanız varsayılan <code>~/.claude</code> kullanılır
-        (yani şu an terminalde açık olan hesabınız). Chat oturumları her hesap için ayrıca saklanır.
-      </p>
-      <div id="acctForm"></div>
-      <div class="modal-actions">
-        <button class="ghost-btn" id="addAcct">+ Hesap ekle</button>
-        <span class="spacer"></span>
-        <button class="ghost-btn" id="modalCancel">Vazgeç</button>
-        <button class="primary-btn" id="modalSave">Kaydet</button>
+      <div class="set-layout">
+        <nav class="set-tabs" role="tablist" aria-label="Ayar bölümleri">
+          <button class="set-tab" data-tab="accounts" role="tab"><span data-icon="briefcase"></span>Hesaplar</button>
+          <button class="set-tab" data-tab="look" role="tab"><span data-icon="eye"></span>Görünüm</button>
+          <button class="set-tab" data-tab="general" role="tab"><span data-icon="settings"></span>Genel</button>
+          <button class="set-tab" data-tab="octopus" role="tab"><span data-icon="octopus"></span>Octopus</button>
+        </nav>
+        <div class="set-panes">
+          <section class="set-pane" data-pane="accounts" role="tabpanel">
+            <p class="muted small">
+              Her hesabın kendi <b>ayar klasörü</b> var; Claude Code girişi ve geçmişi orada tutulur.
+              Bir hesabın klasörünü boş bırakırsanız varsayılan <code>~/.claude</code> kullanılır
+              (yani şu an terminalde açık olan hesabınız). Chat oturumları her hesap için ayrıca saklanır.
+            </p>
+            <div id="acctForm"></div>
+            <div class="modal-actions">
+              <button class="ghost-btn" id="addAcct">+ Hesap ekle</button>
+              <span class="spacer"></span>
+              <button class="ghost-btn" id="modalCancel">Vazgeç</button>
+              <button class="primary-btn" id="modalSave">Kaydet</button>
+            </div>
+          </section>
+          <section class="set-pane" data-pane="look" role="tabpanel" id="setLook"></section>
+          <section class="set-pane" data-pane="general" role="tabpanel" id="setGeneral"></section>
+          <section class="set-pane" data-pane="octopus" role="tabpanel" id="setOctopus"></section>
+        </div>
       </div>
     </div>
   </div>

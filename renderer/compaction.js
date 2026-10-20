@@ -1,5 +1,5 @@
 /* Claude Panel — bağlam göstergesi ve sıkıştırma izni (ana süreç: compaction.js; docs/octopus/OCTOPUS-PLANI.md İ1, P2.2).
-   Yazma alanının altında bir halka (her tur sonunda getContextUsage), %80'de uyarı kartı.
+   Yazma kutusunun çubuğunda bir halka ve yüzde (her tur sonunda getContextUsage), %80'de uyarı kartı.
    Claude Code otomatik sıkıştırmak isteyince ana süreç bloklar, burada onay kartı açılır.
    Ahtapotun başında bir kez: oturum kayıtlarının saklama süresi önerisi (cleanupPeriodDays). */
 
@@ -14,11 +14,13 @@ function fmtTokens(n) {
 }
 
 // ---------- Halka ----------
+// Yazma kutusunun çubuğunda, model seçicinin solunda: ince halka ve yanında hep yüzde ("%12"). Plan kullanımı ise
+// modelin sağında, sayısız bir dilimdir (renderer/usage.js → usageButton); ikisi böylece birbirinden ve yükleme simgesinden ayrılır.
 
 function contextRing(tab) {
   const { svg, bar } = ringSvg(); // renderer/usage.js
   const label = h('span', { class: 'ctx-pct' });
-  const btn = h('button', { class: 'ctx-ring', hidden: true, onclick: () => contextMenu(tab, btn) }, svg, label);
+  const btn = h('button', { class: 'ctx-ring', hidden: true, 'aria-label': 'Bağlam doluluğu', onclick: () => contextMenu(tab, btn) }, svg, label);
   btn.bar = bar;
   btn.label = label;
   return btn;
@@ -41,8 +43,9 @@ function setContextUsage(tab, u) {
   btn.hidden = false;
   btn.dataset.level = pct >= 90 ? 'high' : pct >= CONTEXT_WARN ? 'warn' : 'low';
   btn.bar.setPct(pct);
-  btn.label.textContent = pct >= CONTEXT_WARN ? `%${pct}` : '';
-  btn.title = `Bağlam: %${pct} dolu` + (u.totalTokens && u.maxTokens ? ` (${fmtTokens(u.totalTokens)} / ${fmtTokens(u.maxTokens)} token)` : '');
+  btn.label.textContent = `%${pct}`;
+  btn.title = `Bağlam penceresi: %${pct} dolu` + (u.totalTokens && u.maxTokens ? ` (${fmtTokens(u.totalTokens)} / ${fmtTokens(u.maxTokens)} token)` : '')
+    + '\nTıklayın: talimatla sıkıştır' + (tab.octopusId ? ' ya da yeniden doğ' : '');
   if (pct < CONTEXT_WARN) { tab.ctxWarned = false; return; }
   if (tab.ctxWarned) return;
   tab.ctxWarned = true; // eşik her aşılışında bir kez
@@ -50,7 +53,7 @@ function setContextUsage(tab, u) {
   compactCard(tab, 'warn', `Bağlam %${pct} doldu`,
     !u.autoCompact ? 'Otomatik sıkıştırma kapalı; pencere dolarsa Claude Code devam edemeyebilir.'
       : ask ? 'Claude Code yakında kendiliğinden sıkıştırmak isteyecek; onayınız olmadan sıkıştırılmaz. Şimdi talimatla sıkıştırırsanız neyin korunacağını siz belirlersiniz.'
-        : 'Claude Code yakında kendiliğinden sıkıştıracak (Hesap ayarları: İzin ver). Şimdi talimatla sıkıştırırsanız neyin korunacağını siz belirlersiniz.');
+        : 'Claude Code yakında kendiliğinden sıkıştıracak (Ayarlar → Octopus: İzin ver). Şimdi talimatla sıkıştırırsanız neyin korunacağını siz belirlersiniz.');
 }
 
 // ---------- Kartlar ----------

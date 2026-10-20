@@ -128,24 +128,35 @@ function publicItem(a) {
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const DOC_CSS = `
-  :root { color-scheme: dark; }
-  html, body { margin: 0; background: #100f0d; color: #ece5d6; }
+// Markdown ve kod sayfalarının renkleri panelin iki temasıyla aynı (renderer/styles.css); tema prefers-color-scheme'den gelir
+const PAGE_VARS = `
+  :root { color-scheme: dark; --bg: #100f0d; --well: #0c0b0a; --text: #ece5d6; --head: #f2ecdf; --muted: #a1998a; --faint: #5a5348;
+    --gold-lo: #9a7f4f; --link: #f1dfb4; --link-line: rgba(205, 176, 122, .45); --line: rgba(234, 216, 178, .12); --line-2: rgba(234, 216, 178, .2);
+    --code: #e6c68e; --pre: #ddd5c5; }
+  @media (prefers-color-scheme: light) {
+    :root { color-scheme: light; --bg: #efeadf; --well: #ebe5da; --text: #2a251e; --head: #1f1b15; --muted: #6b6253; --faint: #a39a89;
+      --gold-lo: #8f7040; --link: #7a5c24; --link-line: rgba(160, 125, 62, .45); --line: rgba(74, 56, 26, .14); --line-2: rgba(74, 56, 26, .24);
+      --code: #8a5a1c; --pre: #3a342b; }
+  }
+`;
+
+const DOC_CSS = `${PAGE_VARS}
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
   body { font: 17px/1.7 ui-serif, "New York", Charter, Georgia, serif; padding: 52px 56px 64px; max-width: 820px; margin: 0 auto; }
-  h1, h2, h3, h4 { line-height: 1.3; font-weight: 600; margin: 1.3em 0 .5em; color: #f2ecdf; }
+  h1, h2, h3, h4 { line-height: 1.3; font-weight: 600; margin: 1.3em 0 .5em; color: var(--head); }
   h1, h2 { font-family: Didot, "Bodoni 72", ui-serif, serif; font-weight: 400; line-height: 1.15; }
   h1 { font-size: 2.6em; margin-top: 0; } h2 { font-size: 1.7em; } h3 { font-size: 1.15em; }
-  a { color: #f1dfb4; text-decoration-color: rgba(205, 176, 122, .45); text-underline-offset: 3px; }
-  code { font: .82em "SF Mono", ui-monospace, Menlo, monospace; background: #0c0b0a; border: 1px solid rgba(234, 216, 178, .12); border-radius: 6px; padding: 1px 6px; color: #e6c68e; }
-  pre { background: #0c0b0a; border: 1px solid rgba(234, 216, 178, .12); border-radius: 14px; padding: 14px 16px; overflow-x: auto; }
-  pre code { background: none; border: 0; padding: 0; color: #ddd5c5; font-size: 13.5px; line-height: 1.55; }
+  a { color: var(--link); text-decoration-color: var(--link-line); text-underline-offset: 3px; }
+  code { font: .82em "SF Mono", ui-monospace, Menlo, monospace; background: var(--well); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; color: var(--code); }
+  pre { background: var(--well); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; overflow-x: auto; }
+  pre code { background: none; border: 0; padding: 0; color: var(--pre); font-size: 13.5px; line-height: 1.55; }
   table { border-collapse: collapse; font: 14px -apple-system, sans-serif; margin: 1em 0; }
-  th, td { border-bottom: 1px solid rgba(234, 216, 178, .12); padding: 8px 16px 8px 0; text-align: left; }
-  th { font-size: .78em; letter-spacing: .1em; text-transform: uppercase; color: #9a7f4f; }
-  blockquote { margin: 0 0 1em; padding-left: 16px; border-left: 2px solid #9a7f4f; color: #a1998a; font-style: italic; }
-  hr { border: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(234, 216, 178, .2), transparent); margin: 2em 0; }
+  th, td { border-bottom: 1px solid var(--line); padding: 8px 16px 8px 0; text-align: left; }
+  th { font-size: .78em; letter-spacing: .1em; text-transform: uppercase; color: var(--gold-lo); }
+  blockquote { margin: 0 0 1em; padding-left: 16px; border-left: 2px solid var(--gold-lo); color: var(--muted); font-style: italic; }
+  hr { border: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--line-2), transparent); margin: 2em 0; }
   img { max-width: 100%; border-radius: 8px; }
-  li::marker { color: #9a7f4f; }
+  li::marker { color: var(--gold-lo); }
 `;
 
 function mdPage(title, content) {
@@ -157,11 +168,11 @@ function mdPage(title, content) {
 function codePage(title, content, lang) {
   const lines = content.replace(/\n$/, '').split('\n');
   const rows = lines.map((l, i) => `<tr><td class="n">${i + 1}</td><td class="c">${esc(l) || ' '}</td></tr>`).join('');
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
-    html, body { margin: 0; background: #0c0b0a; color: #ddd5c5; }
-    .bar { font: 600 10px -apple-system, sans-serif; color: #9a7f4f; padding: 16px 20px 8px; text-transform: uppercase; letter-spacing: .18em; }
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PAGE_VARS}
+    html, body { margin: 0; background: var(--well); color: var(--pre); }
+    .bar { font: 600 10px -apple-system, sans-serif; color: var(--gold-lo); padding: 16px 20px 8px; text-transform: uppercase; letter-spacing: .18em; }
     table { border-collapse: collapse; font: 13px/1.6 "SF Mono", ui-monospace, Menlo, monospace; width: 100%; }
-    td.n { color: #5a5348; text-align: right; padding: 0 14px 0 20px; user-select: none; width: 1%; white-space: nowrap; vertical-align: top; }
+    td.n { color: var(--faint); text-align: right; padding: 0 14px 0 20px; user-select: none; width: 1%; white-space: nowrap; vertical-align: top; }
     td.c { white-space: pre-wrap; word-break: break-word; padding-right: 20px; }
   </style></head><body><div class="bar">${esc(lang || 'kod')}</div><table>${rows}</table></body></html>`;
 }
@@ -199,6 +210,8 @@ const WIDGET_HEAD = `<!doctype html><meta charset="utf-8"><meta name="viewport" 
 --bg:#100f0d;--bg-2:#0c0b0a;--bg-3:#1a1815;--line:rgba(234,216,178,.12);--line-soft:rgba(234,216,178,.07);--danger:#df5f55;--warn:#e8955c;--ok:#8fbf7f;
 --display:Didot,"Bodoni 72",ui-serif,serif;--serif:ui-serif,"New York",Georgia,serif;
 --ui:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;--mono:"SF Mono",Menlo,monospace}
+@media (prefers-color-scheme:light){:root{color-scheme:light;--text:#1f1b15;--soft:#3f392f;--muted:#6b6253;--faint:#8a8070;--clay:#9c7a3c;--accent:#9c7a3c;--gold:#9c7a3c;
+--bg:#efeadf;--bg-2:#ebe5da;--bg-3:#f6f2ea;--line:rgba(74,56,26,.14);--line-soft:rgba(74,56,26,.09);--danger:#c9483d;--warn:#b8672c;--ok:#4b8a3b}}
 html,body{margin:0;background:transparent;color:var(--text);font:14px/1.5 var(--ui)}</style>
 <script>(()=>{const say=(m)=>parent.postMessage(Object.assign({__panelWidget:1},m),'*');
 const h=()=>say({height:Math.ceil(document.documentElement.getBoundingClientRect().height)});

@@ -341,9 +341,11 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   const env = environmentsList().find((e) => e.id === tab.envId) || null;
   tab.envName = env?.name || '';
 
-  // --- Üst satır: mesajların üstünde yüzer (hesap ve klasör adı sekmede ve kenar çubuğunda)
+  // --- Üst satır: mesajların üstünde yüzer (hesap ve klasör adı sekmede ve kenar çubuğunda).
+  // Bölme düğmeleri yalnız ikon, adları title'da. Solda yalnız hata ve kapanış yazılır (setStatus); "çalışıyor" alttaki canlı göstergede.
   const statusEl = h('span', { class: 'ct-status' });
-  const sideBtn = h('button', { class: 'icon-btn', title: 'Yan paneli aç/kapat', onclick: () => toggleSide(tab) }, icon('panel', 16));
+  const sideBtn = h('button', { class: 'icon-btn side-toggle', onclick: () => setSidePanel(!tab.host.classList.contains('side-open')) }, icon('panel', 16));
+  const topBtn = (cls, title, onclick, ...kids) => h('button', { class: 'top-btn icon-only ' + cls, title, 'aria-label': title.replace(/ \(.*\)$/, ''), onclick }, ...kids);
   const top = h('div', { class: 'chat-top' },
     tab.parentId ? h('button', { class: 'top-btn', title: 'Bu yan oturumu başlatan sohbete git', onclick: () => {
       const p = chatsById.get(tab.parentId);
@@ -352,14 +354,15 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
     statusEl, h('span', { class: 'spacer' }),
     tab.prChip = h('button', { class: 'top-btn pr-chip', hidden: true, onclick: () => prMenu(tab) }),
     // Ahtapotun başında görünür (renderer/octopus.js → refreshOctopusPanes)
-    tab.octoBtn = h('button', { class: 'top-btn octo-toggle', hidden: true, title: 'Ahtapotu yanda aç/kapat', onclick: () => toggleOctopusInChat(tab) }, icon('octopus', 14), 'Ahtapot'),
-    h('button', { class: 'top-btn changes-toggle', title: 'Değişiklikleri yanda aç/kapat (⌘⇧D)', onclick: () => toggleChangesInChat(tab) },
-      icon('code', 14), 'Değişiklikler', tab.changesBadge = h('span', { class: 'top-badge', hidden: true })),
-    h('button', { class: 'top-btn browser-toggle', title: 'Tarayıcıyı yanda aç/kapat (⌘⇧B)', onclick: () => toggleBrowserInChat(tab) }, icon('globe', 14), 'Tarayıcı'),
-    h('button', { class: 'top-btn sim-toggle', title: 'iOS simülatörünü yanda aç/kapat (⌘⇧S)', onclick: () => toggleSimulatorInChat(tab) }, icon('phone', 14), 'Simülatör'),
-    h('button', { class: 'top-btn', title: 'Bu oturumu terminalde aç', onclick: () => openInTerminal(tab) }, icon('terminal', 14), 'Terminal'),
+    tab.octoBtn = topBtn('octo-toggle', 'Ahtapot: yanda aç/kapat', () => toggleOctopusInChat(tab), icon('octopus', 16)),
+    topBtn('changes-toggle', 'Değişiklikler: yanda aç/kapat (⌘⇧D)', () => toggleChangesInChat(tab),
+      icon('code', 16), tab.changesBadge = h('span', { class: 'top-badge', hidden: true })),
+    topBtn('browser-toggle', 'Tarayıcı: yanda aç/kapat (⌘⇧B)', () => toggleBrowserInChat(tab), icon('globe', 16)),
+    topBtn('sim-toggle', 'Simülatör: iOS simülatörünü yanda aç/kapat (⌘⇧S)', () => toggleSimulatorInChat(tab), icon('phone', 16)),
+    topBtn('term-open', 'Terminal: bu oturumu terminalde aç', () => openInTerminal(tab), icon('terminal', 16)),
     h('button', { class: 'icon-btn chat-more', title: 'Sohbet menüsü', onclick: (e) => chatMenu(tab, e.currentTarget) }, icon('more', 16)),
     sideBtn);
+  tab.octoBtn.hidden = true;
 
   // --- Mesaj listesi ve boş ekran
   const list = h('div', { class: 'chat-list' });
@@ -382,6 +385,8 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   const picker = modelPicker(acctId,
     () => ({ model: tab.modelChoice || '', effort: tab.effort || '', resolved: tab.model, models: tab.models }),
     (patch) => ('model' in patch ? changeModel(tab, patch.model) : changeEffort(tab, patch.effort)));
+  // Tek kutu: yazı, altında tek çubuk (yeni sohbet ekranındaki .new-composer gibi). Solda ekler, bağlayıcılar, skill'ler,
+  // izin modu ve sohbetin yeri (klasör, ortam, ayrı kopya); sağda bağlam halkası, model/efor, plan kullanımı, gönder
   const composer = h('div', { class: 'composer' },
     h('div', { class: 'composer-inner' },
       slashBox,
@@ -393,15 +398,14 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
           fileInput,
           connectorsButton(acctId, () => tab.cwd),
           skillsButton(acctId, () => tab.cwd, () => tab.input),
+          modeSel,
+          h('span', { class: 'cb-place' },
+            h('span', { class: 'meta-folder', title: `Klasör: ${tilde(cwd)}` }, icon('folder', 14), h('span', {}, tilde(cwd).split('/').pop() || cwd)),
+            env ? h('span', { class: 'meta-folder meta-env', title: `Ortam: ${env.name} (${envSummary(env)})` }, icon('box', 14), h('span', {}, env.name)) : null,
+            tab.wtChip = h('span', { class: 'meta-folder meta-wt', hidden: true })),
           h('span', { class: 'spacer' }),
-          stopBtn, sendBtn)),
-      h('div', { class: 'composer-meta' },
-        h('span', { class: 'meta-folder', title: cwd }, icon('folder', 14), tilde(cwd).split('/').pop() || cwd),
-        env ? h('span', { class: 'meta-folder meta-env', title: `Ortam: ${env.name} (${envSummary(env)})` }, icon('box', 14), env.name) : null,
-        tab.wtChip = h('span', { class: 'meta-folder meta-wt', hidden: true }),
-        modeSel,
-        h('span', { class: 'spacer' }),
-        tab.ctxRing = contextRing(tab), picker, usageButton(acctId))));
+          tab.ctxRing = contextRing(tab), picker, usageButton(acctId),
+          stopBtn, sendBtn))));
 
   // --- Yan panel
   const progressBody = h('div', { class: 'side-body' }, h('div', { class: 'side-empty' }, 'Claude görev listesi oluşturunca burada görünür.'));
@@ -422,8 +426,10 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   const browserPane = h('div', { class: 'chat-browser' });
   const changesPane = h('div', { class: 'chat-changes' });
   const octoPane = h('div', { class: 'chat-octo' });
-  const host = h('div', { class: 'term-host chat-host' + (bg ? '' : ' active') + (window.innerWidth > 1250 ? ' side-open' : '') }, main, artPane, simPane, browserPane, changesPane, octoPane, side);
+  // Yan panel varsayılan kapalı; açık/kapalı son durumu config.json → sidePanelOpen (setSidePanel)
+  const host = h('div', { class: 'term-host chat-host' + (bg ? '' : ' active') }, main, artPane, simPane, browserPane, changesPane, octoPane, side);
   host.__tab = tab;
+  syncSideBtn(host, sideBtn, !!state.cfg.sidePanelOpen);
   Object.assign(tab, {
     host, list, scroller, actEl, artPane, simPane, browserPane, changesPane, octoPane, welcome, input, attach, slashBox, sendBtn, stopBtn, picker, modeSel,
     statusEl, progressBody, progressCount, contextBody, sessionBody,
@@ -483,10 +489,10 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   tab.cwd = res.cwd;
   tab.octopusId = res.octopus || null; // ahtapotun başı (renderer/octopus.js)
   tab.title = opts.title || res.title;
-  // Ayrı çalışma kopyası: yazma alanının altında dal adı (worktrees.js)
+  // Ayrı çalışma kopyası: yazma alanının çubuğunda dal adı (worktrees.js)
   if (res.worktree) {
     tab.worktree = res.worktree;
-    tab.wtChip.replaceChildren(icon('layers', 14), res.worktree.branch);
+    tab.wtChip.replaceChildren(icon('layers', 14), h('span', {}, res.worktree.branch));
     tab.wtChip.title = `Ayrı çalışma kopyası: ${tilde(res.worktree.path)}\nDal: ${res.worktree.branch}\nSekme kapanınca kopya temizse silinir, değişiklik varsa korunur.`;
     tab.wtChip.hidden = false;
   }
@@ -519,8 +525,19 @@ function setDraft(tab, text) {
   requestAnimationFrame(() => { tab.input.focus(); tab.input.setSelectionRange(text.length, text.length); });
 }
 
-function toggleSide(tab) {
-  tab.host.classList.toggle('side-open');
+// Yan panel (İlerleme / Bağlam / Oturum) bütün sohbetlerde birlikte açılıp kapanır; son durum yeni sohbetlere ve sonraki açılışa geçer
+function syncSideBtn(host, btn, open) {
+  host.classList.toggle('side-open', open);
+  btn.classList.toggle('on', open);
+  btn.title = open ? 'Yan paneli kapat' : 'Yan paneli aç (ilerleme, bağlam, oturum)';
+  btn.setAttribute('aria-pressed', String(open));
+}
+function setSidePanel(open) {
+  state.cfg.sidePanelOpen = open;
+  for (const t of Object.values(state.tabs).flat()) {
+    if (t.kind === 'chat') syncSideBtn(t.host, t.host.querySelector('.side-toggle'), open);
+  }
+  window.panel.saveConfig({ sidePanelOpen: open }).then((c) => { state.cfg = c; });
 }
 
 // ---------- Görünüm yardımcıları ----------
@@ -559,16 +576,21 @@ function divider(tab, text) {
   endGroup(tab);
   return append(tab, h('div', { class: 'chat-divider' }, h('span', {}, text)));
 }
+// Sohbetin durumu sekmenin kabında (data-status: busy | idle | error | off). Üst satırda yalnız hata ve kapanış yazılır;
+// meşgulken metin (Başlatılıyor, Ortam hazırlanıyor, Yeniden deneniyor, Durduruluyor) alttaki canlı göstergeye gider (renderer/activity.js)
 function setStatus(tab, kind, text) {
+  tab.host.dataset.status = kind;
   tab.statusEl.className = 'ct-status ' + kind;
-  tab.statusEl.textContent = text;
+  tab.statusEl.textContent = kind === 'error' || kind === 'off' ? text : '';
+  if (kind === 'busy' && text) { startActivity(tab); setActivity(tab, text); }
+  else if (kind !== 'busy' && !tab.busy) stopActivity(tab);
 }
 function setBusy(tab, busy) {
   tab.busy = busy;
   if (busy) startActivity(tab); else stopActivity(tab); // renderer/activity.js
   tab.stopBtn.hidden = !busy;
   tab.sendBtn.hidden = busy && !tab.input.value.trim();
-  setStatus(tab, busy ? 'busy' : 'idle', busy ? 'Çalışıyor' : '');
+  setStatus(tab, busy ? 'busy' : 'idle', '');
   renderTabs(tab.acctId);
 }
 

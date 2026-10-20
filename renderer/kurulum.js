@@ -1,7 +1,7 @@
 /* Claude Panel — sıfırdan kullanım (docs/octopus/OCTOPUS-PLANI.md P8.1).
    İlk açılış sihirbazı (openWelcome): hesap (varsayılan ~/.claude), giriş denetimi ve terminalde `claude /login`, ilk ahtapot.
    "Projeyi Octopus'a al" (openImportProject): var olan bir projeyi yalnız okuyarak tanır; beyin adayı, hafıza onayı, defter taslağı (alma.js).
-   Hesap ayarları penceresindeki Octopus bölümü (octopusSettings): otomatik sıkıştırma, maliyet eşikleri, hafıza kapsamı, kol sınırı,
+   Ayarlar penceresinin Octopus sekmesi (octopusSettings): otomatik sıkıştırma, maliyet eşikleri, hafıza kapsamı, kol sınırı,
    "Hafızayı sil".
    Octopus tanıtımı (openOctopusIntro, P8.2): sihirbazın ikinci adımından, yeni sohbetin klasör menüsünden ve Yardım menüsünden açılır. */
 
@@ -113,7 +113,7 @@ function welcomeAccount(a) {
     h('p', { class: 'dlg-body' }, 'Panel Claude Code\'u bu Mac\'te çalıştırır: sohbet görünümü, terminal, projelerin ahtapotları. Başlamak için tek hesap yeter.'),
     field('Hesabın adı', 'name', 'Claude'),
     field('Ayar klasörü', 'configDir', '~/.claude (varsayılan)',
-      'Boş bırakılırsa Claude Code\'un varsayılan klasörü (~/.claude) kullanılır. Başka hesapları sonra Hesap ayarlarından ekleyebilirsiniz.'),
+      'Boş bırakılırsa Claude Code\'un varsayılan klasörü (~/.claude) kullanılır. Başka hesapları sonra Ayarlar → Hesaplar\'dan ekleyebilirsiniz.'),
     loginBox(),
     h('div', { class: 'modal-actions' },
       h('button', { class: 'ghost-btn', onclick: finishWelcome }, 'Kurulumu atla'),
@@ -199,7 +199,7 @@ const INTRO_CARDS = [
     'unutulanlar sonraki mesajda masaya konur. Token harcayan her işin önce tahmini bedeli görünür.'],
   ['lock', 'Veri bu Mac\'te', 'Ahtapot kayıtları, defter, dizin ve arşiv panelin klasöründe, yalnız sizin okuyabileceğiniz dosyalarda durur. Panel bunları hiçbir yere göndermez; ' +
     'Claude\'a giden yalnız sohbetin kendisi ve Claude\'un aradığı parçalardır. Bilinen gizli anahtar biçimleri dizine girmeden maskelenir. ' +
-    'Hesap ayarları → Octopus\'tan hafızayı kapatabilir ya da silebilirsiniz.'],
+    'Ayarlar → Octopus\'tan hafızayı kapatabilir ya da silebilirsiniz.'],
 ];
 
 function openOctopusIntro() {
@@ -297,11 +297,11 @@ function openImportProject(acctId, dir, known) {
   });
 }
 
-// ---------- Hesap ayarları: Octopus bölümü ----------
+// ---------- Ayarlar: Octopus sekmesi ----------
 
 function octopusSettings() {
   const save = (patch) => window.panel.saveConfig(patch).then((c) => { state.cfg = c; });
-  const sec = h('div', { class: 'set-sec', id: 'octoSettings' }, h('h3', { class: 'set-title' }, icon('octopus', 15), 'Octopus'));
+  const sec = h('div', { class: 'set-sec', id: 'octoSettings' }); // başlığı pencerenin sekmesi (renderer/app.js → openSettings)
 
   // Otomatik sıkıştırma (compaction.js): "Her zaman sor"da Claude Code'un kendi sıkıştırması bloklanır, sohbette onay kartı açılır
   const compactSel = h('select', { id: 'autoCompact', onchange: (e) => save({ autoCompact: e.target.value }) },

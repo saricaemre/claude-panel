@@ -201,7 +201,7 @@ const OC_MOTION = {
   bud: { amp: 2, freq: 0, k: 0.8, curl: 0.2, lift: 0 },
 };
 const OC_STOPS = { base: ['#a14f36', '#d97757', '#efa98d'], rest: ['#8b4531', '#bf6a4e', '#d99b82'], wait: ['#a14f36', '#e39a60', '#f3cd82'] };
-const OC_STATE_COL = { working: 'var(--clay)', waiting: 'var(--warn)', reported: 'var(--soft)', done: '#8fbf7f', stopped: 'var(--danger-text)', cut: 'var(--faint)' };
+const OC_STATE_COL = { working: 'var(--clay)', waiting: 'var(--warn)', reported: 'var(--soft)', done: 'var(--ok)', stopped: 'var(--danger-text)', cut: 'var(--faint)' };
 const OC_ORDER = { waiting: 0, working: 1, stopped: 2, reported: 3, done: 4 };
 const OC_WARN = '#e2b86b', OC_CLAY = '#d97757';
 const OC_BUD_WAIT = 10000; // onaylanan tomurcuk kolu kayda düşene kadar en çok bu kadar bekler

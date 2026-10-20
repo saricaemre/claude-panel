@@ -47,7 +47,7 @@ Claude bir projede uzun süre çalışınca bağlamı dolar ve Claude Code konu�
 - **Defter.** Kurallar, retler, zevk, kararlar ve açık işler defterde satır satır durur. Baş `defter` aracıyla yazar. Siz başın bölmesindeki Defter sekmesinde düzenler, sabitler, kapatır ya da geri alırsınız. Hiçbir satır silinmez, her değişiklik yeni bir olaydır. Defterin özeti her oturum açılışında ve her sıkıştırmadan sonra başın önüne konur. Kollar işleriyle ilgili kuralları ilk mesajlarında alır. Projenizde karar dosyaları varsa (ör. `docs/kararlar/K*.md`) "Dosyalardan al" ile defterde yalnız okunan satırlar olarak görünür.
 - **Hafıza.** Projenin geçmiş oturumları bu Mac'te tam metin olarak dizinlenir (Türkçe harflerle doğru arama). Baş, bağlamından düşmüş bir şeyi `hatirla` aracıyla kelimesi kelimesine bulur. Gerekirse geçmiş bir ana ya da kapanmış bir kola tek bir soru sorar (`danis`). Claude Code eski oturum kayıtlarını varsayılan olarak 30 gün sonra sildiği için ahtapotların kayıtları ayrıca sıkıştırılmış bir arşive kopyalanır.
 - **Sıkıştırma sizin onayınızla.** Panel bir oturumu sormadan sıkıştırmaz. Claude Code'un kendi otomatik sıkıştırması bir onay kartına bağlanır. Kartta talimatla sıkıştırabilir ya da başı **yeniden doğurabilirsiniz**: yeni bir oturum defter, ilk görev ve son turlarla yazılmış bir devir notuyla açılır, eski oturum "fosil" olarak kalır. Ardından kısa bir **sınav** neyin hatırlandığını ölçer; unutulan satırlar sonraki mesajda yeniden masaya konur.
-- **Maliyet görünür.** Token harcayan her iş (danışma, sınav, yeniden doğuş) önce tahmini bedelini gösterir. Eşiğin üstündeki iş onayınız olmadan çalışmaz. Eşikler Hesap ayarları → Octopus'ta.
+- **Maliyet görünür.** Token harcayan her iş (danışma, sınav, yeniden doğuş) önce tahmini bedelini gösterir. Eşiğin üstündeki iş onayınız olmadan çalışmaz. Eşikler Ayarlar → Octopus'ta.
 
 Var olan bir proje yalnız okunarak tanınır. Panel projenizin dosyalarına (`CLAUDE.md` vb.) ve Claude Code ayarlarına sormadan yazmaz. Tek istisna sorulan bir öneridir: ahtapotun başında bir kez, oturum kayıtlarının saklama süresini uzatmak (`cleanupPeriodDays`) önerilir. Onaylarsanız hesabın `settings.json`'una yalnız bu değer yazılır.
 
@@ -59,7 +59,7 @@ Panelin bütün verisi `~/Library/Application Support/Claude Panel/` klasöründ
 |---|---|---|
 | `config.json` | Hesaplar, son klasörler, ortamlar (değişkenleri düz metin), ayarlar | Dosyayı silin; panel ilk açılış sihirbazıyla başlar |
 | `octopus/oc_…/` | Bir ahtapotun kaydı (`ahtapot.json`), defteri (`defter.jsonl`), sınavları, yeniden doğuşları | Klasörü silin (arayüzde silme düğmesi henüz yok) |
-| `octopus/hafiza.db` (+ `-wal`, `-shm`) | Hafıza dizini: oturumların tam metni | Hesap ayarları → Octopus → **Hafızayı sil** |
+| `octopus/hafiza.db` (+ `-wal`, `-shm`) | Hafıza dizini: oturumların tam metni | Ayarlar → Octopus → **Hafızayı sil** |
 | `octopus/arsiv/` | Ahtapot oturumlarının kalıcı arşivi (`.jsonl.gz`) | Aynı düğme: dizin ve arşiv birlikte silinir |
 | `artifacts/` | Artifacts galerisi, sürümler, küçük resimler | Galeriden tek tek ya da klasörü silin |
 | `Partitions/` | Web ve tarayıcı bölmelerinin çerezleri ve önbelleği | Klasörü silin (claude.ai girişleri gider) |
@@ -71,7 +71,7 @@ Panelin hiç dokunmadığı ya da yalnız okuduğu yerler:
 
 Her şeyi kaldırmak için: uygulamayı (`~/Applications/Claude Panel.app`) ve yukarıdaki klasörü silin. Claude Code'un verisi ve girişi yerinde kalır.
 
-Bir projeyi hafızadan çıkarmak için Hesap ayarları → Octopus'ta o ahtapotun **Hafıza** kutusunu kapatın. Proje dizinden düşer, arşiv kopyası kalır.
+Bir projeyi hafızadan çıkarmak için Ayarlar → Octopus'ta o ahtapotun **Hafıza** kutusunu kapatın. Proje dizinden düşer, arşiv kopyası kalır.
 
 ## Gizlilik
 
@@ -85,7 +85,7 @@ Bir projeyi hafızadan çıkarmak için Hesap ayarları → Octopus'ta o ahtapot
 
 ## Birden çok hesap
 
-Hesap ayarlarından (⌘,) başka hesaplar eklersiniz. Her hesabın ayrı bir ayar klasörü olur (ör. `~/.claude-is`). Giriş bilgileri, geçmiş ve ayarlar bu yüzden birbirine karışmaz. Her hesap için bir kez giriş yapılır: hesabın terminalinde `/login`.
+Ayarlar → Hesaplar'dan (⌘,) başka hesaplar eklersiniz. Her hesabın ayrı bir ayar klasörü olur (ör. `~/.claude-is`). Giriş bilgileri, geçmiş ve ayarlar bu yüzden birbirine karışmaz. Her hesap için bir kez giriş yapılır: hesabın terminalinde `/login`.
 
 Kişisel ayarlarınızın (`CLAUDE.md`, skill'ler, hook'lar, proje hafızası) bütün hesaplarda olmasını istiyorsanız:
 
@@ -116,7 +116,7 @@ Liste hem sohbete hem terminaldeki `claude`'a gider. Kod çalıştıran bir sunu
 | ⇧⌘B / ⇧⌘D / ⇧⌘S | Tarayıcı / Değişiklikler / iOS Simülatörü |
 | ⌘⌥← / ⌘⌥→ | Önceki / sonraki sekme |
 | ⌘+ / ⌘- / ⌘0 | Yazı boyutu |
-| ⌘, | Hesap ayarları |
+| ⌘, | Ayarlar |
 | Enter / Shift+Enter | Gönder / yeni satır |
 | Esc | Claude'u durdur |
 | Shift+Tab | İzin modunu değiştir |

@@ -5,6 +5,100 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 
 ---
 
+## 2026-10-20 — Kenar çubuğu düğmesi tıklanmıyordu
+
+**İstek:** Emre: soldaki paneli gizleme düğmesine tıklanamıyor.
+
+**Neden:** Electron sürükleme bölgelerini (`-webkit-app-region`) belge sırasıyla üst üste koyar, sonraki öncekini ezer. `#sidebarToggle` `#app`'in ilk çocuğuydu; ardından gelen kenar çubuğunun `.drag` satırı (kapalıyken sekme şeridi `.tabbar`) düğmenin üstünü yeniden "sürükle" yapıyordu. `z-index: 40` buna etki etmez. e2e geçiyordu çünkü Playwright tıklamayı CDP ile gönderir, işletim sisteminin sürükleme katmanından geçmez.
+
+**Yapılan:** Düğme `index.html`'de `</main>`'den sonraya taşındı (konumu `position: fixed`, görünüm değişmedi), yanına nedeni yazıldı. CLAUDE.md §5 "Pencere sürükleme"ye kural eklendi.
+
+**Doğrulama:** e2e kenar çubuğu adımına `toggleRegion` eklendi: düğmenin ortasını kapsayan, app-region'ı olan öğeler belge sırasıyla yürünür, sonuncusu düğme (no-drag) olmalı; açık ve kapalı hâlde. Düğme eski yerine konunca test "açıkken bir sürükleme şeridinin altında kalıyor … `drag`" ile kırmızıya döndü; düzeltmeyle `npm run check` ve `npm test` geçti. `0-kenar-kapali.png` ve `1-yeni-sohbet.png`'de düğme aynı yerde.
+
+**Bekleyen:** Ölçüm Electron'un kuralını taklit eder, gerçek fare tıklaması değildir; Emre'nin `npm start` ile düğmeye bir kez tıklaması (açık ve kapalı hâlde) bekliyor.
+
+---
+
+## 2026-10-20 — Sade ve kompakt sohbet görünümü
+
+**İstek:** Emre: "daha kompakt ve sade görünüm". Ekranlardaki fazlalıklardan dördü bu işte: yazma kutusunun altındaki ayrı satır, yazılı üst çubuk düğmeleri ve "Çalışıyor" rozeti, hep açık sağ panel, uzun tek sayfa "Hesap ayarları".
+
+**Yapılan:**
+- **Tek yazma kutusu** (renderer/chat.js, usage.js, compaction.js): `.composer-meta` satırı kalktı. Klasör, ortam, ayrı kopyanın dalı (`.cb-place`), izin modu, bağlam halkası, model/efor ve plan kullanımı kutunun alt çubuğunda (yeni sohbet ekranındaki `.new-composer` gibi). Bir satır kazanıldı.
+  - Sığmayınca kısalma sırası `flex-shrink` ağırlığıyla: önce yer yazıları, sonra efor, en son mod ve model adı.
+  - `.chat-main` 700 px altında efor ve yer yazıları düşer (title'da). 560 px altında (900 px pencerede yan bölme açık) çubuk kutunun içinde iki satıra bölünür, hiçbir şey taşmaz. Bağlam yüzdesi orada da yazar (yüzdesiz halka yine yükleme simgesine benziyordu).
+- **İki gösterge ayrıldı:** bağlam ince halka ve hep yüzde ("%23"), title'ı "Bağlam penceresi: %23 dolu (… token)". Plan kullanımı sayısız, ince çerçeveli dolu dilim (`pieSvg`), title'ı "Plan kullanımı · 5 saatlik limit: %7 kullanıldı". Kullanım yüklenirken dönmez, hafifçe söner; bilinmiyorken çerçeve kesikli.
+- **Üst çubuk:** Ahtapot, Değişiklikler, Tarayıcı, Simülatör, Terminal her genişlikte yalnız ikon (`.top-btn.icon-only`, adları title ve `aria-label`'da; Değişiklikler sayısı ikonun köşesinde). "Çalışıyor" rozeti kalktı.
+  - `setStatus` durumu sekmenin kabına yazar (`.chat-host[data-status]`). Meşgulken metnini (Başlatılıyor, Ortam hazırlanıyor, Yeniden deneniyor, Durduruluyor) alttaki canlı göstergeye verir. `.ct-status` yalnız hata ve kapanışı yazar.
+  - Sohbet başlamadan gösterge karşılama ekranının altına yüzer, ekranı kaydırmaz.
+- **Sağ yan panel** varsayılan kapalı. Düğme bütün açık sohbetlerde birlikte açıp kapatır; son durum `config.json` → `sidePanelOpen` (main.js `config:save`) ile yeni sohbetlere ve sonraki açılışa geçer. Açıkken düğme altın.
+- **Ayarlar:** "Hesap ayarları" → "Ayarlar" (pencere, kenar çubuğu düğmesi, menü "Ayarlar…", belgeler ve arayüz metinleri). Solda sekmeler: Hesaplar · Görünüm (Tema) · Genel (Mac uyumasın, Editör) · Octopus. Hesaplar "Kaydet" ile, diğerleri değişince kaydedilir. Pencere sabit yükseklikte, bölme kayar; son açılan sekme panel açık kaldıkça hatırlanır. Ayar id'leri değişmedi. Eski düzende "Hesap ekle" tema/editör/Octopus bölümlerini siliyordu (`form.innerHTML = ''`); ayrı bölmelerle bu da düzeldi.
+
+**Kararlar:**
+- Yan panelin durumu sohbet başına değil, panel genelinde (kenar çubuğu gibi). Bir sohbette açınca hepsinde açılır.
+- "Başlatan sohbet" ve PR düğmesi yazılı kaldı (bilgi taşıyorlar); dar sütunda eskisi gibi ikona inerler.
+- Çok dar sütunda öğe gizlemek yerine iki satır: bağlayıcılar, skill'ler ve mod hep erişilebilir kalsın.
+
+**Doğrulama:**
+- `npm run check` temiz; `npm test` yeşil.
+- e2e'deki `.ct-status.busy` beklemeleri (31 yer) `.chat-host[data-status="busy"]` oldu; ayar adımları önce sekmeye tıklar.
+- Yeni assert'ler:
+  - **İzin kartı beklerken:** `data-status="busy"`, rozet boş ve görünmez, canlı gösterge "Onayınızı bekliyor".
+  - **"Sade görünüm" adımı:** `.composer-meta` yok; çubukta 9 öğe; tek satır ve kutunun içinde (`composerBar()`: 1440 px'te, yan panelle, dal adıyla, ahtapot bölmesiyle; 900 px'te iki satır). Bağlam yüzdesi görünür, title'ı doğru; kullanım dilim ve title'ı doğru. Üst çubukta dört ikon düğme, yazısız, adları title'da; boşta durum yazısı görünmez. Yan panel kapalı başlar; düğmeyle açılır, kapanır, `sidePanelOpen` kaydedilir; başka sohbette açılınca yeni sohbet açık başlar.
+  - **Ayarlar:** düğme "Ayarlar ⌘,", menüde "Ayarlar…", başlık, sekmelerin sırası, bir anda tek bölme, Octopus ayarı Hesaplar'da görünmez, sekme geçişi, son sekmenin hatırlanması.
+- İlk koşuda 900 px adımı gerçek bir taşmayı yakaladı (model, kullanım, gönder kutudan taşıyordu); iki satır düzeniyle düzeldi.
+- Bilerek bozuldu, her biri kırmızıya döndü, sonra geri alındı:
+  - meşgulken rozete yazı → "meşgulken üst satırda rozet var";
+  - yan panel açık başlar → "yan panel açık başladı";
+  - sekmeler bölmeleri gizlemez → "ayar penceresinin sekmeleri";
+  - yeni sohbet son durumu almaz → "yeni sohbet yan panelin son durumuyla açılmadı";
+  - kullanım yine halka → "kullanım göstergesi dilim değil".
+  Dar sütun ölçümü ilk koşuda gerçek taşmayla kırmızıydı.
+- Ekran görüntüleri: koyu `tests/out/4-tur-bitti`, `4a-yan-panel`, `4d-ayarlar-hesaplar`, `6o-ayri-kopya`, `7g`/`7h` (ahtapot bölmesiyle, 900 px); açık `9a-acik-ayarlar`, `9a2-acik-ayarlar-hesaplar`, `9b`–`9d`.
+
+**Bekleyen:**
+- Emre'nin görsel onayı (koyu ve açık tema) ve gerçek hesapla bir tur (gerçek model adları uzunsa dar sütunda model düğmesi kırpılır).
+- Sonraya kalan öneriler: kol sekmelerini gruplama, kart sıkılaştırma, komut paleti.
+
+---
+
+## 2026-10-20 — Açık tema ("Gün ve Şampanya")
+
+**İstek:** Emre: panele açık (light) mod ekleyelim; ayrıca daha kompakt ve sade görünüm için neler eklenip toparlanabilir.
+
+**Yapılan:**
+- **Seçim:** `config.json` → `theme` (`system` varsayılan, `dark`, `light`). Görünüm → Tema menüsü (radyo düğmeleri) ve Hesap ayarlarında "Tema" listesi. Ana süreç `nativeTheme.themeSource`'u ayarlar (`applyTheme`). Pencere zemini (`windowBg`) temayla ve macOS görünümü değişince güncellenir. Menüden seçilince açık ayar penceresindeki liste de güncellenir (`menu:cmd theme`).
+- **Stiller:** `:root`'tan sonraki ~110 sabit renk değişkene bağlandı.
+  - Saydam tonlar renk kanallarıyla: `rgba(var(--gold-rgb|--gilt-rgb|--line-rgb|--hi-rgb), a)`.
+  - Gölgeler `rgba(var(--shade), calc(a * var(--shade-k)))`.
+  - Cam, perde, kullanıcı kabarcığı, yanıt yazısı, kod, diff, parıltı ve selamın yaldızı adlı değişkenlerle.
+- **Açık palet** `@media (prefers-color-scheme: light)` bloğunda:
+  - Zemin yumuşak kâğıt (#efeadf), kartlar ve kutular açık krem (#f6f2ea), kenar çubuğu parşömen (#e7e0d2), yazı mürekkep (#1f1b15). İlk hâli (zemin #f8f5ee, kartlar #fffdf9) gerçek ekranda fazla parlaktı (Emre: "beyazı çok patlak"); bir ton koyulaştı, yüzeyler arası fark azaldı, soluk yazı (#8a8070) yeni zemine göre koyulaştı.
+  - Altın koyulaştı: vurgu #9c7a3c, etiket #8f7040, bağlantı #7a5c24. Gren kahve tonunda; gölgeler ~%28 güçte ve kahveye çalar.
+  - Yaldızlı düğmeler iki temada aynı metal.
+- **`color-scheme`** `:root`'a eklendi. Koyu temada yerel select'ler (ayar penceresinde Editör, Otomatik sıkıştırma) beyaz çiziliyordu; artık koyu.
+- **Terminal:** iki tema (`TERM_THEMES`); açık sekmeler tema değişince güncellenir. Artifact Markdown/kod sayfaları (`PAGE_VARS`) ve sohbet içi görsellerin değişkenleri (`WIDGET_HEAD`) iki temalı. claude.ai webview'i ve tarayıcı bölmesi nativeTheme'i izler.
+
+**Kararlar:**
+- Varsayılan "Sistem". Emre'nin macOS'u koyu olduğu için görünümü değişmez.
+- Arayüzde ayrı tema durumu yok: tek kaynak nativeTheme, JS'te `matchMedia`.
+- Koyu temada görünür değişiklik amaçlanmadı. Birleştirilen birkaç ton çok az değişti: diff metin renkleri tek çifte indi, MCP "bağlı" rozeti camgöbeğinden yeşile döndü.
+- Ahtapotun bakır renkleri ve hesap renkleri iki temada aynı.
+
+**Doğrulama:**
+- `npm run check` temiz; `npm test` yeşil.
+- Yeni e2e adımı: ayarlardan açık tema → config, nativeTheme, pencere zemini, sayfa zemini/kenar çubuğu/yazı rengi, terminal teması. Ayar penceresi açıkken menüden Koyu → penceredeki liste, config, menüdeki işaret.
+- Bilerek bozuldu (`themeSource` atanmadı): adım kırmızıya döndü.
+- İlk koşuda bütün test açık temada çalıştı ve sohbet içi görsel adımı düştü. Neden: Playwright, Electron sayfasında `prefers-color-scheme`'i varsayılan olarak `light` taklit ediyor. `colorScheme: null` ile kapatıldı (CLAUDE.md §5).
+- Hemen çekilen açık tema görüntüsü yarı saydam çıktı. Ayrı bir betikle ölçüldü: pencere opak, renk geçişleri birkaç karede oturuyor. Testte görüntüden önce bekleniyor.
+- Ekran görüntüleri: `tests/out/9a…9e`.
+
+**Bekleyen:**
+- Emre'nin görsel onayı (özellikle kartlar, ahtapot bölmesi, Değişiklikler) ve gerçek hesapla bir tur.
+- Terminalde çalışan Claude Code'un kendi teması (`/theme`) panelden ayrı. Küçük resimler çizildikleri temada kalır.
+
+---
+
 ## 2026-10-20 — Yeni görsel dil: "Gece ve Şampanya"
 
 **İstek:** Emre: panelin tasarımını değiştir, hayal gücünü kullan, sınır yok; çok şık, sade, göz alıcı bir asalet.

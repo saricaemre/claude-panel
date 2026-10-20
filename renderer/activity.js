@@ -1,6 +1,7 @@
 /* Claude Panel — Claude çalışırken canlı gösterge: sohbetin altında dönen ✳, o an ne yaptığı (düşünüyor, yazıyor,
    komut çalıştırıyor…) parıltılı yazıyla ve turun ne kadar sürdüğü. İzin kartı açıkken "Onayınızı bekliyor" der.
-   Yazma alanının kenarındaki dönen ışık CSS'te (.composer-box.working). Tur bitince ikisi de kaybolur. */
+   Sohbetin geçiş durumları da burada yazar (Başlatılıyor, Ortam hazırlanıyor, Yeniden deneniyor, Durduruluyor; renderer/chat.js → setStatus);
+   üst satırda "Çalışıyor" rozeti yok. Yazma alanının kenarındaki dönen ışık CSS'te (.composer-box.working). Tur bitince ikisi de kaybolur. */
 
 const LIVE_VERBS = {
   bash: 'Komut çalıştırıyor', read: 'Dosya okuyor', edit: 'Düzenliyor', search: 'Arıyor', todo: 'Planlıyor',

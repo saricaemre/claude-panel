@@ -32,18 +32,38 @@ const state = {
   lastTerm: {},    // acctId -> kullanıcının en son baktığı terminal sekmesi (Claude'un terminal aracı varsayılan olarak bunu okur)
   panes: {},       // acctId -> DOM refs
   fontSize: 13,
+  settingsTab: 'accounts', // Ayarlar penceresinde son açılan sekme (openSettings)
 };
 const tabsById = new Map();
 const pendingData = new Map();
 
-const TERM_THEME = {
-  background: '#100f0d', foreground: '#f2ecdf', cursor: '#cdb07a', cursorAccent: '#100f0d',
-  selectionBackground: '#3d3527',
-  black: '#2a2824', red: '#e5645a', green: '#8fbf7f', yellow: '#e2b86b', blue: '#7aa2f7',
-  magenta: '#c49be0', cyan: '#6fc1c1', white: '#d8d3ca',
-  brightBlack: '#6b665d', brightRed: '#f07f75', brightGreen: '#a6d494', brightYellow: '#f0cd8a',
-  brightBlue: '#97b8ff', brightMagenta: '#d7b3ef', brightCyan: '#8ad6d6', brightWhite: '#ffffff',
+// Terminal renkleri temaya göre (zemin stillerdeki --canvas). Açıkta "white" gridir: açık zeminde beyaz yazı görünmezdi.
+const TERM_THEMES = {
+  dark: {
+    background: '#100f0d', foreground: '#f2ecdf', cursor: '#cdb07a', cursorAccent: '#100f0d',
+    selectionBackground: '#3d3527',
+    black: '#2a2824', red: '#e5645a', green: '#8fbf7f', yellow: '#e2b86b', blue: '#7aa2f7',
+    magenta: '#c49be0', cyan: '#6fc1c1', white: '#d8d3ca',
+    brightBlack: '#6b665d', brightRed: '#f07f75', brightGreen: '#a6d494', brightYellow: '#f0cd8a',
+    brightBlue: '#97b8ff', brightMagenta: '#d7b3ef', brightCyan: '#8ad6d6', brightWhite: '#ffffff',
+  },
+  light: {
+    background: '#efeadf', foreground: '#1f1b15', cursor: '#9c7a3c', cursorAccent: '#efeadf',
+    selectionBackground: '#ddd1b8',
+    black: '#1f1b15', red: '#b8322a', green: '#3f7a2e', yellow: '#8a6512', blue: '#2f5fbf',
+    magenta: '#8a4fae', cyan: '#1f7a7a', white: '#7a7264',
+    brightBlack: '#8a8272', brightRed: '#d0463d', brightGreen: '#4f8f3a', brightYellow: '#a87c1c',
+    brightBlue: '#4a78d4', brightMagenta: '#a066c4', brightCyan: '#2f9393', brightWhite: '#3f392f',
+  },
 };
+// Tema ana süreçte seçilir (nativeTheme); arayüz yalnız prefers-color-scheme'i izler
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+const termTheme = () => TERM_THEMES[darkQuery.matches ? 'dark' : 'light'];
+darkQuery.addEventListener('change', () => {
+  for (const list of Object.values(state.tabs)) {
+    for (const t of list) if (t.kind === 'term') t.term.options.theme = termTheme();
+  }
+});
 
 const accounts = () => state.cfg.accounts;
 const acct = (id) => accounts().find((a) => a.id === id);
@@ -518,7 +538,7 @@ async function launch(acctId, cwd, mode, resumeId, envId = envOf(acctId)?.id, { 
     scrollback: 10000,
     macOptionIsMeta: false, // Türkçe klavyede @, #, { gibi karakterler Option ile yazılıyor
     allowProposedApi: true,
-    theme: TERM_THEME,
+    theme: termTheme(),
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
@@ -855,7 +875,21 @@ function ensureWebview(acctId, startUrl = 'https://claude.ai/new') {
 // Yeni hesaplara sırayla verilen renkler: zümrüt, kil, safir, şampanya, ametist, turkuaz
 const COLORS = ['#4c9f86', '#d97757', '#6a86d8', '#cdb07a', '#a585d4', '#5fb3b3'];
 
-function openSettings() {
+// Ayarlar penceresi: solda sekmeler. Hesap listesi "Kaydet" ile, diğer ayarlar değişince kaydedilir.
+// Son açılan sekme panel açık kaldıkça hatırlanır. Alanların id'leri (#themeChoice, #keepAwake, #editorChoice, #autoCompact…) e2e'de kullanılır.
+const SETTINGS_TABS = ['accounts', 'look', 'general', 'octopus'];
+
+function settingsTab(name) {
+  state.settingsTab = SETTINGS_TABS.includes(name) ? name : 'accounts';
+  for (const b of document.querySelectorAll('#modal .set-tab')) {
+    const on = b.dataset.tab === state.settingsTab;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', String(on));
+  }
+  for (const p of document.querySelectorAll('#modal .set-pane')) p.hidden = p.dataset.pane !== state.settingsTab;
+}
+
+function openSettings(tab) {
   const form = $('#acctForm');
   const draft = accounts().map((a) => ({ ...a }));
 
@@ -916,15 +950,24 @@ function openSettings() {
   };
 
   render();
-  // Genel ayar: anında kaydedilir (hesap listesinden bağımsız)
-  const awake = h('input', { type: 'checkbox', id: 'keepAwake', onchange: (e) => window.panel.saveConfig({ keepAwake: e.target.checked }).then((c) => { state.cfg = c; }) });
+  const save = (patch) => window.panel.saveConfig(patch).then((c) => { state.cfg = c; });
+
+  // Görünüm → Tema: ana süreç nativeTheme'i değiştirir, stiller ve terminaller prefers-color-scheme'i izler
+  const themeSel = h('select', { id: 'themeChoice', onchange: (e) => save({ theme: e.target.value }) },
+    h('option', { value: 'system' }, 'Sistem (macOS\'u izler)'), h('option', { value: 'dark' }, 'Koyu'), h('option', { value: 'light' }, 'Açık'));
+  themeSel.value = state.cfg.theme || 'system';
+  $('#setLook').replaceChildren(h('label', { class: 'acct-form-opt acct-form-select' }, h('span', {}, 'Tema'), themeSel,
+    h('small', {}, 'Görünüm menüsünden de değişir. Web görünümü (claude.ai) ve artifact sayfaları da temaya uyar.')));
+
+  // Genel: uyanık tutma ve editör (Claude'un "editörde aç" aracı ve Değişiklikler bölmesindeki düğme, opener.js)
+  const awake = h('input', { type: 'checkbox', id: 'keepAwake', onchange: (e) => save({ keepAwake: e.target.checked }) });
   awake.checked = state.cfg.keepAwake !== false;
-  form.append(h('label', { class: 'acct-form-opt' }, awake, h('span', {}, 'Claude çalışırken Mac uyumasın'),
-    h('small', {}, 'Bir sohbette tur sürerken sistem uykusu engellenir; ekran yine kararabilir.')));
-  // Editör: Claude'un "editörde aç" aracı ve Değişiklikler bölmesindeki düğme (opener.js)
-  const editorSel = h('select', { id: 'editorChoice', onchange: (e) => window.panel.saveConfig({ editor: e.target.value }).then((c) => { state.cfg = c; }) });
-  form.append(h('label', { class: 'acct-form-opt acct-form-select' }, h('span', {}, 'Editör'), editorSel,
-    h('small', {}, 'Claude bir dosyayı "editörde aç" dediğinde ve Değişiklikler bölmesinde kullanılır.')));
+  const editorSel = h('select', { id: 'editorChoice', onchange: (e) => save({ editor: e.target.value }) });
+  $('#setGeneral').replaceChildren(
+    h('label', { class: 'acct-form-opt' }, awake, h('span', {}, 'Claude çalışırken Mac uyumasın'),
+      h('small', {}, 'Bir sohbette tur sürerken sistem uykusu engellenir; ekran yine kararabilir.')),
+    h('label', { class: 'acct-form-opt acct-form-select' }, h('span', {}, 'Editör'), editorSel,
+      h('small', {}, 'Claude bir dosyayı "editörde aç" dediğinde ve Değişiklikler bölmesinde kullanılır.')));
   window.panel.editorList().then((r) => {
     const auto = r.editors[0]?.name || 'varsayılan metin düzenleyici';
     editorSel.replaceChildren(h('option', { value: '' }, `Otomatik (${auto})`),
@@ -932,8 +975,10 @@ function openSettings() {
       h('option', { value: 'default' }, 'Varsayılan metin düzenleyici'));
     editorSel.value = [...editorSel.options].some((o) => o.value === r.choice) ? r.choice : '';
   });
+
   // Octopus: otomatik sıkıştırma, maliyet eşikleri, hafıza kapsamı, kol sınırı, "Hafızayı sil" (renderer/kurulum.js)
-  form.append(octopusSettings());
+  $('#setOctopus').replaceChildren(octopusSettings());
+  settingsTab(tab || state.settingsTab);
   $('#modal').hidden = false;
 }
 
@@ -965,6 +1010,13 @@ function setSidebar(open, save = true) {
 }
 
 window.panel.onMenu((cmd, arg) => {
+  // Menüden tema (ana süreç uyguladı ve kaydetti): yalnız ayarın kopyası ve açık ayar penceresi güncellenir
+  if (cmd === 'theme') {
+    state.cfg.theme = arg;
+    const sel = document.getElementById('themeChoice');
+    if (sel) sel.value = arg;
+    return;
+  }
   if (!$('#modal').hidden && cmd !== 'settings') return;
   closeMenu();
   if (state.page === 'artifacts' && ['toggle', 'view', 'closeTab', 'nextTab', 'font'].includes(cmd)) {
@@ -1001,7 +1053,7 @@ window.panel.onMenu((cmd, arg) => {
       if (state.view[state.active] === 'code') closeTab(state.activeTab[state.active]);
       break;
     case 'nextTab': if (state.view[state.active] === 'code') cycleTab(arg); break;
-    case 'settings': $('#modal').hidden ? openSettings() : closeSettings(); break;
+    case 'settings': $('#modal').hidden ? openSettings(arg) : closeSettings(); break;
     case 'octopusIntro': openOctopusIntro(); break;
     case 'font':
       if (state.view[state.active] === 'chat') {
@@ -1028,7 +1080,8 @@ async function init() {
   $('#sidebarToggle').onclick = () => setSidebar(state.sidebarHidden);
   $('#navNew').onclick = newChat;
   $('#navArtifacts').onclick = () => showArtifacts(null);
-  $('#settingsBtn').onclick = openSettings;
+  $('#settingsBtn').onclick = () => openSettings();
+  for (const b of document.querySelectorAll('#modal .set-tab')) b.onclick = () => settingsTab(b.dataset.tab);
   $('#modalClose').onclick = closeSettings;
   $('#modalCancel').onclick = closeSettings;
   $('#modal').addEventListener('mousedown', (e) => { if (e.target.id === 'modal') closeSettings(); });

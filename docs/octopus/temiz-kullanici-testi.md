@@ -29,7 +29,7 @@ Bulunan her sorun için not: hangi adım, ne beklendi, ne oldu, ekran görüntü
 | 13 | Claude'a "Bunu bir kola ver: README'yi İngilizceye çevirsin" de | Yan oturum izin kartı → onayla → ahtapot bölmesinde bir kol büyür, kol rapor verince durumu değişir |
 | 14 | "Kırmızı başlık istemiyorum, bunu deftere yaz" de | Defter sekmesinde ret satırı |
 | 15 | Paneli kapat, yeniden aç, ahtapota tıkla | Baş "Devam et" ile açılır, kol kendiliğinden açılmaz |
-| 16 | Hesap ayarları (⌘,) → Octopus | Proje listede, hafıza açık; dizin boyutu görünür |
+| 16 | Ayarlar (⌘,) → Octopus sekmesi | Proje listede, hafıza açık; dizin boyutu görünür |
 | 17 | Finder'da `~/Library/Application Support/Claude Panel/` | `config.json`, `octopus/` var. Terminal'de `ls -l` ile `config.json` ve `octopus/oc_…/` dosyaları `-rw-------`, klasör `drwx------` |
 | 18 | README'deki "Veri nerede durur" tablosunu bu kullanıcıda doğrula | Tablodaki her yer gerçekten orada |
 

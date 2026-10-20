@@ -83,8 +83,9 @@ fs.writeFileSync(path.join(PROJECT, '.claude', 'settings.local.json'), JSON.stri
 const skillOv = () => JSON.parse(fs.readFileSync(SHARED_SETTINGS, 'utf8')).skillOverrides;
 const mcpOff = () => JSON.parse(fs.readFileSync(CLAUDE_JSON, 'utf8')).projects?.[PROJECT]?.disabledMcpServers;
 // Üç hesap ayarda açıkça (varsayılan tek hesap ~/.claude; ayarda hesap yoksa ilk açılış sihirbazı açılır, son adımda denenir).
-// İzinsiz MCP sunucuları da ayarda (varsayılan boş; temiz kurulumda --allowedTools gitmediği son adımda denenir)
-fs.writeFileSync(path.join(USER_DATA, 'config.json'), JSON.stringify({ recents: { max: [PROJECT] }, lastAccount: 'max', autoAllowMcp: ['blender', 'figma-console'], accounts: [
+// İzinsiz MCP sunucuları da ayarda (varsayılan boş; temiz kurulumda --allowedTools gitmediği son adımda denenir).
+// Tema koyu: ekran görüntüleri ve renk assert'leri makinenin macOS görünümüne bağlı olmasın (açık tema ayrı adımda)
+fs.writeFileSync(path.join(USER_DATA, 'config.json'), JSON.stringify({ recents: { max: [PROJECT] }, lastAccount: 'max', theme: 'dark', autoAllowMcp: ['blender', 'figma-console'], accounts: [
   { id: 'is', name: 'İş', note: 'İş hesabı', color: '#3f9b84', configDir: '~/.claude-is' },
   { id: 'max', name: 'Max', note: 'Max üyelik', color: '#d97757', configDir: '~/.claude-max' },
   { id: 'pro', name: 'Pro', note: 'Pro üyelik', color: '#7c7ce0', configDir: '~/.claude-pro' }] }));
@@ -182,6 +183,8 @@ async function waitUntil(fn, ms, msg) {
   // Panel aynı ayar klasörüyle yeniden de açılır (Octopus: kayıt kapanıp açılınca geri gelmeli)
   const launchElectron = ({ home = HOME, userData = USER_DATA } = {}) => electron.launch({
     executablePath: require('electron'),
+    // Playwright prefers-color-scheme'i varsayılan olarak 'light' taklit eder; null: panelin kendi teması (nativeTheme) geçer
+    colorScheme: null,
     args: [ROOT, ...(process.platform === 'linux' ? ['--no-sandbox'] : [])],
     env: {
       ...process.env,
@@ -283,6 +286,24 @@ async function waitUntil(fn, ms, msg) {
       const first = document.querySelector('.acct-pane.active .tabbar > :first-child').getBoundingClientRect();
       return { right: Math.round(r.right), toggle: Math.round(t.right), first: Math.round(first.left), pressed: document.querySelector('#sidebarToggle').getAttribute('aria-pressed') };
     });
+    // Playwright'ın tıklaması CDP'den gider, işletim sisteminin sürükleme katmanından geçmez; düğme sürükleme
+    // bölgesinin altında kalsa da test geçerdi. Electron bölgeleri belge sırasıyla üst üste koyar (sonraki öncekini
+    // ezer): düğmenin ortasını kapsayan, app-region'ı olan son öğe düğmenin kendisi (no-drag) olmalı.
+    const toggleRegion = () => page.evaluate(() => {
+      const t = document.querySelector('#sidebarToggle').getBoundingClientRect();
+      const x = t.left + t.width / 2, y = t.top + t.height / 2;
+      let last = null;
+      for (const el of document.querySelectorAll('*')) {
+        const region = getComputedStyle(el).getPropertyValue('-webkit-app-region');
+        if (region !== 'drag' && region !== 'no-drag') continue;
+        if (!el.getClientRects().length) continue;
+        const r = el.getBoundingClientRect();
+        if (x >= r.left && x < r.right && y >= r.top && y < r.bottom) last = { region, id: el.closest('#sidebarToggle') ? 'sidebarToggle' : el.id || String(el.className) };
+      }
+      return { last, top: document.elementFromPoint(x, y)?.closest('#sidebarToggle') ? 'toggle' : 'başka öğe' };
+    });
+    assert.deepEqual(await toggleRegion(), { last: { region: 'no-drag', id: 'sidebarToggle' }, top: 'toggle' },
+      'kenar çubuğu düğmesi açıkken bir sürükleme şeridinin altında kalıyor (gerçek tıklama pencereyi sürükler)');
     assert.equal((await sideBox()).pressed, 'true');
     await page.click('#sidebarToggle');
     await page.waitForFunction(() => document.querySelector('#sidebar').getBoundingClientRect().right <= 0, null, { timeout: 3000 });
@@ -291,6 +312,8 @@ async function waitUntil(fn, ms, msg) {
     assert.equal(sb.pressed, 'false');
     assert.ok(sb.first >= sb.toggle, `kapalı kenar çubuğunda sekme şeridi düğmenin altında kalıyor (${sb.first} < ${sb.toggle})`);
     assert.ok(await page.isVisible('#sidebarToggle'), 'kenar çubuğu kapalıyken aç düğmesi görünmüyor');
+    assert.deepEqual(await toggleRegion(), { last: { region: 'no-drag', id: 'sidebarToggle' }, top: 'toggle' },
+      'kenar çubuğu düğmesi kapalıyken sekme şeridinin altında kalıyor (gerçek tıklama pencereyi sürükler)');
     await waitUntil(() => readConfig().sidebarHidden === true, 3000, 'kenar çubuğu kapalı diye kaydedilmedi');
     await page.screenshot({ path: path.join(OUT, '0-kenar-kapali.png') });
     await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.find((m) => m.label === 'Görünüm').submenu.items.find((i) => i.accelerator === 'CmdOrCtrl+B').click());
@@ -471,7 +494,7 @@ async function waitUntil(fn, ms, msg) {
     await page.waitForSelector(P + '.chat-host.active .msg-user >> text=IS-279 üzerinde devam et');
     assert.equal(await page.locator('#navNew.on').count(), 0);
     await page.waitForFunction(() => state.tabs.max.at(-1)?.models?.length > 0, null, { timeout: 15000 });
-    assert.equal((await page.innerText(P + '.chat-host.active .composer-meta .model-btn')).replace(/\s+/g, ' ').trim(), 'Sonnet 5.5 Orta');
+    assert.equal((await page.innerText(P + '.chat-host.active .composer-bar .model-btn')).replace(/\s+/g, ' ').trim(), 'Sonnet 5.5 Orta');
     assert.match(fakeLog(), /ARGS .*"--effort=medium","--model=sonnet"/, 'model/efor SDK\'ya verilmedi');
 
     step('Açılış hook\'u: uzun çıktı tek satırlık kapalı özet; tıklanınca tam metin');
@@ -495,6 +518,11 @@ async function waitUntil(fn, ms, msg) {
 
     step('İzin kartı → İzin ver');
     await page.waitForSelector(P + '.perm-card:not(.answered):not(.question)', { timeout: 15000 });
+    // Tur sürüyor: üst satırda "Çalışıyor" rozeti yok; durum sekmenin kabında, bilgi alttaki canlı göstergede
+    assert.deepEqual(await page.$eval(P + '.chat-host.active', (host) => ({
+      status: host.dataset.status, badge: host.querySelector('.ct-status').textContent, badgeShown: !!host.querySelector('.ct-status').offsetParent,
+      live: host.querySelector('.live-act').hidden ? null : host.querySelector('.live-act .la-text').textContent,
+    })), { status: 'busy', badge: '', badgeShown: false, live: 'Onayınızı bekliyor' }, 'meşgulken üst satırda rozet var ya da canlı gösterge yok');
     await page.screenshot({ path: path.join(OUT, '3-izin.png') });
     await page.click(P + '.perm-card:not(.answered) .primary-btn');
 
@@ -503,12 +531,56 @@ async function waitUntil(fn, ms, msg) {
     await page.click(P + '.perm-card.question .q-opt');
     await page.click(P + '.perm-card.question .primary-btn');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-list')?.textContent.includes('IS-280')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     await page.screenshot({ path: path.join(OUT, '4-tur-bitti.png') });
 
     const groups = await page.$$eval(P + '.tool-group .grp-text', (o) => o.map((x) => x.textContent));
     assert.ok(groups.length >= 2, 'araç grupları oluşmadı: ' + JSON.stringify(groups));
     assert.match(groups[0], /dosya okundu/);
+
+    step('Sade görünüm: tek yazma kutusu (çubukta klasör, izin modu, bağlam, model, kullanım), üst çubuk yalnız ikon, yan panel kapalı başlar ve hatırlanır');
+    const HOST = P + '.chat-host.active ';
+    assert.equal(await page.locator(P + '.composer-meta').count(), 0, 'yazma kutusunun altında ayrı satır kaldı');
+    await page.waitForSelector(HOST + '.ctx-ring:not([hidden])', { timeout: 5000 });
+    // Kutunun çubuğu tek satır, kutudan taşmıyor; eski alt satırın öğeleri çubukta
+    const composerBar = () => page.$eval(HOST + '.composer-box', (box) => {
+      const bar = box.querySelector('.composer-bar');
+      const br = box.getBoundingClientRect();
+      const kids = [...bar.children].filter((k) => !k.classList.contains('spacer') && k.getBoundingClientRect().width > 0);
+      const mids = kids.map((k) => { const r = k.getBoundingClientRect(); return r.top + r.height / 2; }).sort((x, y) => x - y);
+      return {
+        missing: ['.plus-btn', '.connectors-btn', '.skills-btn', '.meta-select', '.cb-place .meta-folder', '.ctx-ring', '.model-btn', '.usage-btn', '.send-btn'].filter((s) => !bar.querySelector(s)),
+        rows: mids.filter((m, i) => i === 0 || m - mids[i - 1] > 6).length,
+        overflow: kids.filter((k) => { const r = k.getBoundingClientRect(); return r.right > br.right + 0.5 || r.left < br.left - 0.5; }).map((k) => k.className),
+      };
+    });
+    assert.deepEqual(await composerBar(), { missing: [], rows: 1, overflow: [] }, 'yazma kutusunun çubuğu');
+    // Bağlam: halka ve hep yüzde; plan kullanımı: sayısız dilim. Title'ları ne olduklarını söylüyor
+    const rings = await page.$eval(HOST + '.composer-bar', (b) => ({
+      ctxPct: b.querySelector('.ctx-ring .ctx-pct').textContent, ctxPctShown: !!b.querySelector('.ctx-ring .ctx-pct').offsetParent,
+      ctxTitle: b.querySelector('.ctx-ring').title.split('\n')[0],
+      usage: [!!b.querySelector('.usage-btn .pie-slice'), !!b.querySelector('.usage-btn .ring-bar'), b.querySelector('.usage-btn').title.split('\n')[0]],
+    }));
+    assert.match(rings.ctxPct, /^%\d+$/, 'bağlam yüzdesi yazmıyor');
+    assert.equal(rings.ctxPctShown, true, 'bağlam yüzdesi görünmüyor');
+    assert.match(rings.ctxTitle, new RegExp(`^Bağlam penceresi: ${rings.ctxPct} dolu`), 'bağlam halkasının title\'ı');
+    assert.deepEqual(rings.usage, [true, false, 'Plan kullanımı · 5 saatlik limit: %7 kullanıldı'], 'kullanım göstergesi dilim değil ya da title\'ı yanlış');
+    // Üst çubuk: bölme düğmeleri yalnız ikon, adları title'da; "Çalışıyor" rozeti yok (boşta da)
+    assert.deepEqual(await page.$$eval(HOST + '.chat-top .top-btn.icon-only:not([hidden])', (o) => o.map((b) =>
+      [b.className.split(' ').at(-1), [...b.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim(), b.title.split(':')[0]])),
+    [['changes-toggle', '', 'Değişiklikler'], ['browser-toggle', '', 'Tarayıcı'], ['sim-toggle', '', 'Simülatör'], ['term-open', '', 'Terminal']], 'üst çubuk düğmeleri');
+    assert.equal(await page.isVisible(HOST + '.ct-status'), false, 'boştayken üst satırda durum yazısı var');
+    // Yan panel varsayılan kapalı; düğme bütün sohbetlerde açar, durum config.json → sidePanelOpen
+    const cfgNow = () => JSON.parse(fs.readFileSync(path.join(USER_DATA, 'config.json'), 'utf8'));
+    const sideState = () => page.$eval(P + '.chat-host.active', (h) => ({
+      open: h.classList.contains('side-open'), shown: !!h.querySelector('.chat-side').offsetParent, pressed: h.querySelector('.side-toggle').getAttribute('aria-pressed') }));
+    assert.deepEqual(await sideState(), { open: false, shown: false, pressed: 'false' }, 'yan panel açık başladı');
+    assert.equal(cfgNow().sidePanelOpen, undefined);
+    await page.click(HOST + '.side-toggle');
+    assert.deepEqual(await sideState(), { open: true, shown: true, pressed: 'true' }, 'yan panel düğmeyle açılmadı');
+    await waitUntil(() => cfgNow().sidePanelOpen === true, 3000, 'yan panelin açık durumu kaydedilmedi');
+    assert.deepEqual(await composerBar(), { missing: [], rows: 1, overflow: [] }, 'yan panel açıkken yazma kutusunun çubuğu');
+    await page.screenshot({ path: path.join(OUT, '4a-yan-panel.png') });
     assert.equal((await page.textContent(P + '.side-count')).trim(), '1 / 3');
     const PRG = P + '.chat-host.active .side-progress';
     assert.equal(await page.$eval(PRG, (d) => d.open), false, 'İlerleme bölümü açık başladı');
@@ -521,9 +593,12 @@ async function waitUntil(fn, ms, msg) {
     await page.click(CTX + ' > summary');
     assert.equal(await page.$eval(CTX, (d) => d.open), true, 'Bağlam bölümü tıklayınca açılmadı');
     await page.click(CTX + ' > summary');
+    await page.click(HOST + '.side-toggle');
+    assert.deepEqual(await sideState(), { open: false, shown: false, pressed: 'false' }, 'yan panel düğmeyle kapanmadı');
+    await waitUntil(() => cfgNow().sidePanelOpen === false, 3000, 'yan panelin kapalı durumu kaydedilmedi');
 
     step('Efor ve izin modu değişimi SDK\'ya ulaşıyor');
-    const MB = P + '.chat-host.active .composer-meta .model-btn';
+    const MB = P + '.chat-host.active .composer-bar .model-btn';
     await page.click(MB);
     await page.click('.model-menu .pop-item:has-text("Opus 5.5")');
     await page.click(MB);
@@ -581,7 +656,7 @@ async function waitUntil(fn, ms, msg) {
       await page.fill(HC + '.composer-input', text);
       await page.press(HC + '.composer-input', 'Enter');
       await page.waitForFunction((want) => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes(want)
-        && !document.querySelector('.acct-pane.active .ct-status.busy'), want, { timeout: 15000 });
+        && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), want, { timeout: 15000 });
       return from;
     };
     // Elle sıkıştırma: /compact'ta UserPromptSubmit yok; PreCompact talimatı alır, ardından sınır, PostCompact, SessionStart (compact)
@@ -623,10 +698,24 @@ async function waitUntil(fn, ms, msg) {
     assert.ok(fakeLog().slice(hf).includes('SIKISTIRMA manual yapıldı "Retleri gerekçeleriyle, kullanıcının zevk ve kalite çıtası alıntılarını, oturumun ilk görevini, açık işleri ve karar kimliklerini koru."'),
       'sıkıştırma şablonu CLI\'ye ulaşmadı');
     await page.waitForSelector(HC + '.ctx-ring[data-level="low"]', { timeout: 5000 });
-    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 10000 });
+    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 10000 });
     assert.equal(await page.$$eval(HC + '.compact-card.ctx:not(.answered)', (o) => o.length), 0, 'sıkıştırmadan sonra kart açık kaldı');
     // Ayar "İzin ver": Claude Code kendisi sıkıştırır (mesaj UserPromptSubmit'ten geçer, sonra PreCompact auto, sınır, PostCompact, SessionStart compact)
+    // Ayarlar penceresi (eski adı "Hesap ayarları"): solda dört sekme, bir anda tek bölme; ilk açılışta Hesaplar
+    assert.equal((await page.innerText('#settingsBtn')).replace(/\s+/g, ' ').trim(), 'Ayarlar ⌘,');
+    assert.ok(await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.flatMap((i) => i.submenu?.items || []).some((i) => i.label === 'Ayarlar…')), 'menüde "Ayarlar…" yok');
     await page.click('#settingsBtn');
+    const setPanes = () => page.$eval('#modal', (m) => ({
+      title: m.querySelector('h2').textContent,
+      tabs: [...m.querySelectorAll('.set-tab')].map((t) => (t.classList.contains('on') ? '*' : '') + t.textContent.trim()),
+      shown: [...m.querySelectorAll('.set-pane')].filter((p) => p.offsetParent).map((p) => p.dataset.pane),
+    }));
+    assert.deepEqual(await setPanes(), { title: 'Ayarlar', tabs: ['*Hesaplar', 'Görünüm', 'Genel', 'Octopus'], shown: ['accounts'] }, 'ayar penceresinin sekmeleri');
+    await page.waitForTimeout(300); // açılış animasyonu (pop)
+    await page.screenshot({ path: path.join(OUT, '4d-ayarlar-hesaplar.png') });
+    assert.equal(await page.isVisible('#autoCompact'), false, 'Octopus ayarı Hesaplar sekmesinde görünüyor');
+    await page.click('.set-tab[data-tab="octopus"]');
+    assert.deepEqual(await setPanes(), { title: 'Ayarlar', tabs: ['Hesaplar', 'Görünüm', 'Genel', '*Octopus'], shown: ['octopus'] }, 'Octopus sekmesine geçilmedi');
     assert.equal(await page.inputValue('#autoCompact'), 'ask', 'varsayılan "Her zaman sor" değil');
     await page.selectOption('#autoCompact', 'allow');
     await waitUntil(() => JSON.parse(fs.readFileSync(path.join(USER_DATA, 'config.json'), 'utf8')).autoCompact === 'allow', 3000, 'otomatik sıkıştırma ayarı kaydedilmedi');
@@ -657,7 +746,7 @@ async function waitUntil(fn, ms, msg) {
     await page.fill(C + '.composer-input', 'rapor hazırla');
     await page.press(C + '.composer-input', 'Enter');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Raporu hazırladım')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     await page.waitForFunction(() => document.querySelectorAll('.acct-pane.active .chat-host.active .artifact-card').length === 2, null, { timeout: 10000 });
     const cards = await page.$$eval(C + '.artifact-card', (o) => o.map((x) => x.textContent));
     assert.match(cards[0], /Haftalık rapor.*Sürüm 2/);
@@ -677,7 +766,7 @@ async function waitUntil(fn, ms, msg) {
     await page.fill(C + '.composer-input', 'blender sahnesine küp ekle');
     await page.press(C + '.composer-input', 'Enter');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Küp hazır')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     const shot = C + '.grp-shots .tool-shot img';
     await page.waitForFunction((s) => document.querySelector(s)?.naturalWidth === 64, shot, { timeout: 5000 });
     assert.equal(await page.locator(shot).count(), 1);
@@ -791,7 +880,7 @@ async function waitUntil(fn, ms, msg) {
     assert.match(await page.textContent(C + '.perm-card:not(.answered) .perm-arg'), /uygulama başlatıldı · com\.ornek\.uygulama/);
     await page.click(C + '.perm-card:not(.answered) .primary-btn');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Simülatörde uygulamaya dokundum')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     await page.waitForSelector(SIM + '.sim-pane.live', { timeout: 5000 });
     const simLog = fakeLog();
     // Claude Code her işlem için sorar; panel güvenli olanları kendisi onaylar, kart yalnız launch için çıkar
@@ -953,7 +1042,7 @@ async function waitUntil(fn, ms, msg) {
     assert.equal(await page.locator(brCard + ' button:has-text("hep izin ver")').count(), 0, 'dış site kartında "hep izin ver" olmamalı');
     await page.click(brCard + ' button:text-is("Reddet")');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Tarayıcıda sayfayı denedim')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     await page.waitForSelector(BR + '.br-pane', { timeout: 5000 });
     const brLog = fakeLog().slice(brMark);
     const brOut = (action, nth = 0) => (brLog.split('\n').filter((l) => l.startsWith(`BRMCP ${action} `))[nth] || '');
@@ -1023,7 +1112,7 @@ async function waitUntil(fn, ms, msg) {
       await page.click(gdCard + ' .primary-btn');
       // Engel kalkarsa sayfa çözülmeyen adrese gider, tur zaman aşımına düşer: eval'in yanıtı nedeni söyler
       await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Tarayıcıda sayfayı denedim')
-        && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 30000 })
+        && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 30000 })
         .catch(() => assert.fail('tur bitmedi; eval ile gidiş engellenmemiş olabilir: ' + (fakeLog().slice(gdMark).match(/BRMCP eval .*/g) || []).join(' | ')));
       const gdLog = fakeLog().slice(gdMark);
       const gdOut = (action, nth = 0) => (gdLog.split('\n').filter((l) => l.startsWith(`BRMCP ${action} `))[nth] || '');
@@ -1050,7 +1139,7 @@ async function waitUntil(fn, ms, msg) {
       await page.fill(C + '.composer-input', 'tarayıcıda gidiş tekrar ' + WEB);
       await page.press(C + '.composer-input', 'Enter');
       await waitUntil(() => fakeLog().slice(gdMark).split('\n').filter((l) => l.startsWith('BRMCP eval ')).length >= 4, 30000, 'ikinci tur bitmedi');
-      await page.waitForFunction(() => !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
       assert.equal(await page.locator(C + '.perm-card:has-text("JavaScript")').count(), 1, 'aynı kökende eval yeniden sordu');
       const linkAt = await page.evaluate(async (s) => {
         const wv = document.querySelector(s);
@@ -1087,7 +1176,7 @@ async function waitUntil(fn, ms, msg) {
     await page.waitForSelector(teCard + ':has-text("durdurmak")', { timeout: 15000 });
     await page.click(teCard + ' button:text-is("Reddet")');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Terminale baktım')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 20000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 20000 });
     const teLog = fakeLog().slice(teMark);
     const teOut = (action, nth = 0) => (teLog.split('\n').filter((l) => l.startsWith(`TERMMCP ${action} `))[nth] || '');
     assert.match(teOut('list'), new RegExp(`${userTermId} · WFC · ~/WFC · son kullanılan`), 'kullanıcının terminali listede son kullanılan değil');
@@ -1116,7 +1205,7 @@ async function waitUntil(fn, ms, msg) {
     await page.fill(C + '.composer-input', 'değişiklikleri göster');
     await page.press(C + '.composer-input', 'Enter');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Değişiklikleri gösterdim')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     const shLog = fakeLog().slice(shMark);
     assert.ok(!/SHOWPERM/.test(shLog), 'show aracı izin sormamalı');
     assert.match(shLog, /SHOWMCP changes "Değişiklikler bölmesi açıldı \(2 değişen dosya\)"/);
@@ -1154,7 +1243,7 @@ async function waitUntil(fn, ms, msg) {
     await page.fill(C + '.composer-input', 'editörde aç');
     await page.press(C + '.composer-input', 'Enter');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Dosyaları açtım')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     const opLog = fakeLog().slice(opMark);
     assert.ok(!/OPENPERM/.test(opLog), 'open aracı izin sormamalı');
     assert.match(opLog, /OPENMCP editor ".*\/uygulama\.js:2 VS Code ile açıldı"/);
@@ -1168,6 +1257,9 @@ async function waitUntil(fn, ms, msg) {
     assert.ok(await page.locator(C + '.tool-group summary', { hasText: 'dosya açıldı' }).count(), 'grup özeti yok');
     // Ayar: kurulu editörler listelenir; Xcode seçilince satır xed ile, varsayılan metin düzenleyicide klasör açılmaz
     await page.click('#settingsBtn');
+    // Pencere son açılan sekmeyle (Octopus) açılır; editör Genel'de
+    assert.deepEqual(await page.$$eval('#modal .set-pane', (o) => o.filter((p) => p.offsetParent).map((p) => p.dataset.pane)), ['octopus'], 'son açılan sekme hatırlanmadı');
+    await page.click('.set-tab[data-tab="general"]');
     await page.waitForSelector('#editorChoice option[value="xcode"]', { state: 'attached' });
     assert.deepEqual(await page.$$eval('#editorChoice option', (o) => o.map((x) => x.textContent)), ['Otomatik (VS Code)', 'VS Code', 'Xcode', 'Varsayılan metin düzenleyici']);
     await page.selectOption('#editorChoice', 'xcode');
@@ -1192,7 +1284,7 @@ async function waitUntil(fn, ms, msg) {
     assert.equal(await page.locator(prCard + ' button:has-text("hep izin ver")').count(), 0);
     await page.click(prCard + ' .primary-btn');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('PR izleniyor.')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     const prLog = fakeLog().slice(prMark);
     assert.deepEqual([...prLog.matchAll(/PRPERM (\w+) (allow|deny)/g)].map((m) => m[1] + ':' + m[2]), ['status:allow', 'watch:allow']);
     assert.equal(await page.locator(C + '.perm-card').count(), 1, 'yalnız otomatik düzeltme sorulmalı');
@@ -1214,7 +1306,7 @@ async function waitUntil(fn, ms, msg) {
     assert.ok(!/javascript:/.test(ev1), 'javascript: adresi Claude\'a gitti');
     assert.match(ev1, /kullanıcı yazmadı.*gh run view/s);
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('CI olayına baktım (1)')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 10000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 10000 });
     assert.equal(await page.textContent(C + '.pr-note.pr-ci_failed .sn-head > .sn-status:last-of-type'), 'Claude\'a iletildi');
     assert.equal(await page.getAttribute(PRC, 'data-ci'), 'fail');
     assert.deepEqual(await page.$$eval(C + '.pr-ci_failed .pr-list a', (o) => o.map((a) => [a.textContent, a.getAttribute('href')])), [['CI / test', JOB_URL]]);
@@ -1256,7 +1348,7 @@ async function waitUntil(fn, ms, msg) {
     assert.match(ev2, /--- ali · giris\.js:3 · .*#r91\nBurada null kontrolü yok/);
     assert.ok(!/Kendi yorumum|Eski yorum/.test(ev2), 'gh kullanıcısının ya da izlemeden önceki yorum iletildi');
     assert.equal(ev2.split('</ci-izleme-olayi>').length, rvCards + 1, 'yorum gövdesi etiketi kapattı');
-    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 10000 });
+    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 10000 });
     // Birleşir: kart, düğme kaybolur, yoklama durur
     ghState((st) => { st.pr.state = 'MERGED'; });
     await page.waitForSelector(C + '.pr-note.pr-merged', { timeout: 8000 });
@@ -1272,7 +1364,7 @@ async function waitUntil(fn, ms, msg) {
     await page.fill(C + '.composer-input', 'grafik çiz');
     await page.press(C + '.composer-input', 'Enter');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Grafiği yukarıda gösterdim')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     assert.ok(!/WIDGETPERM/.test(fakeLog()), 'show_widget izin sormamalı');
     const WF = C + '.grp-shots .widget iframe.widget-frame';
     assert.match(await page.getAttribute(WF, 'src'), /^artifact:\/\/widget\/[0-9a-f]{24}\/$/);
@@ -1306,7 +1398,7 @@ async function waitUntil(fn, ms, msg) {
     assert.equal(await page.locator(ssCard + ' button:has-text("hep izin ver")').count(), 0);
     await page.click(ssCard + ' .primary-btn');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('İki iş de bitti')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 30000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 30000 });
     const ssLog = fakeLog().slice(ssMark);
     assert.deepEqual([...ssLog.matchAll(/SESSPERM (\w+) (allow|deny)/g)].map((m) => m[1] + ':' + m[2]), ['start:allow', 'list:allow', 'read:allow', 'send:allow']);
     const childId = +((ssLog.match(/SESSMCP start "Yan oturum (\d+) başladı/) || [])[1]);
@@ -1372,7 +1464,7 @@ async function waitUntil(fn, ms, msg) {
         await page.click(sdCard + ' button:has-text("Reddet")');
       }
       await waitUntil(() => [...fakeLog().matchAll(/SESSDIRMCP |SESSDIRPERM start deny/g)].length > n, 15000, 'klasörlü start yanıtlanmadı: ' + dir);
-      await page.waitForFunction(() => !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
       return got;
     };
     const DEFAULT_START = 'Claude yeni bir yan oturum başlatmak istiyor';
@@ -1402,7 +1494,7 @@ async function waitUntil(fn, ms, msg) {
 
     step('Tur sonu kutusu ve sabit görev listesi: özet, tek soru, düğme mesaj olarak gider; yarım görev yazma alanının üstünde');
     const turnDone = (text) => page.waitForFunction((t) => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes(t)
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), text, { timeout: 30000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), text, { timeout: 30000 });
     await page.fill(C + '.composer-input', 'özetle bitir');
     await page.press(C + '.composer-input', 'Enter');
     await turnDone('Kapıları koştum');
@@ -1491,6 +1583,8 @@ async function waitUntil(fn, ms, msg) {
     await page.screenshot({ path: path.join(OUT, '6o-ayri-kopya-menu.png') });
     await page.keyboard.press('Escape');
     await page.evaluate(() => closeMenu());
+    // Yan panelin son durumu yeni sohbete geçer (başka bir sohbette düğmeyle açılmış gibi: setSidePanel)
+    await page.evaluate(() => setSidePanel(true));
     await page.fill(P + '.new-input', 'kopyada yaz');
     await page.press(P + '.new-input', 'Enter');
     await page.waitForFunction(() => state.activeTab.max?.kind === 'chat' && (state.activeTab.max.chatId || state.activeTab.max.exited), null, { timeout: 15000 });
@@ -1506,7 +1600,12 @@ async function waitUntil(fn, ms, msg) {
     assert.equal(gitOut('status', '--porcelain'), '', 'kopya ana çalışma ağacında görünüyor');
     assert.match(fs.readFileSync(path.join(DEPO, '.git', 'info', 'exclude'), 'utf8'), /^\/\.claude\/worktrees\/$/m);
     assert.ok(gitOut('worktree', 'list', '--porcelain').includes('branch refs/heads/' + wt1.chip));
+    assert.deepEqual(await sideState(), { open: true, shown: true, pressed: 'true' }, 'yeni sohbet yan panelin son durumuyla açılmadı');
+    assert.equal(await page.isVisible(HOST + '.cb-place .meta-wt'), true, 'dal adı yazma kutusunun çubuğunda görünmüyor');
+    assert.deepEqual(await composerBar(), { missing: [], rows: 1, overflow: [] }, 'dal adı ve yan panelle yazma kutusunun çubuğu');
     await page.screenshot({ path: path.join(OUT, '6o-ayri-kopya.png') });
+    await page.click(HOST + '.side-toggle');
+    await waitUntil(() => cfgNow().sidePanelOpen === false, 3000, 'yan panel kapatılınca kaydedilmedi');
     await page.evaluate(() => closeTab(state.activeTab.max, true));
     await page.waitForSelector('#toast:not([hidden]):has-text("Ayrı kopya korunuyor")', { timeout: 5000 });
     assert.ok(fs.existsSync(path.join(wt1.cwd, 'kopya.txt')), 'değişiklikli kopya silindi');
@@ -1520,6 +1619,7 @@ async function waitUntil(fn, ms, msg) {
     let awake = await page.evaluate(() => window.panel.awakeStatus());
     assert.equal(awake.active, true, 'tur sürerken uyanık tutulmuyor');
     await page.click('#settingsBtn');
+    await page.click('.set-tab[data-tab="general"]');
     await page.uncheck('#keepAwake');
     const awakeNow = () => page.evaluate(() => window.panel.awakeStatus());
     await waitUntil(async () => !(await awakeNow()).active, 3000, 'ayar kapatılınca uyanık tutma sürdü');
@@ -1581,7 +1681,7 @@ async function waitUntil(fn, ms, msg) {
     await page.fill(C + '.composer-input', 'tuzak sayfayı göster');
     await page.press(C + '.composer-input', 'Enter');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('görev kutucuğu')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     assert.deepEqual(await page.$eval(C + '.msg-assistant:has-text("Devam etmek için")', (el) => ({
       tehlikeli: [...el.querySelectorAll('form, button:not(.code-copy), style, [style], [action]')].map((x) => x.outerHTML.slice(0, 80)),
       kutucuk: el.querySelectorAll('input[type="checkbox"]').length,
@@ -1650,7 +1750,7 @@ async function waitUntil(fn, ms, msg) {
     await page.fill(C + '.composer-input', 'ekleri incele');
     await page.press(C + '.composer-input', 'Enter');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Ekleri aldım: 2 görsel, 2 dosya.')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     assert.equal(await page.locator(ATT).count(), 0, 'gönderilen ekler yazma alanında kaldı');
     const sent = JSON.parse(fakeLog().match(/^EKLER (.*)$/gm).at(-1).slice(6));
     assert.deepEqual(sent.map((b) => b.image || b.text.split('\n')[0]), ['image/png',
@@ -1937,7 +2037,7 @@ async function waitUntil(fn, ms, msg) {
       await page.waitForFunction((n) => document.querySelectorAll('.acct-pane.active .chat-host.active .perm-card.answered').length === n, i + 1, { timeout: 5000 });
     }
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Kollar rapor verdi')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 30000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 30000 });
     // Başın ilk turundan sonra bir kez: kayıt saklama süresi önerisi (cleanupPeriodDays); onaylanınca ortak settings.json'a symlink bozulmadan yazılır
     const retention = C + '.retention-card:not(.answered)';
     await page.waitForSelector(retention, { timeout: 5000 });
@@ -2096,6 +2196,10 @@ async function waitUntil(fn, ms, msg) {
     // Kolun üstüne gelince alt kutuda o kol
     await page.hover(OC + '.oc-lbl[data-id="kol-5"]');
     assert.match(await page.textContent(OC + '.oc-info'), /Kol 3.*Alt görev bitti: alt görev: k3.*rapor verdi/s);
+    // Bölme açıkken (1440 px'te sütun ~670 px) çubuk sıkışır ama tek satır: efor ve klasör adı düşer (title'da)
+    assert.deepEqual(await composerBar(), { missing: [], rows: 1, overflow: [] }, 'ahtapot bölmesi açıkken yazma kutusunun çubuğu');
+    assert.deepEqual(await page.$eval(C + '.composer-bar', (b) => [b.querySelector('.mp-effort')?.offsetParent ?? null, b.querySelector('.cb-place .meta-folder > span').offsetParent]),
+      [null, null], 'dar sütunda efor ve klasör adı düşmedi');
     await page.screenshot({ path: path.join(OUT, '7g-octopus-bolme.png') });
     await setWidth(900);
     await page.waitForFunction(() => innerWidth === 900, null, { timeout: 3000 });
@@ -2109,6 +2213,8 @@ async function waitUntil(fn, ms, msg) {
       return [...m.querySelectorAll('.chat-top > :not([hidden])')].map((b) => Math.round(b.getBoundingClientRect().right - r)).filter((d) => d > 0);
     });
     assert.deepEqual(topOverflow, [], 'üst çubuk düğmeleri sohbet sütunundan taşıyor (px)');
+    // Çok dar sütunda (~310 px) tek satır sığmaz: çubuk kutunun içinde iki satıra bölünür, hiçbir şey taşmaz
+    assert.deepEqual(await composerBar(), { missing: [], rows: 2, overflow: [] }, 'dar sütunda yazma kutusunun çubuğu (kutunun içinde iki satır)');
     await page.screenshot({ path: path.join(OUT, '7h-octopus-bolme-dar.png') });
     await assertCloseVisible(C + '.chat-octo', 'Ahtapot bölmesi');
     // Kenar çubuğu: nokta rengi durumu gösterir (bitti yeşil, rapor verdi açık, kesilen içi boş)
@@ -2127,6 +2233,70 @@ async function waitUntil(fn, ms, msg) {
     await page.click(C + '.octo-toggle');
     await page.waitForSelector(OC + '.oc-arm', { timeout: 5000 });
     assert.equal(await page.locator(C + '.ch-pane').count(), 0, 'ahtapot açılınca Değişiklikler kapanmadı');
+
+    step('Tema: ayarlardan açık tema (ana süreç nativeTheme ile uygular; stiller, terminal, pencere zemini uyar), menüden koyuya dönüş');
+    const themeCfg = () => JSON.parse(fs.readFileSync(path.join(USER_DATA, 'config.json'), 'utf8')).theme;
+    const themeMain = () => app.evaluate(({ nativeTheme, BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows().find((x) => x.webContents.getURL().endsWith('/renderer/index.html'));
+      return { source: nativeTheme.themeSource, dark: nativeTheme.shouldUseDarkColors, bg: win.getBackgroundColor().toLowerCase().slice(-6) };
+    });
+    const themePage = () => page.evaluate(() => ({
+      body: getComputedStyle(document.body).backgroundColor,
+      side: getComputedStyle(document.getElementById('sidebar')).backgroundColor,
+      text: getComputedStyle(document.body).color,
+      term: termTheme().background,
+      terms: Object.values(state.tabs).flat().filter((t) => t.kind === 'term').map((t) => t.term.options.theme.background),
+    }));
+    assert.deepEqual(await themeMain(), { source: 'dark', dark: true, bg: '100f0d' }, 'testin ayarındaki koyu tema uygulanmadı');
+    await page.click('#settingsBtn');
+    await page.click('.set-tab[data-tab="look"]');
+    assert.equal(await page.inputValue('#themeChoice'), 'dark');
+    await page.selectOption('#themeChoice', 'light');
+    await waitUntil(() => themeCfg() === 'light', 3000, 'tema seçimi kaydedilmedi');
+    await page.waitForFunction(() => matchMedia('(prefers-color-scheme: light)').matches, null, { timeout: 3000 });
+    const lightNow = await themePage();
+    assert.deepEqual({ ...lightNow, terms: undefined }, { body: 'rgb(239, 234, 223)', side: 'rgb(231, 224, 210)', text: 'rgb(31, 27, 21)', term: '#efeadf', terms: undefined },
+      'açık temanın zemini, kenar çubuğu, yazısı ya da terminal teması');
+    assert.ok(lightNow.terms.every((b) => b === '#efeadf'), 'açık terminal sekmeleri temaya geçmedi: ' + lightNow.terms);
+    assert.deepEqual(await themeMain(), { source: 'light', dark: false, bg: 'efeadf' }, 'ana süreçte tema ya da pencere zemini');
+    // Renk geçişleri (transition) ve pencerenin bulanık zemini birkaç karede oturur; hemen çekilen görüntü yarı saydam çıkıyordu
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: path.join(OUT, '9a-acik-ayarlar.png') });
+    await page.click('.set-tab[data-tab="accounts"]');
+    await page.screenshot({ path: path.join(OUT, '9a2-acik-ayarlar-hesaplar.png') });
+    await page.click('#modalClose');
+    await page.screenshot({ path: path.join(OUT, '9b-acik-octopus.png') });
+    await page.click(C + '.changes-toggle');
+    await page.waitForSelector(C + '.ch-pane', { timeout: 5000 });
+    await page.screenshot({ path: path.join(OUT, '9c-acik-degisiklikler.png') });
+    await page.click(C + '.octo-toggle');
+    await page.waitForSelector(OC + '.oc-arm', { timeout: 5000 });
+    await page.evaluate(() => newChat());
+    await page.waitForSelector(P + '.launcher.active', { timeout: 5000 });
+    await page.waitForTimeout(600); // açılış animasyonu (rise)
+    await page.screenshot({ path: path.join(OUT, '9d-acik-yeni-sohbet.png') });
+    await page.evaluate(() => showArtifacts(null));
+    await page.waitForSelector('body[data-page="artifacts"] .art-page-inner', { timeout: 5000 });
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: path.join(OUT, '9e-acik-artifacts.png') });
+    await page.evaluate(() => selectAccount('max'));
+    await page.evaluate((id) => activateTab('max', chatsById.get(id)), headChat);
+    await page.waitForSelector(OC + '.oc-arm', { timeout: 5000 });
+    // Menüden (Görünüm → Tema → Koyu), ayar penceresi açıkken: seçim penceredeki listeye de yansır
+    await page.click('#settingsBtn');
+    await app.evaluate(({ Menu }) => {
+      const tema = Menu.getApplicationMenu().items.flatMap((i) => i.submenu?.items || []).find((i) => i.label === 'Tema');
+      tema.submenu.items.find((i) => i.label === 'Koyu').click();
+    });
+    await page.waitForFunction(() => matchMedia('(prefers-color-scheme: dark)').matches, null, { timeout: 3000 });
+    assert.equal(await page.inputValue('#themeChoice'), 'dark', 'menüden seçilen tema açık ayar penceresine yansımadı');
+    await page.click('#modalClose');
+    assert.equal(themeCfg(), 'dark', 'menüden seçilen tema kaydedilmedi');
+    assert.deepEqual(await themeMain(), { source: 'dark', dark: true, bg: '100f0d' }, 'menüden koyuya dönünce ana süreç');
+    const darkNow = await themePage();
+    assert.deepEqual([darkNow.body, darkNow.term], ['rgb(16, 15, 13)', '#100f0d'], 'koyu temaya dönünce zemin ya da terminal');
+    assert.equal(await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.flatMap((i) => i.submenu?.items || [])
+      .find((i) => i.label === 'Tema').submenu.items.find((i) => i.checked)?.label), 'Koyu', 'menüde işaretli tema');
 
     step('Octopus P4.2: canlılık (çalışan kol, vantuzlar, atımlar, doluluk, bekleyen kol, mürekkep); azaltılmış harekette ve görünmezken döngü durur');
     const ocStats = () => page.evaluate((id) => { const v = chatsById.get(id).octoView; return { ...v.stats, running: v.running }; }, headChat);
@@ -2352,7 +2522,7 @@ async function waitUntil(fn, ms, msg) {
     await page.fill(C + '.composer-input', 'hafızana bak: witcher');
     await page.press(C + '.composer-input', 'Enter');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Hafızaya baktım')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     const memLog = fakeLog().slice(memMark);
     assert.match(memLog, /^APPEND ".*projenin beyni.*önce `hatirla` ile ara; tahmin etme/m, 'başın sistem istemine hafıza talimatı gitmedi');
     assert.match(memLog, /^APPEND ".*işi kollara böler.*`sessions start` ile bir kola ver/m, 'başın sistem istemine kollara iş verme talimatı gitmedi');
@@ -2398,7 +2568,7 @@ async function waitUntil(fn, ms, msg) {
     await page.fill(C + '.composer-input', 'deftere yaz: witcher reddedildi');
     await page.press(C + '.composer-input', 'Enter');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Deftere yazdım')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     const dfLog = fakeLog().slice(dfMark);
     assert.match(dfLog, /^APPEND ".*önce `hatirla` ile ara.*`defter` aracı.*reddettiğinde `ret`.*`yerine_koy`/m, 'başın sistem istemine defter talimatı gitmedi');
     assert.ok(!/DEFTERPERM/.test(dfLog), 'defter izin sormamalı');
@@ -2477,7 +2647,7 @@ async function waitUntil(fn, ms, msg) {
     assert.match(armCalls[0][0], /^Defter: 2 satır \(açık\)\.\n\n\[D-1 ret\] Witcher 3 arayüz stili \(usturlap ve tombak da\).*\[D-2 zevk\]/s, 'kol defteri okuyamadı: ' + armCalls[0][0]);
     assert.deepEqual(armCalls[1], ['Defteri yalnız baş yazar. Deftere girmesi gereken bir şey varsa raporunda başa öner.', true]);
     assert.equal(dfEvents().length, 7, 'kol deftere yazdı');
-    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host.active .ct-status.busy')
+    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host.active[data-status="busy"]')
       && document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Kollar rapor verdi'), null, { timeout: 15000 });
     await page.evaluate(() => { for (const t of state.tabs.max.filter((x) => x.cwd.endsWith('/WFC'))) closeTab(t, true); });
 
@@ -2497,7 +2667,7 @@ async function waitUntil(fn, ms, msg) {
       await page.fill(C + '.composer-input', text);
       await page.press(C + '.composer-input', 'Enter');
       await page.waitForFunction((d) => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes(d)
-        && !document.querySelector('.acct-pane.active .ct-status.busy'), done, { timeout: 15000 });
+        && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), done, { timeout: 15000 });
     };
     await page.click('.acct.active .octo-row:has-text("WFC")');
     await page.waitForFunction((oc) => state.activeTab.max?.chatId && state.activeTab.max.octopusId === oc, adoptedId, { timeout: 15000 });
@@ -2561,7 +2731,7 @@ async function waitUntil(fn, ms, msg) {
     assert.ok(compCtx.length <= 10000, 'compact çıktısı 10.000 karakteri aştı: ' + compCtx.length);
     assert.match(compCtx, /Bağlamın az önce sıkıştırıldı\. .*`hatirla` ile ara/);
     assert.ok(compCtx.includes('\n[D-1 ret] Witcher 3 arayüz stili (usturlap ve tombak da) ('), 'sıkıştırmadan sonra ret satırı masada değil');
-    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 15000 });
+    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
     await page.waitForSelector(C + '.exam-card.done', { timeout: 20000 }); // başın sıkıştırmasından sonra sınav (P7.2; ayrıntısı kendi adımında)
     const p52d = fakeLog().length;
     await headSend('alt görev: sonra witcher', 'Alt görev bitti: alt görev: sonra witcher');
@@ -2584,7 +2754,7 @@ async function waitUntil(fn, ms, msg) {
     await waitUntil(() => readOctoOf(adoptedId).arms.filter((a) => a.title === 'Defter kolu')[1].brief, 10000, 'kolun görev tanımı yazılmadı');
     assert.equal(readOctoOf(adoptedId).arms.filter((a) => a.title === 'Defter kolu')[1].brief, 'kol deftere baksın', 'görev tanımına defter girdi');
     await waitUntil(async () => (await reported()) > reportedBefore, 15000, 'kolun raporu başa gelmedi');
-    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host.active .ct-status.busy'), null, { timeout: 15000 });
+    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host.active[data-status="busy"]'), null, { timeout: 15000 });
     // Projenin dosyalarına dokunulmadı (İ1)
     assert.deepEqual(kStat(), kBefore, 'içe aktarılan dosyalar değişti');
     await page.evaluate(() => { for (const t of state.tabs.max.filter((x) => x.cwd.endsWith('/WFC'))) closeTab(t, true); });
@@ -2649,7 +2819,7 @@ async function waitUntil(fn, ms, msg) {
     await page.waitForSelector(danisCard, { timeout: 15000 });
     await page.click(danisCard + ' .ghost-btn:text-is("Reddet")');
     await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Geçmişe danıştım')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 20000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 20000 });
     const dLog = fakeLog().slice(p61);
     const dCalls = dLog.split('\n').map((l) => l.match(/^DANISMCP +("(?:[^"\\]|\\.)*")\s*(HATA)?/)).filter(Boolean).map((m) => [JSON.parse(m[1]), !!m[2]]);
     assert.equal(dCalls.length, 6, 'danışma çağrıları: ' + JSON.stringify(dCalls));
@@ -2812,7 +2982,7 @@ async function waitUntil(fn, ms, msg) {
     await page.press(C + '.composer-input', 'Enter');
     const blocked73 = C + '.compact-card.blocked:not(.answered)';
     await page.waitForSelector(blocked73 + ' .rebirth-btn', { timeout: 15000 });
-    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host.active .ct-status.busy'), null, { timeout: 15000 });
+    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host.active[data-status="busy"]'), null, { timeout: 15000 });
     const p73 = fakeLog().length;
     await page.click(blocked73 + ' .rebirth-btn');
     const planCard = C + '.rebirth-card[data-kind="plan"]:not(.answered)';
@@ -3033,7 +3203,7 @@ async function waitUntil(fn, ms, msg) {
     await page2.fill(C + '.composer-input', 'kolları kapat');
     await page2.press(C + '.composer-input', 'Enter');
     await page2.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Kolları kapattım')
-      && !document.querySelector('.acct-pane.active .ct-status.busy'), null, { timeout: 30000 });
+      && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 30000 });
     const closeLog = fakeLog().slice(closeMark);
     const listLine = closeLog.split('\n').find((l) => l.startsWith('KAPATMCP list')) || '';
     assert.match(listLine, /\(kol-15\) · Kol A · rapor verdi/, 'yeniden açılan baş açık kolunu görmedi: ' + listLine);
@@ -3178,6 +3348,7 @@ async function waitUntil(fn, ms, msg) {
 
     step('Ayarlar (P8.1): maliyet eşikleri, kol sınırı, hafıza kapsamı (kapatınca dizinden düşer), ahtapotu olmayan proje, "Hafızayı sil"');
     await page3.click('#settingsBtn');
+    await page3.click('.set-tab[data-tab="octopus"]');
     await page3.waitForSelector('#memScope .set-mem-row:has-text("Kale"):has-text("2 oturum")', { timeout: 10000 });
     await page3.locator('#modal .modal-card').screenshot({ path: path.join(OUT, '8d-ayarlar-octopus.png') }).catch(() => {});
     await page3.locator('#octoSettings').screenshot({ path: path.join(OUT, '8e-ayarlar-octopus-bolum.png') }).catch(() => {});
@@ -3234,7 +3405,7 @@ async function waitUntil(fn, ms, msg) {
     // Hafızası açık proje sonraki taramada yeniden dizinlenir
     await page3.evaluate(() => window.panel.hafizaTara());
     await waitUntil(async () => (await kaleHits()).join() === 'k3', 15000, 'silinen hafıza yeniden kurulmadı');
-    await page3.click('#modalCancel');
+    await page3.click('#modalClose'); // "Vazgeç" yalnız Hesaplar sekmesinde (hesap taslağını bırakır)
     assert.deepEqual(errors, [], 'arayüz hataları');
     assert.deepEqual(await mainErrors(app3), [], 'ana süreç hataları (3)');
     console.log('\n✓ Tüm testler geçti. Ekran görüntüleri: tests/out/');

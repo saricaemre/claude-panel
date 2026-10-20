@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, session, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, session, Notification, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -40,7 +40,7 @@ if (process.env.CLAUDE_PANEL_USER_DATA) app.setPath('userData', process.env.CLAU
 
 const CONFIG_PATH = () => path.join(app.getPath('userData'), 'config.json');
 
-// Sıfırdan kurulumda tek hesap: Claude Code'un varsayılan ayar klasörü (~/.claude; configDir boş). Başka hesaplar Hesap ayarlarından eklenir.
+// Sıfırdan kurulumda tek hesap: Claude Code'un varsayılan ayar klasörü (~/.claude; configDir boş). Başka hesaplar Ayarlar → Hesaplar'dan eklenir.
 const DEFAULT_CONFIG = {
   accounts: [{ id: 'claude', name: 'Claude', note: '', color: '#cdb07a', configDir: '' }],
   recents: {},
@@ -65,6 +65,17 @@ function saveConfig(cfg) {
   // Ortam değişkenleri düz metin durur: dosya yalnız kullanıcıya açık
   fs.writeFileSync(CONFIG_PATH(), JSON.stringify(data, null, 2), { mode: 0o600 });
   try { fs.chmodSync(CONFIG_PATH(), 0o600); } catch {}
+}
+
+// Tema: 'system' (macOS'u izler, varsayılan), 'dark', 'light'. nativeTheme bütün sayfaların prefers-color-scheme'ini belirler:
+// panelin stilleri, claude.ai (Web görünümü), artifact sayfaları ve sohbet içi görseller aynı temaya geçer.
+const THEMES = ['system', 'dark', 'light'];
+const themeOf = (cfg) => (THEMES.includes(cfg.theme) ? cfg.theme : 'system');
+// Pencerenin zemini stillerdeki --canvas ile aynı: açılışta ve geçişte beyaz/siyah çakmasın
+const windowBg = () => (nativeTheme.shouldUseDarkColors ? '#100f0d' : '#efeadf');
+function applyTheme(theme) {
+  nativeTheme.themeSource = theme;
+  if (win && !win.isDestroyed()) win.setBackgroundColor(windowBg());
 }
 
 // SDK'nın platform paketindeki Claude Code ikilisi (paketleme --no-asar: çalıştırılabilir). Testlerde sahte CLI.
@@ -213,6 +224,8 @@ ipcMain.handle('config:save', (_e, patch) => {
   if (Array.isArray(patch.environments)) cfg.environments = environments.sanitize(patch.environments);
   if (typeof patch.keepAwake === 'boolean') cfg.keepAwake = patch.keepAwake;
   if (typeof patch.sidebarHidden === 'boolean') cfg.sidebarHidden = patch.sidebarHidden;
+  if (typeof patch.sidePanelOpen === 'boolean') cfg.sidePanelOpen = patch.sidePanelOpen; // sohbetin sağ yan paneli (yoksa kapalı)
+  if (THEMES.includes(patch.theme)) cfg.theme = patch.theme;
   if (typeof patch.editor === 'string') cfg.editor = patch.editor;
   if (patch.autoCompact === 'ask' || patch.autoCompact === 'allow') cfg.autoCompact = patch.autoCompact;
   if (patch.welcome === 'pending' || patch.welcome === 'done') cfg.welcome = patch.welcome;
@@ -227,6 +240,7 @@ ipcMain.handle('config:save', (_e, patch) => {
   }
   saveConfig(cfg);
   if (typeof patch.keepAwake === 'boolean') chat.updateAwake();
+  if (THEMES.includes(patch.theme)) { applyTheme(patch.theme); buildMenu(); }
   return loadConfig();
 });
 // Ortam düzenleyicisi kaydetmeden önce değişken satırlarını denetletir (biçim kuralları tek yerde: environments.js)
@@ -288,11 +302,22 @@ ipcMain.on('notify', (_e, { title, body }) => {
 
 // ---------- Pencere ----------
 
+// Menüden tema: kaydet, uygula, arayüzdeki ayar penceresine haber ver (açıksa seçimi güncellesin)
+function setTheme(theme) {
+  const cfg = loadConfig();
+  cfg.theme = theme;
+  saveConfig(cfg);
+  applyTheme(theme);
+  buildMenu();
+  sendCmd('theme', theme);
+}
+
 function sendCmd(cmd, arg) {
   if (win && !win.isDestroyed()) win.webContents.send('menu:cmd', cmd, arg);
 }
 
 function buildMenu() {
+  const theme = themeOf(loadConfig());
   const accountItems = loadConfig().accounts.slice(0, 9).map((a, i) => ({
     label: a.name,
     accelerator: `CmdOrCtrl+${i + 1}`,
@@ -321,7 +346,7 @@ function buildMenu() {
         { label: 'Sonraki sekme', accelerator: 'CmdOrCtrl+Alt+Right', click: () => sendCmd('nextTab', 1) },
         { label: 'Önceki sekme', accelerator: 'CmdOrCtrl+Alt+Left', click: () => sendCmd('nextTab', -1) },
         { type: 'separator' },
-        { label: 'Hesap ayarları…', accelerator: 'CmdOrCtrl+,', click: () => sendCmd('settings') },
+        { label: 'Ayarlar…', accelerator: 'CmdOrCtrl+,', click: () => sendCmd('settings') },
       ],
     },
     { role: 'editMenu' },
@@ -333,6 +358,10 @@ function buildMenu() {
         { label: 'Yazıyı büyüt', accelerator: 'CmdOrCtrl+=', click: () => sendCmd('font', 1) },
         { label: 'Yazıyı küçült', accelerator: 'CmdOrCtrl+-', click: () => sendCmd('font', -1) },
         { label: 'Yazı boyutunu sıfırla', accelerator: 'CmdOrCtrl+0', click: () => sendCmd('font', 0) },
+        { type: 'separator' },
+        { label: 'Tema', submenu: [['system', 'Sistem'], ['dark', 'Koyu'], ['light', 'Açık']].map(([id, label]) => ({
+          label, type: 'radio', checked: theme === id, click: () => setTheme(id),
+        })) },
         { type: 'separator' },
         { role: 'togglefullscreen' },
         { label: 'Geliştirici araçları', accelerator: 'Alt+CmdOrCtrl+I', click: () => win?.webContents.toggleDevTools() },
@@ -351,7 +380,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 560,
     title: 'Claude Panel',
-    backgroundColor: '#100f0d',
+    backgroundColor: windowBg(),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: { x: 16, y: 18 },
     webPreferences: {
@@ -468,6 +497,8 @@ app.whenReady().then(() => {
   danis.configure({ getThreshold: () => loadConfig().thresholds?.danis ?? null });
   sinav.configure({ getThreshold: () => loadConfig().thresholds?.sinav ?? null });
   opener.setup({ getEditor: () => loadConfig().editor || '' });
+  applyTheme(themeOf(loadConfig()));
+  nativeTheme.on('updated', () => { if (win && !win.isDestroyed()) win.setBackgroundColor(windowBg()); });
   buildMenu();
   createWindow();
   ipcMain.on('menu:rebuild', buildMenu);

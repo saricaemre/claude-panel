@@ -1,5 +1,5 @@
 // Editörde aç / Finder'da göster: Claude'un `open` aracı ve Değişiklikler bölmesinin düğmeleri.
-// Editör Hesap ayarlarında seçilir (config.json → editor); boşsa kurulu ilk editör, hiçbiri yoksa varsayılan metin düzenleyici.
+// Editör Ayarlar → Genel'de seçilir (config.json → editor); boşsa kurulu ilk editör, hiçbiri yoksa varsayılan metin düzenleyici.
 // Dosya hiçbir zaman çalıştırılmaz: editöre adres ya da `open -a` ile verilir, varsayılan yol `open -t` (metin olarak açar).
 const { ipcMain, shell } = require('electron');
 const { execFile, execFileSync } = require('child_process');
@@ -58,7 +58,7 @@ async function openInEditor(abs, line) {
   const ed = current();
   const ln = st.isFile() && Number.isInteger(line) && line > 0 ? line : null;
   if (ed === DEFAULT) {
-    if (!st.isFile()) throw new Error('Klasörü açacak bir kod editörü bulunamadı; Hesap ayarlarından editör seçin');
+    if (!st.isFile()) throw new Error('Klasörü açacak bir kod editörü bulunamadı; Ayarlar → Genel\'den editör seçin');
     await run('open', ['-t', abs]);
   } else if (ed.url && st.isFile()) await run('open', [fileUrl(ed.url, abs, ln)]);
   else if (ed.xed) await run('xed', [...(ln ? ['--line', String(ln)] : []), abs]);
