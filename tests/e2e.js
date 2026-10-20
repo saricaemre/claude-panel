@@ -592,6 +592,15 @@ async function waitUntil(fn, ms, msg) {
     assert.equal(await page.$eval(CTX, (d) => d.open), false, 'Bağlam bölümü açık başladı');
     await page.click(CTX + ' > summary');
     assert.equal(await page.$eval(CTX, (d) => d.open), true, 'Bağlam bölümü tıklayınca açılmadı');
+    // Tur sonundaki ölçüm: pencerede yer tutan kalemler (ertelenen araçlar sayılmaz); "Yalnız ben çağırırım" skill'leri Claude'un listesinden ayrı
+    await page.waitForSelector(CTX + ' .side-ctx-row');
+    const ctxRows = await page.$$eval(CTX + ' .side-ctx-row', (o) => o.map((x) => x.firstChild.textContent));
+    assert.ok(ctxRows.includes('Skill listesi') && ctxRows.includes('Claude Code araçları'), 'bağlam dökümü: ' + ctxRows);
+    assert.ok(!ctxRows.some((n) => /deferred/i.test(n)), 'ertelenen araçlar bağlamda gösterildi: ' + ctxRows);
+    assert.deepEqual(await page.$$eval(CTX + ' .side-skills-user .side-chip', (o) => o.map((x) => x.textContent)), ['sadece-ben'], 'yalnız kullanıcının çağırdığı skill ayrılmadı');
+    const listedSkills = await page.$$eval(CTX + ' .side-skills .side-chip', (o) => o.map((x) => x.textContent));
+    assert.ok(listedSkills.includes('tasarim') && !listedSkills.includes('sadece-ben'), 'Claude\'un skill listesi: ' + listedSkills);
+    await page.screenshot({ path: path.join(OUT, '4a2-baglam.png') });
     await page.click(CTX + ' > summary');
     await page.click(HOST + '.side-toggle');
     assert.deepEqual(await sideState(), { open: false, shown: false, pressed: 'false' }, 'yan panel düğmeyle kapanmadı');
@@ -2070,6 +2079,17 @@ async function waitUntil(fn, ms, msg) {
     const armTools = [...octoLog.matchAll(/^ARACLAR (.*)$/gm)].map((m) => m[1].split(','));
     assert.equal(armTools.length, 2, 'kolların araçları günlükte yok');
     assert.ok(armTools.every((x) => x.includes('sessions') && !x.includes('wrap_up')), 'kolda wrap_up var: ' + armTools.map(String).join(' | '));
+    // Panelin araçlarından yalnız sık kullanılanlar baştan yüklü, öbürleri araç aramasına ertelenir (artifacts.js → ALWAYS_LOAD);
+    // baş, sistem isteminin andığı araçları da yüklü alır (chat-main.js → HEAD_TOOLS)
+    const loaded = {};
+    for (const [, rol, names, all] of fakeLog().matchAll(/^YUKLU (\w+) (\S*) TUMU (\d+)$/gm)) {
+      (loaded[rol] ||= new Set()).add(names);
+      assert.ok(+all - names.split(',').length >= 5, `${rol}: tarayıcı, simülatör, terminal, editör ve PR ertelenmedi (${names} / ${all})`);
+    }
+    const BASE = 'plan,publish_artifact,show,show_widget';
+    assert.deepEqual(Object.fromEntries(Object.entries(loaded).map(([k, v]) => [k, [...v]])), {
+      sohbet: [BASE + ',wrap_up'], kol: [BASE], bas: ['danis,defter,hatirla,hatirla_oku,plan,publish_artifact,sessions,show,show_widget,wrap_up'],
+    }, 'rol başına yüklü araçlar');
     const octoDir = path.join(OCTO_ROOT, octoTabs.id);
     const readOcto = () => JSON.parse(fs.readFileSync(path.join(octoDir, 'ahtapot.json'), 'utf8'));
     // Kollar turunu bitirdi: "rapor verdi" ve son raporları kayıtta

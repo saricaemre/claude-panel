@@ -485,8 +485,14 @@ function artifactEvent(r) {
   return { id: r.artifact.id, title: r.artifact.title, kind: r.artifact.kind, version: r.version, created: r.created };
 }
 
-// Claude'un artifact yayımlayabilmesi için süreç içi MCP sunucusu ("mcp__panel__publish_artifact")
-async function createMcpServer(sdk, { cwd, accountId, getSessionId, onArtifact, extraTools = () => [] }) {
+// Her sohbette baştan yüklü araçlar. Öbürleri Claude Code'un araç aramasına (ToolSearch) ertelenir: adları listede durur,
+// Claude gerekince şemasını yükler. Hepsi yüklüyken her sohbet ~9 bin token taşıyordu (2026-10-20, gerçek CLI 2.1.300'de getContextUsage;
+// tarayıcı 1,5 bin, simülatör 1,3 bin). Sunucu talimatı (instructions) her zaman bağlamda: ertelenen araçları da tanıtır.
+const ALWAYS_LOAD = ['publish_artifact', 'show_widget', 'show', 'plan', 'wrap_up'];
+
+// Claude'un artifact yayımlayabilmesi için süreç içi MCP sunucusu ("mcp__panel__publish_artifact").
+// load: rolün sistem isteminin andığı araçlar (ahtapotun başı: sessions, hatirla, defter, danis) da yüklü olsun diye
+async function createMcpServer(sdk, { cwd, accountId, getSessionId, onArtifact, extraTools = () => [], load = [] }) {
   const { z } = await import('zod');
   const publish = sdk.tool(
     'publish_artifact',
@@ -543,6 +549,7 @@ async function createMcpServer(sdk, { cwd, accountId, getSessionId, onArtifact, 
       return { content: [{ type: 'text', text: `"${args.title}" sohbette gösterildi` }] };
     }
   );
+  const always = new Set([...ALWAYS_LOAD, ...load]);
   return sdk.createSdkMcpServer({
     name: 'panel',
     version: '1.0.0',
@@ -552,8 +559,7 @@ async function createMcpServer(sdk, { cwd, accountId, getSessionId, onArtifact, 
       'Kullanıcının terminal sekmelerini terminal ile okuyabilir, değişiklikleri ya da bir dosyayı show ile yan bölmede gösterebilirsin. ' +
       'Bağımsız bir işi sessions ile ayrı bir yan oturuma devredebilirsin. ' +
       'Projenin geçmiş oturumlarında (sıkıştırmayla bağlamdan düşenler dahil) kelimesi kelimesine aramak için hatirla.',
-    tools: [publish, widget, ...extraTools(z)],
-    alwaysLoad: true,
+    tools: [publish, widget, ...extraTools(z)].map((t) => (always.has(t.name) ? { ...t, _meta: { ...t._meta, 'anthropic/alwaysLoad': true } } : t)),
   });
 }
 

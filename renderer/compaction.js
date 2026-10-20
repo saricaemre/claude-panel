@@ -151,5 +151,5 @@ async function offerRetention(tab) {
 
 // ---------- Olaylar ----------
 
-window.panel.onChatContext((id, u) => { const tab = chatsById.get(id); if (tab && u) { setContextUsage(tab, u); tab.octoView?.refresh(); } });
+window.panel.onChatContext((id, u) => { const tab = chatsById.get(id); if (tab && u) { setContextUsage(tab, u); updateContext(tab); tab.octoView?.refresh(); } });
 window.panel.onCompactBlocked((id, info) => { const tab = chatsById.get(id); if (tab) showCompactBlocked(tab, info); });

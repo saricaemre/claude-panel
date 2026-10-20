@@ -125,6 +125,14 @@ rl.on('line', async (line) => {
     if (sub === 'initialize') hookReg = m.request.hooks || {};
     // Sistem istemine ek (systemPrompt.append): SDK initialize'da appendSystemPrompt olarak verir; başta hafıza talimatı (P3.2)
     if (sub === 'initialize') log('APPEND', JSON.stringify(m.request.appendSystemPrompt ?? null));
+    // Panelin baştan yüklü araçları (_meta anthropic/alwaysLoad; öbürleri araç aramasına ertelenir): YUKLU <rol> <ad,…>
+    // SDK araç listesini initialize'da sdkMcpServerManifests ile verir; rol sistem isteminin ekinden
+    if (sub === 'initialize' && m.request.sdkMcpServerManifests?.panel) {
+      const ap = String(m.request.appendSystemPrompt || '');
+      const rol = ap.startsWith('Bu sohbet, Claude Panel\'de projenin beyni') ? 'bas' : ap.startsWith('Bu sohbet bir Octopus kolu') ? 'kol' : 'sohbet';
+      const tools = m.request.sdkMcpServerManifests.panel.toolsListResult?.tools || [];
+      log('YUKLU', rol, tools.filter((x) => x._meta?.['anthropic/alwaysLoad']).map((x) => x.name).sort().join(','), 'TUMU', tools.length);
+    }
     if (sub === 'initialize') skillNames = skillState().commands.map((c) => c.name).join(',');
     if (sub === 'initialize') response = { commands: skillState().commands, models: [
       { value: 'opus', displayName: 'Opus 5.5', description: 'En güçlü', supportsEffort: true, supportedEffortLevels: ['low','medium','high','xhigh','max'] },
@@ -149,6 +157,8 @@ rl.on('line', async (line) => {
         isAutoCompactEnabled: true, autoCompactThreshold: Math.round(max * 0.967), apiUsage: null };
       const sk = skillState();
       response.skills = { totalSkills: sk.frontmatter.length, includedSkills: sk.frontmatter.length, tokens: sk.frontmatter.reduce((n, x) => n + x.tokens, 0), skillFrontmatter: sk.frontmatter };
+      response.categories.unshift({ name: 'System tools', tokens: 15575, color: 'gray', kind: 'used' }, { name: 'Skills', tokens: response.skills.tokens, color: 'yellow', kind: 'used' },
+        { name: 'MCP tools (deferred)', tokens: 270000, color: 'gray', isDeferred: true, kind: 'deferred' });
     }
     if (sub === 'get_usage') {
       const at = (h) => new Date(Date.now() + h * 3600e3).toISOString();

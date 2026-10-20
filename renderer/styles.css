@@ -833,6 +833,10 @@ body[data-page="artifacts"] .acct-pane { display: none !important; }
 .side-chips { display: flex; gap: 5px; flex-wrap: wrap; }
 .side-chip { font-size: 12px; color: var(--soft); background: var(--hover); border: 1px solid var(--hair); border-radius: 999px; padding: 2px 9px; }
 .side-chip.off { opacity: .5; text-decoration: line-through; }
+.side-chip.user { color: var(--faint); background: transparent; border-style: dashed; }
+.side-ctx { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+.side-ctx-row { display: flex; justify-content: space-between; gap: 12px; color: var(--soft); }
+.side-ctx-n { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .session-list { display: flex; flex-direction: column; margin-top: 12px; border: 1px solid var(--hair-2); border-radius: 12px; max-height: 60vh; overflow-y: auto; }
 .session-row { display: flex; align-items: center; gap: 8px; padding: 9px 10px 9px 14px; border-top: 1px solid var(--hair); }

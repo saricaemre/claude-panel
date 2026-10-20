@@ -32,6 +32,10 @@ function summarize(r) {
     maxTokens: r.rawMaxTokens || r.maxTokens || null,
     autoCompact: r.isAutoCompactEnabled !== false,
     threshold: r.autoCompactThreshold ?? null,
+    // Yan paneldeki Bağlam dökümü (renderer/chat.js → updateContext): pencerede yer tutan kalemler ve Claude'un skill listesi.
+    // Ertelenen araçlar (kind 'deferred'), boş yer ve sıkıştırma payı bağlamda değil.
+    categories: (r.categories || []).filter((c) => c.kind === 'used' && c.tokens > 0).map((c) => ({ name: String(c.name), tokens: c.tokens })),
+    skills: r.skills ? { tokens: r.skills.tokens || 0, listed: (r.skills.skillFrontmatter || []).map((s) => ({ name: String(s.name), tokens: s.tokens || 0 })) } : null,
   };
 }
 

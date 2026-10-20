@@ -34,6 +34,9 @@ const loadSdk = () => (sdkPromise ||= import('@anthropic-ai/claude-agent-sdk'));
 let getAutoAllowMcp = () => [];
 const autoAllowTools = () => getAutoAllowMcp().map((s) => `mcp__${s}`);
 
+// Ahtapotun başında yüklü kalan panel araçları (sistem istemi bunları anar: octopus/hafiza/defter.js → HEAD_PROMPT)
+const HEAD_TOOLS = ['sessions', 'hatirla', 'hatirla_oku', 'defter', 'danis'];
+
 // ---------- Bağlayıcılar (MCP sunucuları) ----------
 // Claude Code bir sunucuyu kapatınca hesabın .claude.json dosyasında, projenin kaydındaki
 // disabledMcpServers listesine yazar (/mcp disable ile aynı). Proje anahtarı klasörün git köküdür
@@ -275,7 +278,10 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
           ask: ({ title, input, signal }) => openCard({ toolName: 'mcp__panel__danis', input, title, signal }).then((r) => r.behavior === 'allow'),
         }),
       ];
-      const panelMcp = await artifacts.createMcpServer(sdk, { cwd: dir, accountId, getSessionId: () => sessionId, onArtifact, extraTools });
+      // Panelin araçlarından yalnız sık kullanılanlar yüklü, öbürleri araç aramasına ertelenir (artifacts.js → ALWAYS_LOAD);
+      // başın sistem istemi kolları, hafızayı, defteri ve danışmayı andığı için başta onlar da yüklü
+      const load = wantOctopus && !worktree && !parentId ? HEAD_TOOLS : [];
+      const panelMcp = await artifacts.createMcpServer(sdk, { cwd: dir, accountId, getSessionId: () => sessionId, onArtifact, extraTools, load });
       // Ahtapotun başı (octopus.js): yeni ahtapot ('new') ya da "Devam et" ile açılan baş (ahtapot kimliği).
       // Ayrı kopyada açılmaz: kopya kapanınca silinir, baş oraya geri dönemezdi. Sistem istemi (hafıza talimatı) buna bağlı olduğu için
       // seçeneklerden önce; arada await yok, sohbet kaydıyla (chats.set) aynı eşzamanlı adımda kalır.
@@ -408,7 +414,7 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
       // İlk mesaj devir notudur; ilk tur bitince döner. Panelin MCP sunucusu yeni süreç için yeniden kurulur.
       c.rebirth = async (text) => {
         const old = { q: c.q, queue: c.queue };
-        const mcp = await artifacts.createMcpServer(sdk, { cwd: dir, accountId, getSessionId: () => sessionId, onArtifact, extraTools });
+        const mcp = await artifacts.createMcpServer(sdk, { cwd: dir, accountId, getSessionId: () => sessionId, onArtifact, extraTools, load });
         const o = { ...options, mcpServers: { panel: mcp } };
         delete o.resume;
         delete o.continue;

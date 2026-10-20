@@ -793,18 +793,48 @@ function updateProgress(tab, todos) {
   updatePlanBar(tab);
 }
 
+// Bağlam bölümü: klasör, ortam, pencerede yer tutan kalemler, MCP sunucuları, skill'ler. Döküm tur sonundaki ölçümden (compaction.js → summarize).
+// init'in skills'i Claude Code'un bildiği bütün skill'lerdir; "Yalnız ben çağırırım" yapılanlar ve yazarın kullanıcıya bıraktıkları Claude'un
+// listesine girmez, bağlamda yer tutmaz (2026-10-20, gerçek CLI'de ölçüldü). Ölçüm gelince ikisi ayrı gösterilir.
+const CTX_NAMES = { 'System prompt': 'Sistem istemi', 'System tools': 'Claude Code araçları', 'MCP tools': 'MCP araçları', 'MCP server instructions': 'MCP talimatları',
+  'Memory files': 'CLAUDE.md ve bellek', 'Skills': 'Skill listesi', 'Custom agents': 'Ajanlar', 'Messages': 'Konuşma' };
+
 function updateContext(tab, init) {
+  if (init) tab.ctxInit = init;
+  init = tab.ctxInit || {};
+  const u = tab.context;
   const rows = [h('div', { class: 'side-row' }, icon('folder', 14), tilde(init.cwd || tab.cwd))];
   if (tab.envName) rows.push(h('div', { class: 'side-row' }, icon('box', 14), `Ortam: ${tab.envName}`));
+  if (u?.categories?.length) {
+    rows.push(h('div', { class: 'side-label' }, u.totalTokens ? `Bağlamda ~${fmtTokens(u.totalTokens)} token` : 'Bağlamda'));
+    rows.push(h('div', { class: 'side-ctx' }, ...[...u.categories].sort((a, b) => b.tokens - a.tokens).map((c) =>
+      h('div', { class: 'side-ctx-row' }, h('span', {}, CTX_NAMES[c.name] || c.name), h('span', { class: 'side-ctx-n' }, fmtTokens(c.tokens))))));
+  }
   const mcp = init.mcp_servers || [];
   if (mcp.length) {
     rows.push(h('div', { class: 'side-label' }, 'MCP sunucuları'));
     rows.push(h('div', { class: 'side-chips' }, mcp.map((s) =>
       h('span', { class: 'side-chip' + (s.status === 'connected' ? '' : ' off'), title: s.status }, s.name))));
   }
-  if ((init.skills || []).length) {
-    rows.push(h('div', { class: 'side-label' }, `Skill'ler (${init.skills.length})`));
-    rows.push(h('div', { class: 'side-chips' }, init.skills.slice(0, 30).map((s) => h('span', { class: 'side-chip' }, s))));
+  const all = init.skills || [];
+  const listed = u?.skills?.listed;
+  if (listed) {
+    // Claude Code aynı skill'i iki yerde farklı adla verebilir (listede "anthropic-skills:deep-research", init'te "deep-research")
+    const tail = (n) => n.slice(n.lastIndexOf(':') + 1);
+    const seen = new Set(listed.flatMap((s) => [s.name, tail(s.name)]));
+    const userOnly = all.filter((n) => !seen.has(n) && !seen.has(tail(n)));
+    if (listed.length) {
+      rows.push(h('div', { class: 'side-label' }, `Claude'un skill listesinde (${listed.length}) · ~${fmtTokens(u.skills.tokens)} token`));
+      rows.push(h('div', { class: 'side-chips side-skills' }, listed.map((s) => h('span', { class: 'side-chip', title: `${s.tokens} token` }, s.name))));
+    }
+    if (userOnly.length) {
+      rows.push(h('div', { class: 'side-label', title: 'Claude kendiliğinden kullanmaz, adlarını da görmez; /ad ile çağrılınca yüklenir' },
+        `Yalnız /ad ile çağrılanlar (${userOnly.length}) · bağlamda yer tutmaz`));
+      rows.push(h('div', { class: 'side-chips side-skills-user' }, userOnly.map((n) => h('span', { class: 'side-chip user' }, n))));
+    }
+  } else if (all.length) {
+    rows.push(h('div', { class: 'side-label' }, `Skill'ler (${all.length})`));
+    rows.push(h('div', { class: 'side-chips' }, all.map((s) => h('span', { class: 'side-chip' }, s))));
   }
   if ((init.agents || []).length) {
     rows.push(h('div', { class: 'side-label' }, 'Ajanlar'));

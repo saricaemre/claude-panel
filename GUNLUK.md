@@ -5,6 +5,58 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 
 ---
 
+## 2026-10-20 — Bağlam yükü: panelin araçları ertelenir, yan panelde gerçek döküm
+
+**İstek:** Emre: yan paneldeki Bağlam bölümünde her oturumda 50 skill'lik bir liste var. "Yalnız ben çağırırım" yaptıkları da her oturumda yüklenip bağlamı şişiriyor mu? Paneli token israf etmeden kullanmak istiyor.
+
+**Ölçüm** (gerçek CLI 2.1.300, Max hesabı, Kızıl Elma, mesaj göndermeden `getContextUsage`, 0 token): "Yalnız ben çağırırım" yapılan 15 skill Claude'un skill listesine **girmiyor**. Listede 32 skill var, ~5,8 bin token. Yan panel ise `init.skills`'i, yani Claude Code'un bildiği bütün skill'leri gösteriyordu. Asıl israf panelin kendisindeydi: MCP sunucusu `alwaysLoad: true` olduğu için 15 aracı her sohbete baştan yükleniyordu (~9 bin token; tarayıcı 1.528, simülatör 1.274, sessions 911, defter 747). Sabit yük: normal sohbet 47.369 → 40.423 token (−6.946), baş −4.200.
+
+**Yapılan:**
+- `artifacts.js` → `ALWAYS_LOAD` (`publish_artifact`, `show_widget`, `show`, `plan`, `wrap_up`) araç başına `_meta['anthropic/alwaysLoad']` ile yüklü kalıyor. Ahtapotun başında `chat-main.js` → `HEAD_TOOLS` da (`sessions`, `hatirla`, `hatirla_oku`, `defter`, `danis`) yüklü, çünkü başın sistem istemi bunları anıyor. Öbürleri Claude Code'un araç aramasına ertelenir. Yeniden doğuşta da aynı liste kullanılır.
+- Yan paneldeki Bağlam bölümü, tur sonundaki ölçümle (`compaction.js` → `summarize`: `categories`, `skills`) şunları gösteriyor:
+  - pencerede yer tutan kalemler (sistem istemi, Claude Code araçları, MCP araçları ve talimatları, CLAUDE.md ve bellek, skill listesi, konuşma);
+  - "Claude'un skill listesinde (N) · ~X token";
+  - ayrıca "Yalnız /ad ile çağrılanlar (M) · bağlamda yer tutmaz".
+- Sahte CLI: initialize'daki `sdkMcpServerManifests`'ten `YUKLU <rol> <adlar> TUMU <n>`; bağlam yanıtında `System tools`, `Skills` ve ertelenen bir kalem var.
+
+**Kararlar:**
+- Ertelenen araçları Claude adlarından ve sunucu talimatından tanır; gerekince ToolSearch ile yükler (Claude masaüstü uygulaması da böyle yapıyor).
+- Ortak ayar panel dışındaki Claude Code'u da etkilediği için Emre'ye soruldu. Seçtiği grup uygulandı: `~/.claude/settings.json` → `skillOverrides`'ta `built-in-browser`, `chrome-browser`, `computer-use` artık `user-invocable-only`. Üçü de claude.ai'den eşitlenen skill'ler; masaüstü uygulamasının tarayıcısını, Chrome eklentisini ve bilgisayar kullanımını anlatıyorlar, bu araçlar panelde yok. Skill listesi 32 → 29, 5.815 → 4.946 token.
+- Aynı gruptaki `cowork-plugin-management` claude.ai'den eşitlenen bir eklenti. `enabledPlugins` ile kapanmadı (beş kimlik geçici bayrakla denendi); claude.ai'den kaldırılması gerekiyor.
+- Kızıl Elma'nın dosyalarına dokunulmadı.
+- **Ölçüm tuzağı:** mesajsız `getContextUsage`'ın toplamı skill değişikliğini yansıtmıyor (§5). "Yalnız ben çağırırım" gerçek istekle ayrıca doğrulandı: girişsiz geçici ayar klasörü + yerel sahte API, 0 token. `user-invocable-only` ve `off` skill'ler istek gövdesinde yok.
+
+**Doğrulama:**
+- Gerçek CLI'de önce/sonra ölçümü (yukarıdaki sayılar). Normal sohbette 5 araç yüklü; başta 10.
+- `npm run check`.
+- e2e'de iki yeni adım:
+  - yan panelde döküm satırları, ertelenen kalemin gösterilmemesi, `sadece-ben`'in ayrı listede durması (ekran görüntüsü `4a2-baglam.png`);
+  - rol başına yüklü araçlar (sohbet / kol / baş).
+- İki yeni assert birer kez bilerek bozuldu, ikisi de kırmızıya döndü: ölçümden `skills` atıldı; `browser` hep yüklü yapıldı.
+- `npm test` 5 koşu, son koşu baştan sona geçti. Öbür düşüşler:
+  - 2. koşu: benim eşiğim yanlıştı (başta 15 araçtan 5'i erteleniyor), düzeltildi.
+  - 1. ve 3. koşu: tarayıcının indirme adımı. §7'deki bilinen yarış; `navigate`'ten hemen sonra okunan konsol, `will-download`'dan önce kalıyor.
+  - 4. koşu: sonda "arayüz hataları" (`claude.ai/directory` webview yüklemesi -3 ile iptal). Bu da §7'deki bağlayıcı menüsü kararsızlığı; nedeni ilk kez kayda geçti.
+  - Bu değişiklik o yollara dokunmuyor.
+
+**Bekleyen:** Gerçek hesapla bir turda Claude'un ertelenen bir aracı (ör. tarayıcı) ToolSearch ile yükleyip kullandığının görülmesi.
+
+---
+
+## 2026-10-20 — Tanıtım videosu (HyperFrames)
+
+**İstek:** Emre: panelin güzel özelliklerini öne çıkaran, en çok 25 saniyelik, HyperFrames ile üretilmiş bir tanıtım videosu.
+
+**Yapılan:** `docs/tanitim/` (HyperFrames 0.8.181 projesi; ürün kodu değil, `kur.sh` paketlemez). 24,5 sn, 1920×1080, 60 kare/sn, altı sahne: logo (✳ kıvılcımı, yaldız çizgi) → üç hesap (çizgiden doğan üç küre, hesap ışıkları, ayar klasörleri; küreler pencerenin kenar çubuğundaki yerlerine uçar) → sohbet (pencere ekranı doldurur, mesaj yazılır, görev kartı 3/3, yanıt akar, yazma kutusunun ışığı döner) → ahtapot düğmesine dalış ve Octopus (kollar `renderer/octopus.js`'in geometrisiyle büyür, raporlar ışık olarak başa akar, bağlam dolar; mürekkeple sıkıştırma, bağlam %4'e iner, defter kartları kalır, "Sınav 9/10") → sekiz özellik kartı (simülatör, tarayıcı, terminal, değişiklikler, PR/CI, Artifacts, ayrı kopya, skill/MCP; her biri kendi küçük animasyonuyla) → "Gece ve Şampanya" / alttan doğan güneşle "Gün ve Şampanya" / yukarıdan çöken geceyle kapanış logosu. Müzik ve efektler `ses/uret.mjs`'te dış kaynaksız sentez (pad akorları, sahne geçişlerinde whoosh ve bas vuruşu, olaylarda zil), -16 LUFS.
+
+**Kararlar:** Ekran görüntüsü yerine arayüz HTML ile yeniden çizildi (her ölçekte keskin, hareket verilebilir). Renkler `styles.css`'in değişkenleri. Örnek metinler kurgusal ("Kapı Projesi"); gerçek proje adı ve hesap bilgisi yok. Çıktılar (`out/`) depoya girmez.
+
+**Doğrulama:** `hyperframes lint`: 0 hata (10 uyarı: iç içe sahne yapısı yalnız Studio görünümünü etkiler; yaldız geçişi `offsetLeft` ölçer, harflerin dönüşümünden etkilenmez). `ffprobe`: 24,5 sn, h264 1080p60 + aac; ebur128 -16,0 LUFS; son kare siyah. Her sahneden ffmpeg ile kare alınıp bakıldı; ilk taslakta yakalanan ve düzeltilenler: sohbet penceresi küçük kalıyordu (kamera yakın plana alındı), küreler pencerenin altında kalıyordu (katman sırası), dalışta eski mesaj ahtapotun başına biniyordu, daire açılışlarında ortada nokta asılı kalıyordu (gün doğuşu / gece çöküşü açılışına çevrildi), kol etiketleri kıvrık uçlara biniyordu.
+
+**Bekleyen:** Emre'nin izleyip görsel ve ses onayı (ses dinlenerek denetlenmedi; yalnız ölçüldü).
+
+---
+
 ## 2026-10-20 — Ahtapotun kapanan kolları kenar çubuğundan kalkar
 
 **İstek:** Emre: kenar çubuğundaki ahtapot kollarını sağ tıkla kendim kapatabilmeliyim; ahtapotta kol kapanınca kenar çubuğunda da kendiliğinden kapanmalı. (Ekran görüntüsünde Kızıl Elma'nın "bitti" ve "kesildi" kolları listede duruyordu; sekmesi kapalı "bitti" kolda "Kolu kapat" yoktu.)
