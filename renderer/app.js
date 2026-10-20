@@ -37,8 +37,8 @@ const tabsById = new Map();
 const pendingData = new Map();
 
 const TERM_THEME = {
-  background: '#252422', foreground: '#eeece5', cursor: '#d97757', cursorAccent: '#252422',
-  selectionBackground: '#4a453d',
+  background: '#100f0d', foreground: '#f2ecdf', cursor: '#cdb07a', cursorAccent: '#100f0d',
+  selectionBackground: '#3d3527',
   black: '#2a2824', red: '#e5645a', green: '#8fbf7f', yellow: '#e2b86b', blue: '#7aa2f7',
   magenta: '#c49be0', cyan: '#6fc1c1', white: '#d8d3ca',
   brightBlack: '#6b665d', brightRed: '#f07f75', brightGreen: '#a6d494', brightYellow: '#f0cd8a',
@@ -331,7 +331,8 @@ function renderLauncher(acctId) {
         : null,
       h('div', { class: 'new-hero' },
         h('span', { class: 'new-mark' }, '✳'),
-        h('h1', { class: 'new-title' }, `${greeting()}, ne üzerinde çalışalım?`)),
+        // Selam üstte altın italik, soru altında (styles.css → .new-title em)
+        h('h1', { class: 'new-title' }, h('em', {}, `${greeting()},`), ' ne üzerinde çalışalım?')),
       composer,
       // Kimlik satırı: hangi hesap, hangi ayar klasörü (klasör zaten yazma kutusunda)
       h('div', { class: 'new-hint' },
@@ -851,7 +852,8 @@ function ensureWebview(acctId, startUrl = 'https://claude.ai/new') {
 
 // ---------- Ayarlar ----------
 
-const COLORS = ['#3f9b84', '#d97757', '#7c7ce0', '#e2b86b', '#c49be0', '#6fc1c1'];
+// Yeni hesaplara sırayla verilen renkler: zümrüt, kil, safir, şampanya, ametist, turkuaz
+const COLORS = ['#4c9f86', '#d97757', '#6a86d8', '#cdb07a', '#a585d4', '#5fb3b3'];
 
 function openSettings() {
   const form = $('#acctForm');

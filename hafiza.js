@@ -329,6 +329,10 @@ async function refreshCoverage(accountId, key) {
 async function wipe() {
   const release = await hold();
   try {
+    // Silmeden önce kurulmuş tarama (zamanlayıcı ya da beklerken gelen istek) silinen dizini ve arşivi hemen yeniden kurmasın;
+    // yoksa silmeden ~0,1 sn sonra patlayıp arşivi geri yazıyordu. Yeniden kurulum bir sonraki taramada (tur sonu, değişiklik).
+    clearTimeout(soonTimer);
+    again = false;
     const w = worker;
     worker = null;
     if (w) await w.terminate().catch(() => {});

@@ -130,20 +130,22 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 
 const DOC_CSS = `
   :root { color-scheme: dark; }
-  html, body { margin: 0; background: #262624; color: #ece9e1; }
-  body { font: 17px/1.7 ui-serif, "New York", Charter, Georgia, serif; padding: 48px 56px 64px; max-width: 820px; margin: 0 auto; }
-  h1, h2, h3, h4 { line-height: 1.3; font-weight: 600; margin: 1.3em 0 .5em; }
-  h1 { font-size: 2em; margin-top: 0; letter-spacing: -.01em; } h2 { font-size: 1.45em; } h3 { font-size: 1.15em; }
-  a { color: #9fb7ff; }
-  code { font: .82em "SF Mono", ui-monospace, Menlo, monospace; background: #1f1e1d; border: 1px solid #3b3a37; border-radius: 6px; padding: 1px 6px; color: #f0937a; }
-  pre { background: #1f1e1d; border: 1px solid #3b3a37; border-radius: 12px; padding: 14px 16px; overflow-x: auto; }
-  pre code { background: none; border: 0; padding: 0; color: #d6d2c8; font-size: 13.5px; line-height: 1.55; }
+  html, body { margin: 0; background: #100f0d; color: #ece5d6; }
+  body { font: 17px/1.7 ui-serif, "New York", Charter, Georgia, serif; padding: 52px 56px 64px; max-width: 820px; margin: 0 auto; }
+  h1, h2, h3, h4 { line-height: 1.3; font-weight: 600; margin: 1.3em 0 .5em; color: #f2ecdf; }
+  h1, h2 { font-family: Didot, "Bodoni 72", ui-serif, serif; font-weight: 400; line-height: 1.15; }
+  h1 { font-size: 2.6em; margin-top: 0; } h2 { font-size: 1.7em; } h3 { font-size: 1.15em; }
+  a { color: #f1dfb4; text-decoration-color: rgba(205, 176, 122, .45); text-underline-offset: 3px; }
+  code { font: .82em "SF Mono", ui-monospace, Menlo, monospace; background: #0c0b0a; border: 1px solid rgba(234, 216, 178, .12); border-radius: 6px; padding: 1px 6px; color: #e6c68e; }
+  pre { background: #0c0b0a; border: 1px solid rgba(234, 216, 178, .12); border-radius: 14px; padding: 14px 16px; overflow-x: auto; }
+  pre code { background: none; border: 0; padding: 0; color: #ddd5c5; font-size: 13.5px; line-height: 1.55; }
   table { border-collapse: collapse; font: 14px -apple-system, sans-serif; margin: 1em 0; }
-  th, td { border-bottom: 1px solid #3b3a37; padding: 8px 16px 8px 0; text-align: left; }
-  blockquote { margin: 0 0 1em; padding-left: 16px; border-left: 3px solid #4a4945; color: #a6a39b; }
-  hr { border: 0; border-top: 1px solid #3b3a37; margin: 2em 0; }
+  th, td { border-bottom: 1px solid rgba(234, 216, 178, .12); padding: 8px 16px 8px 0; text-align: left; }
+  th { font-size: .78em; letter-spacing: .1em; text-transform: uppercase; color: #9a7f4f; }
+  blockquote { margin: 0 0 1em; padding-left: 16px; border-left: 2px solid #9a7f4f; color: #a1998a; font-style: italic; }
+  hr { border: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(234, 216, 178, .2), transparent); margin: 2em 0; }
   img { max-width: 100%; border-radius: 8px; }
-  li::marker { color: #a6a39b; }
+  li::marker { color: #9a7f4f; }
 `;
 
 function mdPage(title, content) {
@@ -156,10 +158,10 @@ function codePage(title, content, lang) {
   const lines = content.replace(/\n$/, '').split('\n');
   const rows = lines.map((l, i) => `<tr><td class="n">${i + 1}</td><td class="c">${esc(l) || ' '}</td></tr>`).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
-    html, body { margin: 0; background: #1f1e1d; color: #d6d2c8; }
-    .bar { font: 12px -apple-system, sans-serif; color: #8a877f; padding: 14px 20px 6px; text-transform: uppercase; letter-spacing: .06em; }
+    html, body { margin: 0; background: #0c0b0a; color: #ddd5c5; }
+    .bar { font: 600 10px -apple-system, sans-serif; color: #9a7f4f; padding: 16px 20px 8px; text-transform: uppercase; letter-spacing: .18em; }
     table { border-collapse: collapse; font: 13px/1.6 "SF Mono", ui-monospace, Menlo, monospace; width: 100%; }
-    td.n { color: #5c5a55; text-align: right; padding: 0 14px 0 20px; user-select: none; width: 1%; white-space: nowrap; vertical-align: top; }
+    td.n { color: #5a5348; text-align: right; padding: 0 14px 0 20px; user-select: none; width: 1%; white-space: nowrap; vertical-align: top; }
     td.c { white-space: pre-wrap; word-break: break-word; padding-right: 20px; }
   </style></head><body><div class="bar">${esc(lang || 'kod')}</div><table>${rows}</table></body></html>`;
 }
@@ -193,8 +195,9 @@ const notFound = () => new Response('Bulunamadı', { status: 404, headers: { 'co
 const widgets = new Map(); // anahtar -> sayfa
 const WIDGET_MAX = 300;
 const WIDGET_HEAD = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<style>:root{color-scheme:dark;--text:#eeece5;--soft:#d3d0c7;--muted:#a19e95;--faint:#6f6c65;--clay:#d97757;--accent:#d97757;
---bg:#252422;--bg-2:#1f1e1c;--bg-3:#2e2d2a;--line:rgba(236,230,214,.13);--line-soft:rgba(236,230,214,.075);--danger:#e5645a;--warn:#e2b86b;--ok:#8fbf7f;
+<style>:root{color-scheme:dark;--text:#f2ecdf;--soft:#d4cdbd;--muted:#a1998a;--faint:#6c6558;--clay:#cdb07a;--accent:#cdb07a;--gold:#cdb07a;
+--bg:#100f0d;--bg-2:#0c0b0a;--bg-3:#1a1815;--line:rgba(234,216,178,.12);--line-soft:rgba(234,216,178,.07);--danger:#df5f55;--warn:#e8955c;--ok:#8fbf7f;
+--display:Didot,"Bodoni 72",ui-serif,serif;--serif:ui-serif,"New York",Georgia,serif;
 --ui:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;--mono:"SF Mono",Menlo,monospace}
 html,body{margin:0;background:transparent;color:var(--text);font:14px/1.5 var(--ui)}</style>
 <script>(()=>{const say=(m)=>parent.postMessage(Object.assign({__panelWidget:1},m),'*');

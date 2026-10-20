@@ -5,6 +5,29 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 
 ---
 
+## 2026-10-20 — Yeni görsel dil: "Gece ve Şampanya"
+
+**İstek:** Emre: panelin tasarımını değiştir, hayal gücünü kullan, sınır yok; çok şık, sade, göz alıcı bir asalet.
+
+**Yapılan:** Düzen (yerleşim, bileşenler, davranış) aynı kaldı; renk, yazı ve doku baştan yazıldı. Ağırlık `renderer/styles.css`'in `:root`'unda: bileşenler zaten değişkenlerden besleniyordu.
+- **Renk:** zemin oniks (`--ink` #0a0908, `--canvas` #100f0d), yazı fildişi (#f2ecdf), çizgiler altına çalan fildişinin saydam tonları. Tek vurgu şampanya altını (`--gold` #cdb07a); eski `--clay` adı artık ona bağlı, bütün eski kurallar kendiliğinden altına döndü. Yaldız (`--gilt`, açık-koyu-açık altın geçişi) yalnız birkaç yerde: gönder düğmesi (yuvarlak mücevher), birincil düğmeler, "Yeni sohbet" artısı, açık anahtarlar, kullanım çubuğu, biten görev kutuları. Uyarı rengi altınla karışmasın diye kehribar-turuncu oldu (`--warn` #e8955c).
+- **Yazı:** büyük başlıklar Didot (`--display`; her Mac'te var, Türkçe harfleri kapsıyor, `fc-list` ile bakıldı): yeni sohbet ekranı, sohbetin boş ekranı, Artifacts, pencere başlıkları, Claude'un yanıtındaki h1/h2, bölme başlıkları, marka. Yanıtlar Source Serif'te kaldı. Küçük bölüm etiketleri (Hesaplar, Son klasörler, menü ve yan panel başlıkları, tablo başlıkları) aralıklı büyük harf, altın tonunda, ardından sönen ince bir çizgi.
+- **Dokunuşlar:** zeminde çok ince bir gren (`--grain`, SVG gürültüsü data URI'si; CSP `img-src data:` izinli). Kenar çubuğunun sağında yaldızlı bir dikiş, sekme şeridinin altında ortası parlak yaldız bir çizgi, etkin sekmenin altında ışıklı küçük bir altın çizgi. Hesap avatarları madalyon (yuvarlak, Didot harf, hesabın renginde halka; etkinde dolu ve parlak). Hesap ışığı (`.aura`) mum ışığı gibi daha toplu ve altına bir altın pus. Kartlar (izin, sıkıştırma, tur sonu) koyu cam, üst kenarlarında ortası parlak yaldız çizgi. Menüler ve bildirim buzlu cam.
+- **Göz alıcı an:** yeni sohbet ekranında yavaşça dönen altın ✳, üstte yaldız italik selam ("İyi geceler,"), altında büyük Didot soru; selamın üstünden 7 sn'de bir ışık geçer. Sohbetin boş ekranında klasör adı aynı yaldız italik. `prefers-reduced-motion`'da hepsi durur.
+- Uyum için: terminal teması (app.js), pencere zemini (main.js `backgroundColor`), sohbet içi görsellerin tema değişkenleri (`--accent` artık altın) ve Markdown/kod artifact sayfaları (artifacts.js) aynı palete geçti. Yeni hesap renkleri mücevher tonları; varsayılan tek hesabın rengi altın.
+
+**Kararlar:** Yeni bağımlılık yok (Didot sistem yazısı). Ahtapot kendi bakır renklerinde kaldı (Emre'nin onayladığı taslak). Yeşil "bitti" rengi ve hesapların kendi renkleri değişmedi.
+
+**Tuzak:** `background-clip: text` (yaldız yazı) yalnız kutunun içini boyar; satır aralığı dar olunca "İ"nin noktası kutunun dışında kalıp görünmüyordu (ilk ekran görüntüsünde "Iyi geceler"). Yaldız yazıya üstten boşluk ve daha geniş satır aralığı verildi.
+
+**Yan bulgu, hafıza silmede yarış (`hafiza.js` → `wipe`):** e2e yeni görünümle üç kez aynı yerde düştü ("arşiv silinmedi"). Değişiklikler yedeklenip geri alınınca geçti, yani tetikleyen bu işti. Zaman çizelgesi çıkarıldı: arşiv silmeden 13 ms sonra gidiyor, 108 ms'de gerçek kayıtlarla geri geliyordu. Silmeden hemen önce kurulmuş bir tarama zamanlayıcısı ("Proje çıkar"ın 500 ms'si) silmeden sonra patlıyordu. Eski görünümde tıklamalar biraz farklı sürdüğü için zamanlayıcı silmeden önce patlıyordu. Kullanıcı için de gerçek bir hata: "Hafızayı sil"den sonra hafıza bir an içinde geri kurulabiliyordu. `wipe` artık bekleyen zamanlayıcıyı ve `again` bayrağını iptal ediyor; yeniden kurulum bir sonraki taramada oluyor (pencerede de böyle yazıyor). e2e'ye yarışı zamanlamadan bağımsız üreten bir adım eklendi (`scanSoon(30)` + `wipe()`, 2,5 sn sonra arşiv yok). Düzeltme olmadan kırmızıya döndüğü görüldü ("silmeden önce kurulan tarama silinen hafızayı hemen yeniden kurdu").
+
+**Doğrulama:** `npm run check`; `npm test` yeşil (düzeltmeyle iki kez arka arkaya geçti; son koşuda pencere ve kart animasyon süreleri eski değerlerine döndürülmüştü, görünüme katkıları yoktu, zamanlamayı kaydırıyorlardı). İki e2e beklentisi bilerek güncellendi: sohbet içi görselin `--accent` değeri (#cdb07a) ve kenar çubuğundaki "rapor verdi" noktasının rengi (yeni `--soft`). Ekran görüntülerine tek tek bakıldı (yeni sohbet, sohbet, izin kartı, Değişiklikler, Artifacts, görüntüleyici, ortam penceresi, ahtapot).
+
+**Bekleyen:** Emre'nin görsel onayı ve gerçek uygulamada (`kur.sh`) bir bakış. Gren dokusu ekran görüntüsünde belirgin; gerçek ekranda fazla gelirse `--grain`'deki alfa (.26) düşürülür.
+
+---
+
 ## 2026-10-20 — Kenar çubuğunu açıp kapama
 
 **İstek:** Emre: soldaki paneli bir düğmeyle açıp kapatabileyim.

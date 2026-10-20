@@ -365,7 +365,7 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   const list = h('div', { class: 'chat-list' });
   const welcome = h('div', { class: 'chat-welcome' },
     h('div', { class: 'welcome-mark' }, '✳'),
-    h('div', { class: 'welcome-title' }, `${tilde(cwd).split('/').pop() || 'Proje'} üzerinde ne yapalım?`),
+    h('div', { class: 'welcome-title' }, h('em', {}, tilde(cwd).split('/').pop() || 'Proje'), ' üzerinde ne yapalım?'),
     h('div', { class: 'welcome-sub' }, `${a.name} hesabı · ${tilde(cwd)}`));
   const actEl = activityEl(); // çalışırken canlı gösterge (renderer/activity.js)
   const scroller = h('div', { class: 'chat-scroll' }, welcome, list, actEl);

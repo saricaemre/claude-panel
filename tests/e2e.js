@@ -1278,7 +1278,7 @@ async function waitUntil(fn, ms, msg) {
     assert.match(await page.getAttribute(WF, 'src'), /^artifact:\/\/widget\/[0-9a-f]{24}\/$/);
     assert.equal(await page.getAttribute(WF, 'sandbox'), 'allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox');
     await page.frameLocator(WF).locator('#sonuc:has-text("|")').waitFor({ timeout: 10000 });
-    assert.equal(await page.frameLocator(WF).locator('#sonuc').textContent(), 'undefined|engelli|#d97757', 'görsel panele erişiyor ya da tema değişkeni yok');
+    assert.equal(await page.frameLocator(WF).locator('#sonuc').textContent(), 'undefined|engelli|#cdb07a', 'görsel panele erişiyor ya da tema değişkeni yok');
     await page.waitForFunction((s) => parseInt(document.querySelector(s)?.style.height) > 300, WF, { timeout: 5000 }).catch(() => assert.fail('iframe içeriğe göre uzamadı'));
     assert.ok(await page.locator(C + '.tool-group summary', { hasText: 'görsel gösterildi' }).count(), 'grup özeti yok');
     await page.locator(WF).scrollIntoViewIfNeeded();
@@ -2113,7 +2113,7 @@ async function waitUntil(fn, ms, msg) {
     await assertCloseVisible(C + '.chat-octo', 'Ahtapot bölmesi');
     // Kenar çubuğu: nokta rengi durumu gösterir (bitti yeşil, rapor verdi açık, kesilen içi boş)
     assert.deepEqual(await page.$$eval('.acct.active .octo-arm', (o) => o.slice(0, 3).map((x) => getComputedStyle(x.querySelector('.octo-dot')).backgroundColor)),
-      ['rgb(143, 191, 127)', 'rgba(0, 0, 0, 0)', 'rgb(211, 208, 199)'], 'kenar çubuğundaki durum noktaları');
+      ['rgb(143, 191, 127)', 'rgba(0, 0, 0, 0)', 'rgb(212, 205, 189)'], 'kenar çubuğundaki durum noktaları');
     // Kola tıklayınca kolun sekmesi etkin olur
     const kol5 = await page.evaluate((sid) => state.tabs.max.find((t) => t.sessionId === sid)?.chatId, octoNow.arms[6].sessionId);
     await page.click(OC + '.oc-lbl[data-id="kol-7"]');
@@ -3214,6 +3214,12 @@ async function waitUntil(fn, ms, msg) {
     assert.deepEqual(cfg3().memoryProjects, []);
     // Hafızayı sil: dizin ve arşiv gider; ahtapot kaydı, defter ve Claude Code'un oturum dosyaları kalır
     await waitUntil(async () => !(await page3.evaluate(() => window.panel.hafizaDurum())).scanning, 10000, 'tarama bitmedi');
+    // Silmeden önce kurulmuş bir tarama zamanlayıcısı (ör. "Proje çıkar"ın 500 ms'si) silinen hafızayı hemen yeniden kurmaz;
+    // yeniden kurulum sonraki taramada. Eskiden zamanlayıcı silmeden ~0,1 sn sonra patlayıp arşivi geri yazıyordu (arayüz hızına bağlı yarış).
+    assert.ok(fs.existsSync(path.join(octo3Root, 'arsiv')), 'silmeden önce arşiv yok');
+    await app3.evaluate(async () => { const h = process.mainModule.require('./hafiza.js'); h.scanSoon(30); await h.wipe(); });
+    await new Promise((r) => setTimeout(r, 2500));
+    assert.ok(!fs.existsSync(path.join(octo3Root, 'arsiv')), 'silmeden önce kurulan tarama silinen hafızayı hemen yeniden kurdu');
     const sentinel = path.join(octo3Root, 'arsiv', 'claude', 'x', 'y.jsonl.gz');
     fs.mkdirSync(path.dirname(sentinel), { recursive: true });
     fs.writeFileSync(sentinel, 'x');

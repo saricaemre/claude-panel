@@ -42,7 +42,7 @@ const CONFIG_PATH = () => path.join(app.getPath('userData'), 'config.json');
 
 // Sıfırdan kurulumda tek hesap: Claude Code'un varsayılan ayar klasörü (~/.claude; configDir boş). Başka hesaplar Hesap ayarlarından eklenir.
 const DEFAULT_CONFIG = {
-  accounts: [{ id: 'claude', name: 'Claude', note: '', color: '#d97757', configDir: '' }],
+  accounts: [{ id: 'claude', name: 'Claude', note: '', color: '#cdb07a', configDir: '' }],
   recents: {},
   environments: [],
   lastAccount: 'claude',
@@ -351,7 +351,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 560,
     title: 'Claude Panel',
-    backgroundColor: '#252422',
+    backgroundColor: '#100f0d',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: { x: 16, y: 18 },
     webPreferences: {
