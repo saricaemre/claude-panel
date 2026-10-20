@@ -157,11 +157,37 @@ function resolveDir(input, cwd) {
   return { dir: p, real: r };
 }
 
+// start'ın modeli ve eforu: verilmezse yan oturum hesabın yeni sohbet seçimini alır (chatPrefs). Model listesi bilinirse ad listeden çözülür
+// (değer, tam kimlik ya da görünen ad: "opus", "claude-opus-5-5", "Opus 5.5"), efor modelin desteklediklerine göre denetlenir; bilinmeyen ad
+// kart açmadan reddedilir ve seçenekler Claude'a söylenir. Liste yoksa yalnız biçim denetlenir (komut satırına --model= olarak gider).
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const EFFORT_LABELS = { low: 'düşük', medium: 'orta', high: 'yüksek', xhigh: 'çok yüksek', max: 'maksimum' };
+const squash = (v) => String(v || '').toLowerCase().replace(/^claude[-\s]*/, '').replace(/[\s._-]+/g, '');
+function resolveModel(input = {}, models) {
+  const want = String(input.model || '').trim();
+  const effort = String(input.effort || '').trim();
+  if (effort && !EFFORTS.includes(effort)) return { error: `Bilinmeyen efor "${effort}"; seçenekler: ${EFFORTS.join(', ')}` };
+  const list = (Array.isArray(models) ? models : []).filter((m) => m?.value && m.value !== 'default');
+  let row = null;
+  if (want) {
+    if (list.length) {
+      const k = squash(want);
+      row = list.find((m) => m.value === want) || list.find((m) => [m.value, m.resolvedModel, m.displayName].some((x) => x && squash(x) === k));
+      if (!row) return { error: `Bilinmeyen model "${want}"; seçenekler: ${list.map((m) => `${m.value} (${m.displayName || m.value})`).join(', ')}` };
+    } else if (!/^[A-Za-z0-9][\w.:\[\]-]{0,79}$/.test(want)) return { error: `Geçersiz model adı "${want}"` };
+  }
+  const levels = row?.supportedEffortLevels;
+  if (effort && row && (row.supportsEffort === false || (Array.isArray(levels) && !levels.includes(effort)))) {
+    return { error: `${row.displayName || row.value} "${effort}" eforunu desteklemiyor${levels?.length ? '; seçenekler: ' + levels.join(', ') : ''}` };
+  }
+  return { model: row?.value || want || '', effort, label: [row?.displayName || want, effort && EFFORT_LABELS[effort] + ' efor'].filter(Boolean).join(', ') };
+}
+
 // İzin: başlatmak her seferinde kartla (yeni bir Claude oturumu açar, kullanım harcar); gerisi kendi yan oturumlarında sormadan.
 // Reddedilecek başlatma (kol, sınır, olmayan klasör) kart açmadan araca gider; araç nedeniyle reddeder.
 // Klasör sohbetin klasörünün ve projesinin (git kökü; ayrı kopyada ana depo) dışındaysa başlık onu söyler: kartta ham girdinin içinde, uzun görev
 // tanımının altında kalıyordu. Gösterilen yol gerçek yoldur (symlink içeride görünüp dışarıyı açmasın).
-function permission(chatId, input = {}, { cwd, project } = {}) {
+function permission(chatId, input = {}, { cwd, project, models } = {}) {
   // Çalışan ya da kullanıcıyı bekleyen yan oturumu kapatmak kartla (yarım tur kaybolur); bitmiş, rapor vermiş, durmuş olanı sormadan
   if (input.action === 'close') {
     let t = null;
@@ -169,15 +195,18 @@ function permission(chatId, input = {}, { cwd, project } = {}) {
     return t.c && (t.c.state === 'working' || t.c.state === 'waiting') ? { title: `Claude çalışan "${t.c.title}" yan oturumunu kapatmak istiyor` } : null;
   }
   if (input.action !== 'start' || startBlocked(chatId)) return null;
-  const title = 'Claude yeni bir yan oturum başlatmak istiyor';
+  const m = resolveModel(input, models);
+  if (m.error) return null;
+  const tail = m.label ? ` (${m.label})` : '';
+  const title = 'Claude yeni bir yan oturum başlatmak istiyor' + tail;
   if (!input.cwd || !cwd) return { title };
   const r = resolveDir(input.cwd, cwd);
   if (r.error) return null;
   const inside = [cwd, project].filter(Boolean).map(real).some((b) => r.real === b || r.real.startsWith(b + path.sep));
-  return { title: inside ? title : `Claude ${tilde(r.real)} klasöründe yeni bir yan oturum başlatmak istiyor` };
+  return { title: inside ? title : `Claude ${tilde(r.real)} klasöründe yeni bir yan oturum başlatmak istiyor${tail}` };
 }
 
-function createTool(sdk, z, { chatId, cwd }) {
+function createTool(sdk, z, { chatId, cwd, getModels = () => null }) {
   return sdk.tool(
     'sessions',
     'Bağımsız bir işi Claude Panel\'de ayrı bir yan oturuma (aynı hesapta yeni bir sohbet sekmesi) devreder. Kullanıcı ayrı, paralel ya da ' +
@@ -188,6 +217,8 @@ function createTool(sdk, z, { chatId, cwd }) {
       '(sekmesi açık kalır; açık yan oturum sınırından düşer), "close" sekmesini kapatır (oturum kaydı kalır; bitti denmemişse kol "kesildi" olur, ' +
       'ahtapotta artık çizilmez; kullanıcı kolları kapatmanı isterse önce doğruladıklarını "done" ile bitir, sonra "close"). Ahtapotun başında ' +
       '"list" sekmesi kapalı kolları da kimliğiyle (kol-3) verir; "read", "done", "close" bu kimliği de alır. Dosya yazan paralel işlerde worktree: true ver (yan oturum kendi dalında çalışır, dosyalar çakışmaz). ' +
+      'Kullanıcı yan oturum için model ya da efor isterse model ve effort ver (ör. model "opus", effort "xhigh" = çok yüksek); verilmezse hesabın yeni sohbet seçimi kullanılır. ' +
+      'Uygulanan model ve efor yanıtta yazar; kullanıcıya onu söyle. ' +
       'Bu sohbet bir ahtapotun koluysa yan oturum açamazsın; gerekiyorsa başa öner.',
     {
       action: z.enum(['start', 'list', 'send', 'read', 'done', 'close']).describe('Yapılacak iş'),
@@ -195,6 +226,8 @@ function createTool(sdk, z, { chatId, cwd }) {
       prompt: z.string().optional().describe('start: yan oturuma ilk mesaj (eksiksiz görev tanımı)'),
       cwd: z.string().optional().describe('start: çalışma klasörü (varsayılan bu sohbetin klasörü)'),
       worktree: z.boolean().optional().describe('start: yan oturum ayrı bir git çalışma kopyasında (kendi dalında) çalışsın; dosya yazan paralel işler için önerilir'),
+      model: z.string().optional().describe('start: yan oturumun modeli: takma ad ("opus", "sonnet", "haiku"), tam kimlik ya da görünen ad; verilmezse hesabın yeni sohbet seçimi'),
+      effort: z.enum(EFFORTS).optional().describe('start: düşünme eforu (low düşük, medium orta, high yüksek, xhigh çok yüksek, max maksimum); verilmezse hesabın yeni sohbet seçimi'),
       id: z.union([z.number(), z.string()]).optional().describe('send/read/done/close: yan oturum numarası (start ya da list\'ten); başta sekmesi kapalı kol için kolun kimliği (kol-3)'),
       message: z.string().optional().describe('send: yan oturuma yazılacak mesaj'),
     },
@@ -212,14 +245,18 @@ function createTool(sdk, z, { chatId, cwd }) {
             const target = resolveDir(a.cwd, cwd);
             if (target.error) throw new Error(target.error);
             const dir = target.dir;
+            const m = resolveModel(a, getModels());
+            if (m.error) throw new Error(m.error);
             // Ahtapotun kolu: ilk mesajına başın defterinden kural, ret ve zevk (P5.2) ve öbür açık kollar eklenir; kol reddedilenleri
             // ve kimin neyle uğraştığını bilsin (yeni kol henüz kayıtta değil, listede kendisi yok)
             const role = octopus.roleOf(chatId);
             const note = role?.role === 'head' ? defter.armNote(role.octoId) + octopus.peerNote(role.octoId) : '';
-            const { id } = await query('start', { parentId: chatId, title, prompt: prompt + note, cwd: dir, worktree: !!a.worktree });
+            const { id } = await query('start', { parentId: chatId, title, prompt: prompt + note, cwd: dir, worktree: !!a.worktree,
+              model: m.model || undefined, effort: m.effort || undefined });
             if (!children.has(id)) register(id, chatId, title, dir);
-            const { cwd: where, branch } = await query('info', { childId: id });
-            return ok(`Yan oturum ${id} başladı: "${title}" (${where}${branch ? ', dal ' + branch : ''}). Her turunu bitirdiğinde sana bildirim gelecek.`);
+            const { cwd: where, branch, model, effort } = await query('info', { childId: id });
+            const runs = `model ${model || 'hesabın varsayılanı'}, efor ${EFFORT_LABELS[effort] || 'modelin varsayılanı'}`;
+            return ok(`Yan oturum ${id} başladı: "${title}" (${where}${branch ? ', dal ' + branch : ''}; ${runs}). Her turunu bitirdiğinde sana bildirim gelecek.`);
           }
           case 'list': {
             const list = [...children.entries()].filter(([, c]) => c.parent === chatId);
@@ -290,4 +327,4 @@ function setup({ getWindow }) {
   ipcMain.on('session:reply', (_e, id, r) => replies.get(id)?.(r));
 }
 
-module.exports = { setup, createTool, permission, register, rebind, relink, noteText, noteBusy, noteWaiting, turnEnded, closed };
+module.exports = { setup, createTool, permission, resolveModel, register, rebind, relink, noteText, noteBusy, noteWaiting, turnEnded, closed };

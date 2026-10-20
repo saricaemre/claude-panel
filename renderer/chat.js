@@ -222,7 +222,9 @@ function toolSummary(tab, name, input = {}) {
       return String(input.recap || '').slice(0, 120);
     case 'mcp__panel__sessions':
       return [{ start: 'başlat', list: 'liste', send: 'mesaj', read: 'okuma' }[input.action] || input.action || '', input.title || (input.id != null ? 'oturum ' + input.id : ''),
-        input.action === 'start' ? outsideDir(tab, input.cwd) : '', input.message || ''].filter(Boolean).join(' · ').slice(0, 200);
+        input.action === 'start' ? outsideDir(tab, input.cwd) : '',
+        input.action === 'start' ? [input.model, input.effort && (effortLabel(input.effort) || input.effort).toLocaleLowerCase('tr') + ' efor'].filter(Boolean).join(', ') : '',
+        input.message || ''].filter(Boolean).join(' · ').slice(0, 200);
     case 'mcp__panel__open':
       return `${input.action === 'reveal' ? 'Finder' : 'editör'} · ${relPath(tab, input.path)}${input.line ? ':' + input.line : ''}`;
     case 'mcp__panel__defter':
@@ -332,8 +334,8 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   const prefs = state.cfg.chatPrefs?.[acctId] || {};
   const tab = {
     kind: 'chat', acctId, cwd, mode, title: '…', exited: false, activity: false, attention: false,
-    chatId: null, sessionId: resumeId || null, busy: false, models: [], model: '', effort: prefs.effort || '',
-    modelChoice: prefs.model || '', permissionMode: prefs.mode || '', envId: opts.envId ?? envOf(acctId)?.id ?? '',
+    chatId: null, sessionId: resumeId || null, busy: false, models: [], model: '', effort: opts.effort ?? prefs.effort ?? '',
+    modelChoice: opts.model ?? prefs.model ?? '', permissionMode: prefs.mode || '', envId: opts.envId ?? envOf(acctId)?.id ?? '',
     toolCards: new Map(), live: new Map(), attachments: [], slash: [], pendingPerms: new Map(),
     group: null, todos: [], started: false, parentId: opts.parentId || null, autoTurns: 0, pendingEvents: [], pr: null,
   };

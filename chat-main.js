@@ -263,7 +263,7 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
         browser.createTool(sdk, z, { chatId: id, onOpen: () => send('browser:open', id) }),
         terminals.createTool(sdk, z, { chatId: id, accountId, cwd: dir, envId }),
         changes.createTool(sdk, z, { chatId: id, cwd: dir }),
-        sessions.createTool(sdk, z, { chatId: id, cwd: dir }),
+        sessions.createTool(sdk, z, { chatId: id, cwd: dir, getModels: () => chats.get(id)?.models || infoCache.get(accountId)?.models }),
         ...(asArm ? [] : [wrapup.createTool(sdk, z)]),
         // Görev listesi kollarda da: kolun ilerlemesi ahtapot kaydına gider (TodoWrite'la aynı yol)
         wrapup.createPlanTool(sdk, z, { onChange: (items) => octopus.noteTodos(id, items) }),
@@ -321,7 +321,7 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
           let site = null;
           const RULES = { mcp__panel__browser: browser, mcp__panel__terminal: terminals, mcp__panel__sessions: sessions, mcp__panel__pr: prwatch };
           if (RULES[toolName]) {
-            site = RULES[toolName].permission(id, input, { cwd: dir, project });
+            site = RULES[toolName].permission(id, input, { cwd: dir, project, models: chats.get(id)?.models || infoCache.get(accountId)?.models });
             if (!site) return Promise.resolve({ behavior: 'allow', updatedInput: input });
           }
           const suggestions = site ? undefined : o.suggestions;
@@ -404,7 +404,7 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
           }
         })();
         // Model listesini arka planda iste
-        q.supportedModels?.().then((models) => { if (c.body === body) send('chat:models', id, models); }).catch(() => {});
+        q.supportedModels?.().then((models) => { if (c.body !== body) return; c.models = models; send('chat:models', id, models); }).catch(() => {}); // c.models: sessions start'ın model adı
       };
       startBody(options);
 

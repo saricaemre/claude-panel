@@ -198,6 +198,7 @@ rl.on('line', async (line) => {
     else if (/<yan-oturum-olayi/.test(t)) await sessionEventTurn(t);
     else if (/<ci-izleme-olayi/.test(t)) await ciEventTurn(t);
     else if (/^yan oturum klasörü: /i.test(t)) await sessionDirTurn(t.replace(/^yan oturum klasörü: /i, '').trim());
+    else if (/^yan oturum modeli: /i.test(t)) await sessionModelTurn(...t.replace(/^yan oturum modeli: /i, '').split('|').map((x) => x.trim()));
     else if (/^geçmişe danış/i.test(t)) await danisTurn(t);
     else if (Array.isArray(m.message.content)) await attachTurn(m.message.content);
     else if (/rapor/i.test(t)) await artifactTurn();
@@ -665,6 +666,14 @@ let sdN = 0;
 async function sessionDirTurn(dir) {
   await panelTool('SESSDIR', 'sessions', 'sd' + (++sdN), { action: 'start', title: 'Klasör işi', prompt: 'alt görev: klasör', cwd: dir });
   await streamText('Klasör denendi.');
+  finish('success');
+}
+// Yan oturumun modeli ve eforu: "yan oturum modeli: <model>|<efor>" ile start (boş parça verilmez); kimlikler sohbet boyunca eşsiz
+let smN = 0;
+async function sessionModelTurn(model, effort) {
+  await panelTool('SESSMODEL', 'sessions', 'sm' + (++smN), { action: 'start', title: 'Model işi', prompt: 'alt görev: model',
+    ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
+  await streamText('Model denendi.');
   finish('success');
 }
 // Octopus: baş iki kol açar (iki ayrı izin kartı); kolların bildirimlerine kısaca yanıt verir

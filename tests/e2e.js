@@ -1501,6 +1501,50 @@ async function waitUntil(fn, ms, msg) {
     fs.rmSync(path.join(sdCwd, 'kisayol'));
     fs.rmSync(path.join(sdCwd, 'alt'), { recursive: true });
 
+    step('Yan oturumun modeli ve eforu: start istediği modelle ve eforla açar (hesabın seçimini değiştirmez); bilinmeyen model ve desteklenmeyen efor kartsız reddedilir');
+    const smCard = C + '.perm-card:not(.answered)';
+    const smPrefs = await page.evaluate(() => JSON.stringify(state.cfg.chatPrefs?.max || {}));
+    // İstek hesabın seçiminden farklı olmalı (önceki adım Opus / çok yüksek seçti); yoksa seçimin yok sayılması yakalanmaz
+    assert.notDeepEqual((({ model, effort }) => [model, effort])(JSON.parse(smPrefs)), ['sonnet', 'high'], 'hesabın seçimi istenenle aynı');
+    const smTry = async (spec) => {
+      const n = [...fakeLog().matchAll(/SESSMODELMCP /g)].length;
+      await page.fill(C + '.composer-input', 'yan oturum modeli: ' + spec);
+      await page.press(C + '.composer-input', 'Enter');
+      return n;
+    };
+    let smMark = fakeLog().length;
+    let smN0 = await smTry('Sonnet 5.5|high');
+    await page.waitForSelector(smCard + ':has-text("yan oturum başlatmak")', { timeout: 15000 });
+    assert.equal(await page.textContent(smCard + ' .perm-title'), 'Claude yeni bir yan oturum başlatmak istiyor (Sonnet 5.5, yüksek efor)', 'kart başlığında model ve efor yok');
+    assert.match(await page.textContent(smCard + ' .perm-arg'), /başlat · Model işi · Sonnet 5\.5, yüksek efor/, 'kart özetinde model ve efor yok');
+    await page.click(smCard + ' .primary-btn');
+    await waitUntil(() => [...fakeLog().matchAll(/SESSMODELMCP /g)].length > smN0, 15000, 'modelli start yanıtlanmadı');
+    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
+    let smLog = fakeLog().slice(smMark);
+    const smChild = +((smLog.match(/SESSMODELMCP start "Yan oturum (\d+) başladı/) || [])[1]);
+    assert.ok(smChild, 'modelli yan oturum başlamadı: ' + smLog.slice(-400));
+    assert.match(smLog, /SESSMODELMCP start "Yan oturum \d+ başladı: \\"Model işi\\" \([^)]*; model Sonnet 5\.5, efor yüksek\)/, 'yanıtta uygulanan model ve efor yok');
+    const smArgs = smLog.split('\n').filter((l) => l.startsWith('ARGS ') && l.includes('"--effort=high"'));
+    assert.equal(smArgs.length, 1, 'yan oturum yüksek eforla açılmadı');
+    assert.match(smArgs[0], /"--model=sonnet"/, 'yan oturum Sonnet ile açılmadı');
+    await page.waitForFunction((id) => chatsById.get(id)?.list.textContent.includes('Alt görev bitti'), smChild, { timeout: 15000 });
+    assert.deepEqual(await page.evaluate((id) => { const t = chatsById.get(id); return [t.modelChoice, t.effort]; }, smChild), ['sonnet', 'high']);
+    assert.equal(await page.evaluate(() => JSON.stringify(state.cfg.chatPrefs?.max || {})), smPrefs, 'yan oturumun modeli hesabın seçimine yazıldı');
+    await page.evaluate((id) => { window.__sohbet.pendingEvents = []; window.__sohbet.autoTurns = 0; closeTab(chatsById.get(id), true); activateTab('max', window.__sohbet); }, smChild);
+    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
+    // Bilinmeyen model ve modelin desteklemediği efor: kart açılmaz, araç seçenekleri söyleyerek reddeder
+    const smCards = await page.locator(C + '.perm-card').count();
+    for (const spec of ['gpt-9|high', 'sonnet|max']) {
+      smN0 = await smTry(spec);
+      await waitUntil(() => [...fakeLog().matchAll(/SESSMODELMCP /g)].length > smN0, 15000, 'start yanıtlanmadı: ' + spec);
+      await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
+    }
+    assert.equal(await page.locator(C + '.perm-card').count(), smCards, 'geçersiz modelde kart açıldı');
+    smLog = fakeLog().slice(smMark);
+    assert.match(smLog, /SESSMODELMCP start "Yan oturum: Bilinmeyen model \\"gpt-9\\"; seçenekler: opus \(Opus 5\.5\), sonnet \(Sonnet 5\.5\)" HATA/);
+    assert.match(smLog, /SESSMODELMCP start "Yan oturum: Sonnet 5\.5 \\"max\\" eforunu desteklemiyor; seçenekler: low, medium, high" HATA/);
+    assert.deepEqual([...smLog.matchAll(/SESSMODELPERM start (\w+)/g)].map((m) => m[1]), ['allow', 'allow', 'allow'], 'kartsız ret araca gitmedi');
+
     step('Tur sonu kutusu ve sabit görev listesi: özet, tek soru, düğme mesaj olarak gider; yarım görev yazma alanının üstünde');
     const turnDone = (text) => page.waitForFunction((t) => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes(t)
       && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), text, { timeout: 30000 });
@@ -1643,7 +1687,7 @@ async function waitUntil(fn, ms, msg) {
     assert.equal(kids.length, 1);
     assert.match(kids[0].cwd, /\/\.claude\/worktrees\/paralel-is-[0-9a-f]{6}$/, 'yan oturum ayrı kopyada değil');
     assert.notEqual(kids[0].cwd, parentWt);
-    assert.match(fakeLog(), new RegExp(`SESSMCP start "Yan oturum \\d+ başladı: \\\\"Paralel iş\\\\" \\(.*dal ${kids[0].branch}\\)`));
+    assert.match(fakeLog(), new RegExp(`SESSMCP start "Yan oturum \\d+ başladı: \\\\"Paralel iş\\\\" \\(.*dal ${kids[0].branch}; model [^)]*\\)`));
     await waitUntil(async () => { const st = await awakeNow(); return !st.active && !st.busy; }, 5000, 'tur bitince uyanık tutma kapanmadı');
     await page.evaluate(() => { const p = state.activeTab.max; for (const t of state.tabs.max.filter((x) => x.parentId === p.chatId)) closeTab(t, true); closeTab(p, true); });
     await new Promise((r) => setTimeout(r, 500)); // closeChat kopyayı eşzamanlı siler; IPC'nin ana sürece ulaşması için

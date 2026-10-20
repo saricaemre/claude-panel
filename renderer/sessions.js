@@ -5,11 +5,11 @@
 const SESSION_AUTO_MAX = 5;
 
 const SESSION_QUERIES = {
-  async start({ parentId, title, prompt, cwd, worktree }) {
+  async start({ parentId, title, prompt, cwd, worktree, model, effort }) {
     const parent = chatsById.get(parentId);
     if (!parent) throw new Error('Başlatan sohbet bulunamadı');
     const tab = await createChatTab(parent.acctId, cwd || parent.cwd, 'new', null,
-      { background: true, parentId, title, send: prompt, envId: parent.envId || '', worktree });
+      { background: true, parentId, title, send: prompt, envId: parent.envId || '', worktree, model, effort });
     if (!tab?.chatId) {
       const err = tab?.startError;
       if (tab) closeTab(tab, true);
@@ -20,7 +20,8 @@ const SESSION_QUERIES = {
   info({ childId }) {
     const tab = chatsById.get(childId);
     if (!tab) throw new Error(`Yan oturum ${childId} açık değil`);
-    return { cwd: tilde(tab.cwd), branch: tab.worktree?.branch || '' };
+    const m = tab.modelChoice && (tab.models.length ? tab.models : acctInfo[tab.acctId]?.models || []).find((x) => x.value === tab.modelChoice);
+    return { cwd: tilde(tab.cwd), branch: tab.worktree?.branch || '', model: m?.displayName || tab.modelChoice || '', effort: tab.effort || '' };
   },
   // Kullanıcının o sekmede yazdığı taslağa dokunmadan mesajı gönderir
   send({ childId, text, parentId }) {

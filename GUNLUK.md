@@ -5,6 +5,20 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 
 ---
 
+## 2026-10-20 — Kol açarken model ve efor
+
+**İstek:** Emre başa "Opus 5.5 çok yüksek eforuyla bir iş kolu aç" dedi, kol orta eforla açıldı. `sessions start`'ta model ve efor alanı yoktu; yan oturum hesabın yeni sohbet seçimini (`chatPrefs`) alıyordu. Baş bunu ancak kolu açtıktan sonra söyleyebildi.
+
+**Yapılan:**
+- `sessions start` artık `model` ve `effort` alıyor (`sessions.js` → `resolveModel`). Model adı sohbetin model listesinden çözülür: değer, tam kimlik ya da görünen ad ("opus", "claude-opus-5-5", "Opus 5.5"). Efor, modelin `supportedEffortLevels`'ına göre denetlenir. Bilinmeyen model ya da desteklenmeyen efor kart açılmadan reddedilir, Claude'a seçenekler söylenir. Liste alınamamışsa yalnız biçim denetlenir.
+- İzin kartının başlığı ve özeti istenen modeli ve eforu yazar ("… başlatmak istiyor (Opus 5.5, çok yüksek efor)").
+- Araç yanıtı yan oturumun gerçekten açıldığı model ve eforu söyler (alan verilmese de); araç açıklaması Claude'dan bunu kullanıcıya söylemesini istiyor.
+- Yan oturumun seçimi hesabın `chatPrefs`'ine yazılmaz (`createChatTab` → `opts.model`/`opts.effort`). Model listesi ana süreçte sohbete de konur (`c.models`), yoksa hesabın önbelleğinden alınır.
+
+**Doğrulama:** `npm run check`. e2e'ye "Yan oturumun modeli ve eforu" adımı eklendi: kart başlığı ve özeti, kolun süreç argümanları (`--model=opus`, `--effort=xhigh`), sekmenin seçimi, `chatPrefs`'in değişmemesi, bilinmeyen model ve Sonnet'e `max` için kartsız ret. Bozma denemesinde (yan oturum sekmesi istenen seçimi yok sayıp hesabınkini alıyor) ilk sürüm yeşil kaldı: önceki bir adım hesabın seçimini zaten Opus / çok yüksek yapıyordu. Adım hesabınkinden farklı bir istekle (Sonnet 5.5, yüksek) yeniden yazıldı, istek ile seçimin farklı olduğu da assert ediliyor; bozunca "yanıtta uygulanan model ve efor yok" ile kırmızı, düzeltince bütün test yeşil. Eski ayrı kopya assert'i yeni yanıt biçimine uyduruldu. Tarayıcı adımları bu oturumda sık düştü (bilinen kararsızlık, §7; temiz kodda da bağlayıcı adımı düştü).
+
+**Bekleyen:** Gerçek hesapla bir tur: başa "Opus 5.5 çok yüksek eforla kol aç" denip kolun çubuğunda seçimin görünmesi. Kapalı bir kol "Devam et" ile açılınca model ve efor yine hesabın seçiminden gelir (kayda yazılmıyor).
+
 ## 2026-10-20 — Bağlam yükü: panelin araçları ertelenir, yan panelde gerçek döküm
 
 **İstek:** Emre: yan paneldeki Bağlam bölümünde her oturumda 50 skill'lik bir liste var. "Yalnız ben çağırırım" yaptıkları da her oturumda yüklenip bağlamı şişiriyor mu? Paneli token israf etmeden kullanmak istiyor.
