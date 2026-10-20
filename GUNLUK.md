@@ -5,6 +5,20 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 
 ---
 
+## 2026-10-20 — Ahtapotun kapanan kolları kenar çubuğundan kalkar
+
+**İstek:** Emre: kenar çubuğundaki ahtapot kollarını sağ tıkla kendim kapatabilmeliyim; ahtapotta kol kapanınca kenar çubuğunda da kendiliğinden kapanmalı. (Ekran görüntüsünde Kızıl Elma'nın "bitti" ve "kesildi" kolları listede duruyordu; sekmesi kapalı "bitti" kolda "Kolu kapat" yoktu.)
+
+**Yapılan:** Kayıtta kola `closed` bayrağı. Kol hangi yoldan kapanırsa kapansın (sağ tık "Kolu kapat", başın `sessions close`'u, sekmesinin kapanması) bayrak konur; bitmiş kol "bitti" kalır, bitmemiş kol "kesildi" olur. Kenar çubuğu yalnız kapanmamış ya da sekmesi açık kolları gösterir, sayı onları sayar, satırın title'ı kaç kolun kapandığını yazar; hiç açık kol yoksa sayı görünmez. Bayraktan önceki kayıtlarda `cut` kapanmış sayılır; sekmesi kapalı "bitti" kollar artık sağ tık menüsünde "Kolu kapat" alır. Kapanan kollar bölmenin "Diğer kollar"ında durur, oradan "Devam et" ile açılınca bayrak kalkar ve kol listeye döner.
+
+**Kararlar:** Kapanan kol silinmez, yalnız kenar çubuğundan kalkar (geçmiş ve fosil düzeni bozulmasın, "Diğer kollar"dan geri açılabilsin). Panel kapanırken bayrak yazılmaz (kayıt olduğu gibi kalır kuralı).
+
+**Doğrulama:** `npm run check`, `npm test` geçti. e2e: sekmesi kapanan kol ve bitmiş kol kenar çubuğundan kalkıyor, kayıtta `closed`; yeniden açılışta kapanan kollar listede yok, sayı yok, title "14 kapandı"; eski kayıt gibi ayarlanmış sekmesi kapalı "bitti" kol sağ tıkla "Kolu kapat" ile kalkıyor ve "bitti" kalıyor; rapor vermiş kol kesilip kalkıyor; "Diğer kollar"dan "Devam et"le açılan kol listeye dönüyor, bayrağı kalkıyor; başın "kolları kapat"ından sonra liste boş. Durum noktası renkleri artık "Diğer kollar"daki satırda ölçülüyor. Süzgeç kaldırılınca test "kapanan kol kenar çubuğunda kaldı" ile kırmızıya döndü.
+
+**Bekleyen:** Gerçek panelde (Kızıl Elma) bir deneme: eski "bitti" kolları sağ tıkla kapatmak, "kesildi"lerin açılışta kendiliğinden kalkması.
+
+---
+
 ## 2026-10-20 — Kenar çubuğu düğmesi tıklanmıyordu
 
 **İstek:** Emre: soldaki paneli gizleme düğmesine tıklanamıyor.

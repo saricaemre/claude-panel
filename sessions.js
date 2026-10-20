@@ -263,8 +263,8 @@ function createTool(sdk, z, { chatId, cwd }) {
           case 'close': {
             const t = target(chatId, a.id);
             if (!t.c) {
-              if (t.arm.state === 'done') return ok(`${t.arm.id} ("${t.arm.title}") bitmiş ve sekmesi kapalı; ahtapotta çizilmiyor.`);
-              octopus.closeArm(t.ref.octoId, t.ref.armId);
+              octopus.closeArm(t.ref.octoId, t.ref.armId); // kenar çubuğundan da kalkar (closed); bitmiş kol "bitti" kalır
+              if (t.arm.state === 'done') return ok(`${t.arm.id} ("${t.arm.title}") bitmiş ve sekmesi kapalı; ahtapotta çizilmiyor, listeden de kaldırıldı.`);
               return ok(`${t.arm.id} ("${t.arm.title}") kapatıldı (kesildi); ahtapotta artık çizilmez.`);
             }
             if (t.c.state === 'closed') return ok(`Yan oturum ${t.id} zaten kapalı.`);

@@ -2097,7 +2097,11 @@ async function waitUntil(fn, ms, msg) {
     await page.evaluate((id) => closeTab(chatsById.get(id), true), octoTabs.arms[1].chatId);
     await waitUntil(() => readOcto().arms[1].state === 'cut' && readOcto().arms[1].endedAt, 10000, 'kapanan kol kesildi olmadı');
     assert.equal(readOcto().arms[0].state, 'reported');
-    await page.waitForSelector('.acct.active .octo-arm[data-state="cut"]', { timeout: 5000 });
+    assert.deepEqual([readOcto().arms[0].closed, readOcto().arms[1].closed], [undefined, true], 'kapanan kol kayıtta "closed" olmadı');
+    // Kapanan kol kenar çubuğundan da kalkar; sayı açık kolları sayar
+    await waitUntil(async () => JSON.stringify(await page.$$eval('.acct.active .octo-arm', (o) => o.map((x) => x.dataset.state))) === '["reported"]', 5000,
+      'kapanan kol kenar çubuğunda kaldı: ' + JSON.stringify(await page.$$eval('.acct.active .octo-arm', (o) => o.map((x) => x.dataset.state))));
+    assert.equal(await page.textContent('.acct.active .octo-row .octo-count'), '1');
     await page.screenshot({ path: path.join(OUT, '7b-octopus.png') });
 
     step('Octopus: kol izin beklerken kayıtta "waiting" ve başta "seni bekliyor" kartı (Claude\'a iletilmez); görev listesi kayıtta');
@@ -2145,6 +2149,8 @@ async function waitUntil(fn, ms, msg) {
     await page.evaluate((id) => closeTab(chatsById.get(id), true), armA);
     await page.waitForTimeout(500);
     assert.equal(readOcto().arms[0].state, 'done', 'bitmiş kolun sekmesi kapanınca kol kesildi');
+    assert.equal(readOcto().arms[0].closed, true, 'bitmiş kolun sekmesi kapanınca kayıtta "closed" olmadı');
+    await waitUntil(async () => (await page.locator('.acct.active .octo-arm').count()) === 0, 5000, 'sekmesi kapanan bitmiş kol kenar çubuğunda kaldı');
     await headIdle();
     // Sınır: A bitti, B kesildi; sekiz kol kartla açılır, dokuzuncusu kartsız reddedilir
     const nineMark = fakeLog().length;
@@ -2217,9 +2223,10 @@ async function waitUntil(fn, ms, msg) {
     assert.deepEqual(await composerBar(), { missing: [], rows: 2, overflow: [] }, 'dar sütunda yazma kutusunun çubuğu (kutunun içinde iki satır)');
     await page.screenshot({ path: path.join(OUT, '7h-octopus-bolme-dar.png') });
     await assertCloseVisible(C + '.chat-octo', 'Ahtapot bölmesi');
-    // Kenar çubuğu: nokta rengi durumu gösterir (bitti yeşil, rapor verdi açık, kesilen içi boş)
-    assert.deepEqual(await page.$$eval('.acct.active .octo-arm', (o) => o.slice(0, 3).map((x) => getComputedStyle(x.querySelector('.octo-dot')).backgroundColor)),
-      ['rgb(143, 191, 127)', 'rgba(0, 0, 0, 0)', 'rgb(212, 205, 189)'], 'kenar çubuğundaki durum noktaları');
+    // Nokta rengi durumu gösterir (bitti yeşil, kesilen içi boş, rapor verdi açık). Kapanan kollar kenar çubuğunda yok, "Diğer kollar"da aynı satırla
+    const dotOf = (sel) => page.$eval(sel + ' .octo-dot', (x) => getComputedStyle(x).backgroundColor);
+    assert.deepEqual([await dotOf(OC + '.oc-more-arm[data-id="kol-1"]'), await dotOf(OC + '.oc-more-arm[data-id="kol-2"]'), await dotOf('.acct.active .octo-arm[data-state="reported"]')],
+      ['rgb(143, 191, 127)', 'rgba(0, 0, 0, 0)', 'rgb(212, 205, 189)'], 'durum noktaları');
     // Kola tıklayınca kolun sekmesi etkin olur
     const kol5 = await page.evaluate((sid) => state.tabs.max.find((t) => t.sessionId === sid)?.chatId, octoNow.arms[6].sessionId);
     await page.click(OC + '.oc-lbl[data-id="kol-7"]');
@@ -3122,9 +3129,10 @@ async function waitUntil(fn, ms, msg) {
       [false, false, true, false], 'çökmeden kalan danışma dalı açılışta temizlenmedi (ya da projects dışı yol silindi)');
     fs.unlinkSync(decoy);
     assert.deepEqual(readOcto(), octoBefore, 'kapanırken kayıt değişti (kollar kesildi sayılmamalı)');
-    assert.deepEqual(await page2.$$eval('.acct.active .octo-row', (o) => o.map((x) => [x.querySelector('.octo-name').textContent, x.querySelector('.octo-count').textContent])), [['WFC', '2'], ['Imladris', '14']]);
-    assert.deepEqual(await page2.$$eval('.acct.active .octo-arm', (o) => o.map((x) => [x.querySelector('.octo-arm-title').textContent, x.dataset.state, x.querySelector('.octo-arm-state').textContent, 'live' in x.dataset])),
-      [['Defter kolu', 'cut', 'kesildi', false], ['Defter kolu', 'cut', 'kesildi', false], ['Kol A', 'done', 'bitti', false], ['Kol B', 'cut', 'kesildi', false], ...Array.from({ length: 12 }, (_, i) => [`Kol ${i + 1}`, 'cut', 'kesildi', false])]);
+    // Kapanan kollar (hepsi) kenar çubuğunda yok, sayı da yok; kayıtta duruyorlar (title)
+    assert.deepEqual(await page2.$$eval('.acct.active .octo-row', (o) => o.map((x) => [x.querySelector('.octo-name').textContent, x.querySelector('.octo-count')?.textContent ?? null])), [['WFC', null], ['Imladris', null]]);
+    assert.equal(await page2.locator('.acct.active .octo-arm').count(), 0, 'kapanan kollar kenar çubuğunda');
+    assert.match(await page2.getAttribute('.acct.active .octo-row:has-text("Imladris")', 'title'), /14 kol \(14 kapandı;/);
     assert.equal(await page2.evaluate(() => state.tabs.max.length), 0, 'baş ya da kollar kendiliğinden açıldı');
     await page2.screenshot({ path: path.join(OUT, '7c-octopus-yeniden-acilis.png') });
     await page2.locator('#sidebar').screenshot({ path: path.join(OUT, '7d-octopus-kenar.png') }).catch(() => {});
@@ -3181,22 +3189,43 @@ async function waitUntil(fn, ms, msg) {
     await page2.waitForFunction(([old, oc]) => state.activeTab.max?.chatId && state.activeTab.max.chatId !== old && state.activeTab.max.octopusId === oc, [head2a, octoBefore.id], { timeout: 15000 });
     const head2b = await headOf2();
     // Panel kapanırken yazılmayan eski durum: sekmesi kapalı ama kayıtta "rapor verdi" olan iki kol (Kol 2 = kol-4, Kol 3 = kol-5)
-    await app2.evaluate((_e, oc) => { const o = process.mainModule.require('./octopus.js'); for (const id of ['kol-4', 'kol-5']) o.setArm(oc, id, { state: 'reported' }); }, octoBefore.id);
-    const sideArm = (n) => `.acct.active .octo[data-id="${octoBefore.id}"] .octo-arm >> nth=${n}`;
-    await page2.waitForSelector(`.acct.active .octo[data-id="${octoBefore.id}"] .octo-arm[data-state="reported"]:not([data-live])`, { timeout: 5000 });
-    // Kenar çubuğunda sağ tık: sekmesi kapalı kol yalnız kayıtta kesilir
-    await page2.click(sideArm(4), { button: 'right' });
+    // "closed" bayrağından önceki kayıtlar gibi: Kol 1 bitti (sekmesi kapalı), Kol 2 ve Kol 3 rapor verdi; kenar çubuğunda görünürler
+    await app2.evaluate((_e, oc) => {
+      const o = process.mainModule.require('./octopus.js');
+      o.setArm(oc, 'kol-3', { state: 'done', closed: undefined });
+      for (const id of ['kol-4', 'kol-5']) o.setArm(oc, id, { state: 'reported', closed: undefined });
+    }, octoBefore.id);
+    const SIDE = `.acct.active .octo[data-id="${octoBefore.id}"] `;
+    const sideArms = () => page2.$$eval(SIDE + '.octo-arm', (o) => o.map((x) => [x.querySelector('.octo-arm-title').textContent, x.dataset.state, 'live' in x.dataset]));
+    await waitUntil(async () => (await sideArms()).length === 4, 5000, 'eski kayıttaki kollar kenar çubuğunda yok: ' + JSON.stringify(await sideArms()));
+    assert.deepEqual(await sideArms(), [['Kol 1', 'done', false], ['Kol 2', 'reported', false], ['Kol 3', 'reported', false], ['Kol A', 'reported', true]]);
+    assert.equal(await page2.textContent(SIDE + '.octo-count'), '4');
+    // Kenar çubuğunda sağ tık: sekmesi kapalı bitmiş kol "Kolu kapat" ile listeden kalkar, "bitti" kalır
+    await page2.click(SIDE + '.octo-arm:has-text("Kol 1")', { button: 'right' });
+    assert.deepEqual(await armMenuItems(), ['Devam et', 'Kolu kapat'], 'sekmesi kapalı bitmiş kolda "Kolu kapat" yok');
+    await page2.click('.octo-arm-menu .pop-item:has-text("Kolu kapat")');
+    await waitUntil(() => readOcto().arms[2].closed === true, 5000, 'kenar çubuğundan kapatılan bitmiş kol kayıtta "closed" olmadı');
+    assert.equal(readOcto().arms[2].state, 'done');
+    // Sekmesi kapalı rapor vermiş kol: kayıtta kesilir, listeden kalkar
+    await page2.click(SIDE + '.octo-arm:has-text("Kol 3")', { button: 'right' });
     assert.deepEqual(await armMenuItems(), ['Devam et', 'Kolu kapat']);
     await page2.click('.octo-arm-menu .pop-item:has-text("Kolu kapat")');
-    await waitUntil(() => readOcto().arms[4].state === 'cut', 5000, 'kenar çubuğundan kapatılan kol kesilmedi');
-    // Kesilmiş Kol B sağ tıkla "Devam et": yine kol olarak açılır (rapor biçimi, başa bağlı)
+    await waitUntil(() => readOcto().arms[4].state === 'cut' && readOcto().arms[4].closed, 5000, 'kenar çubuğundan kapatılan kol kesilmedi');
+    await waitUntil(async () => JSON.stringify(await sideArms()) === JSON.stringify([['Kol 2', 'reported', false], ['Kol A', 'reported', true]]), 5000,
+      'kapatılan kollar kenar çubuğundan kalkmadı: ' + JSON.stringify(await sideArms()));
+    // Kapanan kol bölmenin "Diğer kollar"ında durur: kesilmiş Kol B oradan sağ tıkla "Devam et" ile yine kol olarak açılır (rapor biçimi, başa bağlı)
     const contMark = fakeLog().length;
-    await page2.click(sideArm(15), { button: 'right' });
+    await page2.evaluate((id) => openOctopusInChat(chatsById.get(id)), head2b);
+    await page2.click(OC2 + '.oc-more-arm[data-id="kol-16"]', { button: 'right' });
     assert.deepEqual(await armMenuItems(), ['Devam et'], 'kesilmiş ve sekmesi kapalı kolda "Kolu kapat" olmamalı');
     await page2.click('.octo-arm-menu .pop-item:has-text("Devam et")');
     await page2.waitForFunction((sid) => state.tabs.max.find((t) => t.sessionId === sid)?.chatId, kolBSid, { timeout: 15000 });
     await waitUntil(() => fakeLog().slice(contMark).includes('--resume=' + kolBSid), 10000, 'kol kendi oturumuyla açılmadı');
     await waitUntil(() => fakeLog().slice(contMark).split('\n').some((l) => l.startsWith('APPEND "Bu sohbet bir Octopus kolu')), 10000, '"Devam et"le açılan kol, kol olarak açılmadı');
+    // Yeniden açılan kol kenar çubuğuna döner, bayrağı kalkar
+    await waitUntil(async () => (await sideArms()).some(([t, , live]) => t === 'Kol B' && live), 5000, '"Devam et"le açılan kol kenar çubuğunda yok');
+    assert.equal(readOcto().arms[15].closed, false);
+    await page2.evaluate((id) => closeOctopusInChat(chatsById.get(id)), head2b);
     // Kullanıcı başa "kolları kapat" der: baş listede açık iki kolu ve sekmesi kapalı kol-4'ü görür, hepsini kapatır
     await page2.evaluate((id) => activateTab('max', chatsById.get(id)), head2b);
     const closeMark = fakeLog().length;
@@ -3215,6 +3244,9 @@ async function waitUntil(fn, ms, msg) {
       'kollar kapanınca kayıt: ' + JSON.stringify(readOcto().arms.slice(3, 5).concat(readOcto().arms.slice(14)).map((a) => [a.id, a.state])));
     await page2.waitForFunction(() => state.tabs.max.length === 1, null, { timeout: 5000 }).catch(() => {});
     assert.deepEqual(await page2.evaluate(() => state.tabs.max.map((t) => t.octopusId ? 'baş' : t.title)), ['baş'], 'kol sekmeleri kapanmadı');
+    // Başın kapattığı kollar kenar çubuğundan da kendiliğinden kalkar
+    await waitUntil(async () => (await sideArms()).length === 0, 5000, 'başın kapattığı kollar kenar çubuğunda: ' + JSON.stringify(await sideArms()));
+    assert.ok([3, 14, 15].every((i) => readOcto().arms[i].closed === true), 'başın kapattığı kollar kayıtta "closed" değil');
     // Bölmede hiç kol kalmaz
     await page2.click(C + '.octo-toggle');
     await page2.waitForSelector(OC2 + '.oc-pane', { timeout: 5000 });

@@ -100,15 +100,19 @@ async function closeArm(acctId, rec, arm) {
   if (!r?.ok) toast(r?.error || 'Kol kapatılamadı.');
 }
 
+// Kapanmış kol: kendisi ya da başı kapattı, sekmesi kapandı (kayıtta closed) ya da kesildi (bayraktan önceki kayıtlar).
+// Kenar çubuğunda yalnız sekmesi açıkken görünür; bölmenin "Diğer kollar"ında hep durur.
+const armClosed = (arm) => !!arm.closed || arm.state === 'cut';
+
 // Kenar çubuğunda, bölmedeki kolda ve "Diğer kollar"da sağ tık menüsü
 function armMenu(e, acctId, rec, arm) {
   const t = armTab(acctId, arm);
-  const closable = !!t || (arm.state !== 'cut' && arm.state !== 'done');
+  const closable = !!t || !armClosed(arm);
   openMenuAt(e, [
     { header: arm.title || arm.id },
     { icon: 'chat', label: t ? 'Sekmeye geç' : 'Devam et', desc: t ? null : 'Kol olarak yeniden açılır', onclick: () => openArm(acctId, rec, arm) },
     closable ? { icon: 'close', label: 'Kolu kapat', danger: true,
-      desc: t ? 'Sekmesi kapanır; ahtapotta artık çizilmez' : 'Ahtapotta artık çizilmez', onclick: () => closeArm(acctId, rec, arm) } : null,
+      desc: t ? 'Sekmesi kapanır; ahtapottan ve listeden kalkar' : 'Ahtapottan ve listeden kalkar', onclick: () => closeArm(acctId, rec, arm) } : null,
   ], 'octo-arm-menu');
 }
 
@@ -131,17 +135,18 @@ function octopusSidebar(acctId) {
     h('div', { class: 'octo-title' }, 'Ahtapotlar'),
     list.map((rec) => {
       const headTab = tabs.find((t) => t.octopusId === rec.id);
-      const cut = rec.arms.filter((a) => a.state === 'cut').length;
+      const arms = rec.arms.filter((a) => !armClosed(a) || tabs.some((x) => x.sessionId && x.sessionId === a.sessionId));
+      const closed = rec.arms.length - arms.length;
       return h('div', { class: 'octo', 'data-id': rec.id },
         h('button', {
           class: 'octo-row' + (headTab && headTab === active ? ' on' : ''),
-          title: `${tilde(rec.project.cwd)}\n${rec.arms.length} kol${cut ? ` (${cut} kesildi)` : ''}\n${headTab ? 'Baş açık' : 'Tıklayınca baş "Devam et" ile açılır'}`,
+          title: `${tilde(rec.project.cwd)}\n${rec.arms.length} kol${closed ? ` (${closed} kapandı; ahtapot bölmesinde "Diğer kollar")` : ''}\n${headTab ? 'Baş açık' : 'Tıklayınca baş "Devam et" ile açılır'}`,
           onclick: (e) => { e.stopPropagation(); openOctopus(acctId, rec); },
         }, icon('octopus', 14), h('span', { class: 'octo-name' }, rec.project.name),
         headTab ? h('span', { class: 'octo-live', title: 'Baş açık' }) : null,
-        h('span', { class: 'octo-count', title: `${rec.arms.length} kol` }, rec.arms.length)),
-        rec.arms.length
-          ? h('div', { class: 'octo-arms' }, rec.arms.map((arm) => {
+        arms.length ? h('span', { class: 'octo-count', title: `${arms.length} açık kol` }, arms.length) : null),
+        arms.length
+          ? h('div', { class: 'octo-arms' }, arms.map((arm) => {
               const t = tabs.find((x) => x.sessionId && x.sessionId === arm.sessionId);
               // Sekmesi açık olmayan kol çalışamaz ve bekleyemez (panel kapanırken kayıt olduğu gibi kalır)
               const label = !t && (arm.state === 'working' || arm.state === 'waiting') ? 'açık değil' : ARM_STATES[arm.state] || arm.state;

@@ -214,7 +214,9 @@ function findArm(accountId, sessionId) {
   return null;
 }
 function bindArm(chatId, ref) {
-  if (ref && get(ref.octoId)) live.set(chatId, { octoId: ref.octoId, role: 'arm', armId: ref.armId });
+  if (!ref || !get(ref.octoId)) return;
+  live.set(chatId, { octoId: ref.octoId, role: 'arm', armId: ref.armId });
+  setArm(ref.octoId, ref.armId, { closed: false }); // yeniden açılan kol kenar çubuğuna döner
 }
 // Ahtapotun açık baş sohbeti ve kolun açık sohbeti (yoksa null)
 function headChat(octoId) {
@@ -226,11 +228,11 @@ function armChat(octoId, armId) {
   return null;
 }
 // Sekmesi açık olmayan kolu kapatmak (sağ tık "Kolu kapat", başın `sessions close`'u): bitmemişse "kesildi" olur, ahtapotta çizilmez.
-// Bitmiş kol zaten çizilmez (sekmesi kapalı); dokunulmaz.
+// Bitmiş kolun durumu kalır. İkisi de `closed` olur: kenar çubuğundan kalkar (bölmenin "Diğer kollar"ında durur; "Devam et" bayrağı kaldırır).
 function closeArm(octoId, armId) {
   const arm = get(octoId)?.arms.find((a) => a.id === armId);
   if (!arm) return null;
-  if (arm.state !== 'done' && arm.state !== 'cut') setArm(octoId, armId, { state: 'cut', endedAt: now() });
+  setArm(octoId, armId, arm.state !== 'done' && arm.state !== 'cut' ? { state: 'cut', endedAt: now(), closed: true } : { closed: true });
   return arm;
 }
 
@@ -335,7 +337,7 @@ function chatClosed(chatId) {
   live.delete(chatId);
   if (b.role !== 'arm' || shuttingDown) return;
   const arm = get(b.octoId)?.arms.find((a) => a.id === b.armId);
-  if (arm && arm.state !== 'done') setArm(b.octoId, b.armId, { state: 'cut', endedAt: now() });
+  if (arm) setArm(b.octoId, b.armId, arm.state !== 'done' ? { state: 'cut', endedAt: now(), closed: true } : { closed: true });
 }
 
 function shutdown() { shuttingDown = true; }
