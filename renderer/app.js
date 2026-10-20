@@ -298,6 +298,7 @@ function renderLauncher(acctId) {
       h('button', { class: 'pill-btn ghost icon-only', title: 'Claude Code\'u bu klasörde terminalde aç', disabled: !folder,
         onclick: () => folder && launch(acctId, folder, 'new') }, icon('terminal', 15)),
       connectorsButton(acctId, () => newFolderOf(acctId)),
+      skillsButton(acctId, () => newFolderOf(acctId), () => input),
       h('span', { class: 'spacer' }),
       picker,
       usageButton(acctId),
@@ -621,6 +622,7 @@ function closeTab(tab, force) {
   if (!tab) return;
   if (tab.kind === 'chat') {
     if (!force && tab.busy && !confirm(`"${tab.title}" sohbetinde Claude hâlâ çalışıyor. Kapatılsın mı? (Sonra "Devam et" ile dönebilirsiniz.)`)) return;
+    stopActivity(tab); // canlı göstergenin sayacı (renderer/activity.js)
     if (tab.chatId) { window.panel.chatClose(tab.chatId); chatsById.delete(tab.chatId); }
     closeArtifactInChat(tab);
     closeOctopusInChat(tab);
@@ -950,6 +952,16 @@ function setFont(delta) {
   window.panel.saveConfig({ fontSize: state.fontSize });
 }
 
+// Kenar çubuğu: kapalıyken ana alan pencereyi kaplar, üst şeritler trafik ışıklarına ve düğmeye yer açar (styles.css)
+function setSidebar(open, save = true) {
+  state.sidebarHidden = !open;
+  document.body.classList.toggle('sidebar-off', !open);
+  const btn = $('#sidebarToggle');
+  btn.title = open ? 'Kenar çubuğunu gizle (⌘B)' : 'Kenar çubuğunu göster (⌘B)';
+  btn.setAttribute('aria-pressed', String(open));
+  if (save) window.panel.saveConfig({ sidebarHidden: !open });
+}
+
 window.panel.onMenu((cmd, arg) => {
   if (!$('#modal').hidden && cmd !== 'settings') return;
   closeMenu();
@@ -958,6 +970,7 @@ window.panel.onMenu((cmd, arg) => {
     return;
   }
   switch (cmd) {
+    case 'sidebar': setSidebar(state.sidebarHidden); break;
     case 'newChat': newChat(); break;
     case 'artifacts': state.page === 'artifacts' && !art.openId ? selectAccount(state.active) : showArtifacts(null); break;
     case 'account': selectAccount(arg); break;
@@ -1009,6 +1022,8 @@ async function init() {
   accounts().forEach((a) => loadOctopi(a.id)); // renderer/octopus.js
 
   hydrateIcons();
+  setSidebar(!state.cfg.sidebarHidden, false);
+  $('#sidebarToggle').onclick = () => setSidebar(state.sidebarHidden);
   $('#navNew').onclick = newChat;
   $('#navArtifacts').onclick = () => showArtifacts(null);
   $('#settingsBtn').onclick = openSettings;

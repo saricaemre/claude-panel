@@ -23,6 +23,7 @@ const hafiza = require('./hafiza');
 const danis = require('./danis');
 const sinav = require('./sinav');
 const dogus = require('./dogus');
+const skills = require('./skills');
 
 let sdkPromise;
 let helper = null; // scripts/sessions.mjs çalıştırıcısı (setup'ta); alma.js geçmiş oturumları bununla okur
@@ -261,6 +262,8 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
         changes.createTool(sdk, z, { chatId: id, cwd: dir }),
         sessions.createTool(sdk, z, { chatId: id, cwd: dir }),
         ...(asArm ? [] : [wrapup.createTool(sdk, z)]),
+        // Görev listesi kollarda da: kolun ilerlemesi ahtapot kaydına gider (TodoWrite'la aynı yol)
+        wrapup.createPlanTool(sdk, z, { onChange: (items) => octopus.noteTodos(id, items) }),
         opener.createTool(sdk, z, { cwd: dir }),
         prwatch.createTool(sdk, z, { chatId: id, cwd: dir, env }),
         ...hafiza.createTools(sdk, z, { accountId, project, getSessionId: () => sessionId }), // hatirla, hatirla_oku
@@ -288,11 +291,12 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
         // Başa hafıza, görev ve defter talimatı (hafiza.js, octopus.js, defter.js → HEAD_PROMPT): bağlamda olmayanı önce hatirla ile arasın; işi kollara versin; ret, zevk, karar,
         // kural ve açık işi deftere yazsın. "Beyin yap" ile baş olan sohbet bunları ancak yeniden açılınca alır (sistem istemi süreç açılırken verilir).
         // Kola rapor biçimi (octopus.js → ARM_PROMPT).
+        // Her sohbete görev listesi talimatı (wrapup.js → PLAN_PROMPT), rolün talimatından sonra.
         systemPrompt: { type: 'preset', preset: 'claude_code',
-          ...(octoId ? { append: [hafiza.HEAD_PROMPT, octopus.HEAD_PROMPT, defter.HEAD_PROMPT].join('\n\n') } : asArm ? { append: octopus.ARM_PROMPT } : {}) },
+          append: [...(octoId ? [hafiza.HEAD_PROMPT, octopus.HEAD_PROMPT, defter.HEAD_PROMPT] : asArm ? [octopus.ARM_PROMPT] : []), wrapup.PLAN_PROMPT].join('\n\n') },
         settingSources: ['user', 'project', 'local'], // CLAUDE.md, hook'lar, izinler, skill'ler
         mcpServers: { panel: panelMcp },
-        allowedTools: ['mcp__panel__publish_artifact', 'mcp__panel__show', 'mcp__panel__show_widget', 'mcp__panel__wrap_up', 'mcp__panel__open',
+        allowedTools: ['mcp__panel__publish_artifact', 'mcp__panel__show', 'mcp__panel__show_widget', 'mcp__panel__wrap_up', 'mcp__panel__plan', 'mcp__panel__open',
           'mcp__panel__hatirla', 'mcp__panel__hatirla_oku', 'mcp__panel__defter', 'mcp__panel__danis', ...autoAllowTools()],
         includePartialMessages: true,
         includeHookEvents: true,
@@ -486,6 +490,12 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
   const MODELS_TTL = 10 * 60 * 1000;
   const USAGE_TTL = 60 * 1000;
   const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('zaman aşımı')), ms))]);
+
+  // Skill'ler (skills.js): liste kısa ömürlü yoklama sürecinden, açıp kapama genel settings.json → skillOverrides
+  skills.setup({
+    getAccount, expandHome, accountEnv, loadSdk, InputQueue, withTimeout, readJson, readJsonForWrite, writeJsonAtomic, realFile, projectKey,
+    getChat: (id) => chats.get(id),
+  });
 
   async function readUsage(q) {
     // SDK'da deneysel; yoksa ya da hata verirse kullanım "bilinmiyor" sayılır

@@ -5,6 +5,67 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 
 ---
 
+## 2026-10-20 — Kenar çubuğunu açıp kapama
+
+**İstek:** Emre: soldaki paneli bir düğmeyle açıp kapatabileyim.
+
+**Yapılan:** Pencere düğmelerinin hemen sağına sabit bir kenar çubuğu düğmesi (`#sidebarToggle`, ikon `sidebar`) eklendi. Kenar çubuğu kapalıyken de aynı yerde duruyor. Kısayolu ⌘B; Görünüm menüsünde "Kenar çubuğunu gizle / göster" var. Kapanınca kenar çubuğu sola kayıyor (`margin-left`, 0,22 sn; `prefers-reduced-motion`'da geçiş yok). Sekme şeridi, Web araç çubuğu ve artifact görüntüleyicinin başlığı soldan 112 px boşluk alıyor; böylece trafik ışıklarının ve düğmenin altında kalmıyorlar. Durum `config.json` → `sidebarHidden` alanına yazılıyor, açılışta geri geliyor. Terminal yeni genişliğe kendi `ResizeObserver`'ıyla oturuyor.
+
+**Doğrulama:** `npm run check`, `npm test`. Yeni adımda düğmeyle kapanış, `aria-pressed`, sekme şeridinin düğmenin sağında kalması, kaydın yazılması, menüdeki ⌘B ile yeniden açılış ve kaydın geri dönmesi denetleniyor. Sekme şeridine boşluk veren kural kaldırılınca adım kırmızıya döndü ("10 < 104"). Ekran görüntüsü `tests/out/0-kenar-kapali.png`.
+
+**Bekleyen:** Emre'nin görsel onayı.
+
+---
+
+## 2026-10-20 — Görev listesi kartı ve çalışırken canlı gösterge
+
+**İstek:** Emre: Claude uygulamasındaki gibi, iş başlarken kutucuklu bir görev listesi görelim; sohbet çalışırken de daha canlı olsun (efekt, animasyon).
+
+**Ölçüm (gerçek Claude Code 2.1.300, yerel sahte API sunucusu, 0 token):** Opus 5.5'te hiçbir görev listesi aracı yok (ne `TodoWrite` ne `TaskCreate`). Sonnet 4.5'te `TaskCreate`/`TaskUpdate` var, `TodoWrite` kapalı. Panel yalnız `TodoWrite`'ı tanıdığı için gerçek kullanımda listeyi hiç göstermiyordu.
+
+**Yapılan:**
+- Panelin kendi görev listesi aracı `mcp__panel__plan` (`items` ya da `advance`), izinsiz; talimat her sohbetin sistem istemine (`PLAN_PROMPT`). Kollarda da var, kolun ilerlemesi ahtapot kaydına gider.
+- Sohbette kutucuklu kart: başlıkta çalışan adım, ilerleme halkası ve çubuğu; adım bitince kutu dolar, tik çizilir; çalışan adım vurgulu ve parıltılı. İş sürerken kart hep en altta, tur bitince yerinde kalır; hepsi bitince yeşile döner. `TodoWrite` da aynı kartı kullanır. Yazma alanının üstündeki sabit liste artık yalnız kart görünmüyorken çıkar.
+- Canlı gösterge: sohbetin altında dönen ✳, o an ne yapıldığı ("Komut çalıştırıyor", "Yazıyor", "Onayınızı bekliyor"…) parıltılı yazıyla, geçen süre. Yazma alanının kenarında dönen ışık, çalışan araç grubunun başlığında parıltı, akan yanıtın sonunda yanıp sönen imleç, yeni mesajlarda yumuşak giriş. `prefers-reduced-motion`'da hareketler kapalı.
+
+**Doğrulama:** `npm run check`; `npm test` geçti (yeni adım: iş sürerken kart en altta 1/3, adım durumları, canlı gösterge metni ve süresi, yazma alanı ışığı; tur bitince 3/3, kart yerinde, gösterge kapalı, ana süreç 3/3 saydı; "özetle bitir" adımı kart + kaydırınca sabit liste olarak güncellendi). Gösterge kapatılınca ve kartın en altta tutulması bozulunca adım iki ayrı yerde kırmızıya döndü. `tests/out/6o-plan-suruyor.png`, `6p-plan-bitti.png` incelendi; ilk görüntüde çalışan adım üstü çizili çıkıyordu (parıltı efekti saydam çizgiyi boyuyor), düzeltildi.
+
+**Bekleyen:** Gerçek hesapla bir tur (gerçek Claude'un aracı talimatla ne sıklıkla ve doğru biçimde çağırdığı). `TaskCreate`/`TaskUpdate` kartta gösterilmiyor (talimat Claude'dan panel aracını istiyor). Emre'nin görsel onayı; işlemci yükü ölçülmedi.
+
+---
+
+## 2026-10-20 — Sohbette son yanıtın saati
+
+**İstek:** Emre: Claude uygulamasındaki gibi, Claude'un son mesajının ne zaman geldiği mesajın altında görünsün.
+
+**Yapılan:** Tur bitince (`result`) son metin yanıtının hemen altına soluk, küçük bir saat (`14:32`; bugün değilse `19 Eki 14:32`) konur, üzerine gelince tam tarih. Zaman yanıtın geldiği an (`assistant` mesajı), turun bittiği an değil. Yeni tur bitince saat yeni son yanıta taşınır, öncekinden kalkar. renderer/chat.js → `stampLastReply`, stil `.msg-time`.
+
+**Kararlar:** Yalnız metinsiz (yalnız araç çağıran) turda saat konmaz, önceki yerinde kalır. Geçmiş yüklenen oturumda saat yok: SDK'nın `getSessionMessages`'ı zaman damgası vermiyor.
+
+**Doğrulama:** `npm run check`; `npm test` geçti (yeni adım: tek saat, `SS:DD` biçimi, bu turun zamanı, son yanıtın hemen altı). `stampLastReply` çağrısı kapatılınca "saat tek bir yanıtın altında değil: 0" ile kırmızıya döndü. `tests/out/4y-yanit-saati.png` incelendi.
+
+**Bekleyen:** Gerçek hesapla bir tur; Emre'nin görsel onayı.
+
+---
+
+## 2026-10-20 — Skill'ler: yazma alanında menü ve "Skill'leri yönet"
+
+**İstek:** Emre: Claude uygulamasındaki gibi sohbet barında skill sistemi olsun, yönetebileyim.
+
+**Yapılan:** Yazma alanına (sohbet ve Yeni sohbet ekranı) "Skill'ler" düğmesi: aramalı liste, seçilen skill `/ad` olarak mesajın başına girer. Menüden "Skill'leri yönet" penceresi: kişisel / proje / claude.ai / eklenti / yerleşik grupları, her skill için Açık · Yalnız adı · Yalnız ben çağırırım · Kapalı, Kullan · Düzenle · Finder'da göster, "Yeni skill" (`<ayar klasörü>/skills/<ad>/SKILL.md` şablonu, düzenleyicide açılır). "/" önerileri artık açıklama ve argüman ipucuyla. Ana süreç `skills.js`, arayüz `renderer/skills.js`.
+
+**Kararlar ve ölçümler** (gerçek Claude Code 2.1.300, girişsiz geçici ayar klasörü, 0 token):
+- Liste mesaj göndermeyen kısa ömürlü süreçten (`initializationResult().commands` + `getContextUsage().skills` kaynakları), ~0,5 sn. Kapalılar da görünsün diye dosyalardaki geçersiz kılmalar `--settings` ile `on` verilir; kancalar kapalı, MCP açılmaz.
+- Durum Claude Code'un kendi ayarı `skillOverrides`. Anahtar kişisel/proje skill'inde **klasör adı** (frontmatter adı farklıysa işlemiyor: `baz` değil `bardir`). Eklenti skill'leri bu ayarı yok sayıyor (Claude Code kodu); eklentiyle açılıp kapanır.
+- Panel genel `settings.json`'a yazar (eklentiler gibi; ortaksa her hesapta geçerli). Claude Code'un `/skills` menüsü ise projenin `.claude/settings.local.json`'una yazıyor; orada değer varsa panel kilitli gösterir.
+- Açık oturum ayar dosyasını izliyor, değişiklik `commands_changed` ile kendiliğinden uygulanıyor (symlink'li dosyada da). Panel bu mesajı eskiden yanlış alandan (`slash_commands`) okuyordu; düzeltildi (`commands`).
+
+**Doğrulama:** `npm run check`; `npm test` geçti (iki yeni adım: Yeni sohbet ekranında menü + yönetim, sohbette `commands_changed`). Anahtar klasör adı yerine ad yazılacak biçimde bozulunca "skill kapatma settings.json'a klasör adıyla yazılmadı" ile kırmızıya döndü. `tests/out/1f-skiller.png`, `1g-skill-menusu.png` incelendi (satır kırpılması düzeltildi).
+
+**Bekleyen:** Gerçek hesapla bir tur: claude.ai'den eşitlenen skill'lerin (`anthropic-skills:…`) anahtarı girişsiz ölçülemedi, kural Claude Code kodundan çıkarıldı. Skill silme ve proje skill'i oluşturma arayüzü yok.
+
+---
+
 ## 2026-10-19 — GitHub'a gönderildi, arkadaşla paylaşım
 
 **İstek:** Emre: projeyi GitHub'a gönder, arkadaşı (`kibritci`) kendi kopyasında çalışacak.

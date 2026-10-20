@@ -68,6 +68,19 @@ fs.writeFileSync(path.join(HOME, '.claude-max', 'plugins', 'installed_plugins.js
 fs.mkdirSync(path.join(PROJECT, '.claude'), { recursive: true });
 fs.writeFileSync(path.join(PROJECT, '.claude', 'settings.local.json'), JSON.stringify({ enabledPlugins: { 'yerel@resmi': false } }));
 const pluginsOn = () => JSON.parse(fs.readFileSync(SHARED_SETTINGS, 'utf8')).enabledPlugins;
+// Skill'ler: Max hesabında üç kişisel skill (biri frontmatter adı klasöründen farklı, biri yalnız kullanıcının çağırdığı), projede bir skill
+// (klasörün settings.local.json'u "yalnız adı" diyor), açık eklentinin bir skill'i
+const writeSkill = (dir, front) => {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'SKILL.md'), `---\n${Object.entries(front).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n\nGövde\n`);
+};
+writeSkill(path.join(HOME, '.claude-max', 'skills', 'tasarim'), { name: 'tasarim', description: 'Arayüz tasarımı yönergeleri', 'argument-hint': '<ekran>' });
+writeSkill(path.join(HOME, '.claude-max', 'skills', 'ogilvy'), { name: 'ogilvy-copywriting', description: 'Reklam metni ilkeleri' });
+writeSkill(path.join(HOME, '.claude-max', 'skills', 'sadece-ben'), { name: 'sadece-ben', description: 'Elle çağrılan iş akışı', 'disable-model-invocation': 'true' });
+writeSkill(path.join(PROJECT, '.claude', 'skills', 'proje-notu'), { name: 'proje-notu', description: 'Projenin kuralları' });
+writeSkill(path.join(pluginDir('guvenlik'), 'skills', 'tarama'), { name: 'tarama', description: 'Güvenlik taraması' });
+fs.writeFileSync(path.join(PROJECT, '.claude', 'settings.local.json'), JSON.stringify({ enabledPlugins: { 'yerel@resmi': false }, skillOverrides: { 'proje-notu': 'name-only' } }));
+const skillOv = () => JSON.parse(fs.readFileSync(SHARED_SETTINGS, 'utf8')).skillOverrides;
 const mcpOff = () => JSON.parse(fs.readFileSync(CLAUDE_JSON, 'utf8')).projects?.[PROJECT]?.disabledMcpServers;
 // Üç hesap ayarda açıkça (varsayılan tek hesap ~/.claude; ayarda hesap yoksa ilk açılış sihirbazı açılır, son adımda denenir).
 // İzinsiz MCP sunucuları da ayarda (varsayılan boş; temiz kurulumda --allowedTools gitmediği son adımda denenir)
@@ -262,6 +275,32 @@ async function waitUntil(fn, ms, msg) {
       return [region('.acct-pane.active .tabbar'), region('.acct-pane.active .tab-add'), region('#sidebar .drag')];
     }), ['drag', 'no-drag', 'drag'], 'pencere sekme şeridinden sürüklenmiyor ya da "+" tıklanamıyor');
 
+    step('Kenar çubuğu: düğme ve ⌘B ile kapanıp açılıyor, kapalıyken sekme şeridi düğmenin sağında, ayar kaydediliyor');
+    const readConfig = () => JSON.parse(fs.readFileSync(path.join(USER_DATA, 'config.json'), 'utf8'));
+    const sideBox = () => page.evaluate(() => {
+      const r = document.querySelector('#sidebar').getBoundingClientRect();
+      const t = document.querySelector('#sidebarToggle').getBoundingClientRect();
+      const first = document.querySelector('.acct-pane.active .tabbar > :first-child').getBoundingClientRect();
+      return { right: Math.round(r.right), toggle: Math.round(t.right), first: Math.round(first.left), pressed: document.querySelector('#sidebarToggle').getAttribute('aria-pressed') };
+    });
+    assert.equal((await sideBox()).pressed, 'true');
+    await page.click('#sidebarToggle');
+    await page.waitForFunction(() => document.querySelector('#sidebar').getBoundingClientRect().right <= 0, null, { timeout: 3000 });
+    await page.waitForTimeout(300);
+    let sb = await sideBox();
+    assert.equal(sb.pressed, 'false');
+    assert.ok(sb.first >= sb.toggle, `kapalı kenar çubuğunda sekme şeridi düğmenin altında kalıyor (${sb.first} < ${sb.toggle})`);
+    assert.ok(await page.isVisible('#sidebarToggle'), 'kenar çubuğu kapalıyken aç düğmesi görünmüyor');
+    await waitUntil(() => readConfig().sidebarHidden === true, 3000, 'kenar çubuğu kapalı diye kaydedilmedi');
+    await page.screenshot({ path: path.join(OUT, '0-kenar-kapali.png') });
+    await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.find((m) => m.label === 'Görünüm').submenu.items.find((i) => i.accelerator === 'CmdOrCtrl+B').click());
+    await page.waitForFunction(() => document.querySelector('#sidebar').getBoundingClientRect().left >= 0, null, { timeout: 3000 });
+    await page.waitForTimeout(300);
+    sb = await sideBox();
+    assert.equal(sb.pressed, 'true');
+    assert.ok(sb.right > 200, 'kenar çubuğu ⌘B ile yeniden açılmadı');
+    await waitUntil(() => readConfig().sidebarHidden === false, 3000, 'kenar çubuğu açık diye kaydedilmedi');
+
     step('Terminal: hesabın ayar klasörüyle açılıyor');
     await page.evaluate((dir) => launch('max', dir, 'shell'), PROJECT);
     await page.waitForSelector(P + '.term-host.active .xterm');
@@ -354,6 +393,74 @@ async function waitUntil(fn, ms, msg) {
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('.plugins-modal').count(), 0);
 
+    step('Skill\'ler: yeni sohbet ekranındaki menü (ara, Enter → /ad yazma alanına) ve "Skill\'leri yönet" (durum ortak settings.json → skillOverrides, anahtar klasör adı; kilitler; yeni skill)');
+    const SK = (name) => `.skills-modal .sk-item[data-name="${name}"]`;
+    await page.click(N + '.skills-btn');
+    await page.waitForSelector('.skills-pop .sk-row');
+    assert.deepEqual(await page.$$eval('.skills-pop .sk-row', (o) => o.map((x) => x.dataset.name)),
+      ['ogilvy-copywriting', 'sadece-ben', 'tasarim', 'proje-notu', 'guvenlik:tarama', 'code-review'], 'skill listesi ya da sırası yanlış');
+    assert.equal(await page.textContent('.skills-pop .sk-row[data-name="tasarim"] small'), 'Arayüz tasarımı yönergeleri', 'açıklamanın sonundaki kaynak ("(user)") atılmadı');
+    // Yoklama süreci: kancalar kapalı, MCP yok, dosyadaki kapalı skill'ler de görünsün diye geçersiz kılmalar 'on'
+    const probeLine = fakeLog().split('\n').filter((l) => l.startsWith('SKILLPROBE ')).at(-1) || '';
+    assert.ok(probeLine.includes('"disableAllHooks":true') && probeLine.includes('"skillOverrides":{"proje-notu":"on"}') && probeLine.includes('CWD ' + PROJECT),
+      'yoklama süreci yanlış ayarla açıldı: ' + probeLine);
+    assert.match(fakeLog(), /ARGS \[[^\n]*"--strict-mcp-config"[^\n]*"--settings"/, 'yoklama süreci MCP sunucularını açabilir');
+    await page.fill('.skills-pop .sk-search', 'arayüz');
+    assert.deepEqual(await page.$$eval('.skills-pop .sk-row', (o) => o.map((x) => x.dataset.name)), ['tasarim'], 'açıklamada arama çalışmadı');
+    await page.press('.skills-pop .sk-search', 'Enter');
+    assert.equal(await page.locator('.skills-pop').count(), 0);
+    assert.equal(await page.inputValue(N + '.new-input'), '/tasarim ', 'seçilen skill yazma alanına girmedi');
+    await page.fill(N + '.new-input', '');
+
+    await page.click(N + '.skills-btn');
+    await page.click('.skills-pop .sk-manage');
+    await page.waitForSelector('.skills-modal .sk-item');
+    assert.deepEqual(await page.$$eval('.skills-modal .mm-group', (o) => o.map((x) => x.dataset.group)), ['user', 'project', 'plugin', 'builtin']);
+    const skRows = () => page.$$eval('.skills-modal .sk-item', (o) => o.map((x) => [x.dataset.name, x.querySelector('.sk-mode').value, x.querySelector('.sk-mode').disabled]));
+    assert.deepEqual(await skRows(), [['ogilvy-copywriting', 'on', false], ['sadece-ben', 'user-invocable-only', false], ['tasarim', 'on', false],
+      ['proje-notu', 'name-only', true], ['guvenlik:tarama', 'on', true], ['code-review', 'on', false]]);
+    assert.deepEqual(await page.$$eval(SK('sadece-ben') + ' .sk-mode option', (o) => o.map((x) => x.textContent)), ['Açık', 'Kapalı'], 'yazarın kilitlediği skill\'te dört durum var');
+    assert.match(await page.textContent(SK('proje-notu')), /settings\.local\.json dosyası belirliyor/);
+    assert.match(await page.textContent(SK('guvenlik:tarama')), /Eklentiyle birlikte açılıp kapanır/);
+    assert.equal(await page.locator(SK('ogilvy-copywriting') + ' .sk-edit').count(), 1, 'kişisel skill düzenlenemiyor');
+    assert.equal(await page.locator(SK('code-review') + ' .sk-edit').count(), 0, 'yerleşik skill düzenlenebilir görünüyor');
+    assert.match(await page.textContent('.skills-modal .pl-note'), /^Ortak ayar dosyası \(~\/\.claude\/settings\.json\)/);
+    // Gerçek Claude Code'un baktığı anahtar klasör adı (ogilvy), frontmatter adı (ogilvy-copywriting) değil
+    await page.selectOption(SK('ogilvy-copywriting') + ' .sk-mode', 'off');
+    await page.waitForSelector(SK('ogilvy-copywriting') + '.off .sk-mode:not([disabled])');
+    assert.deepEqual(skillOv(), { ogilvy: 'off' }, 'skill kapatma settings.json\'a klasör adıyla yazılmadı');
+    await page.selectOption(SK('code-review') + ' .sk-mode', 'name-only');
+    await page.selectOption(SK('sadece-ben') + ' .sk-mode', 'off');
+    await waitUntil(() => JSON.stringify(skillOv()) === JSON.stringify({ ogilvy: 'off', 'code-review': 'name-only', 'sadece-ben': 'off' }), 5000, 'skillOverrides: ' + JSON.stringify(skillOv()));
+    await page.selectOption(SK('sadece-ben') + ' .sk-mode', 'user-invocable-only'); // "Açık": geçersiz kılma silinir
+    await waitUntil(() => !('sadece-ben' in skillOv()), 5000, 'açılan skill\'in kaydı silinmedi: ' + JSON.stringify(skillOv()));
+    assert.deepEqual(JSON.parse(fs.readFileSync(SHARED_SETTINGS, 'utf8')).enabledPlugins, { 'guvenlik@resmi': true, 'eski@resmi': true }, 'settings.json\'un diğer alanları bozuldu');
+    assert.ok(fs.lstatSync(path.join(HOME, '.claude-max', 'settings.json')).isSymbolicLink(), 'settings.json symlink\'i bozuldu');
+    await page.fill('.skills-modal .sk-filter', 'kural');
+    assert.deepEqual(await page.$$eval('.skills-modal .sk-item', (o) => o.map((x) => x.dataset.name)), ['proje-notu']);
+    await page.fill('.skills-modal .sk-filter', '');
+    // Yeni skill: geçersiz ad reddedilir; geçerli ad <ayar klasörü>/skills/<ad>/SKILL.md'yi açar ve listeye girer
+    await page.click('.skills-modal .sk-new');
+    await page.fill('.modal.dlg .dlg-input', 'Kötü Ad');
+    await page.press('.modal.dlg .dlg-input', 'Enter');
+    await page.waitForSelector('#toast:not([hidden]):has-text("Skill oluşturulamadı")');
+    await page.click('.skills-modal .sk-new');
+    await page.fill('.modal.dlg .dlg-input', 'haftalik-rapor');
+    await page.press('.modal.dlg .dlg-input', 'Enter');
+    await page.waitForSelector(SK('haftalik-rapor'));
+    const newSkill = path.join(HOME, '.claude-max', 'skills', 'haftalik-rapor', 'SKILL.md');
+    assert.match(fs.readFileSync(newSkill, 'utf8'), /^---\nname: haftalik-rapor\ndescription: "/, 'SKILL.md şablonu yanlış');
+    await waitUntil(() => openLog().some((o) => JSON.stringify(o).includes('haftalik-rapor')), 5000, 'yeni SKILL.md düzenleyicide açılmadı');
+    fs.rmSync(OPEN_LOG, { force: true }); // editörde aç adımı günlüğün tamamını denetler
+    await page.screenshot({ path: path.join(OUT, '1f-skiller.png') });
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('.skills-modal').count(), 0);
+    await page.click(N + '.skills-btn');
+    await page.waitForSelector('.skills-pop .sk-row');
+    assert.equal(await page.locator('.skills-pop .sk-row[data-name="ogilvy-copywriting"]').count(), 0, 'kapalı skill menüde');
+    await page.screenshot({ path: path.join(OUT, '1g-skill-menusu.png') });
+    await page.keyboard.press('Escape');
+
     step('Yeni sohbet ekranı: ilk mesajı yazıp Enter → sohbet seçili klasörde, seçili model/eforla başlar ve mesaj gider');
     const LOGGED_OUT = path.join(HOME, '.claude-max', '.fake-logged-out'); // sohbet süreci girişten önce açılmış gibi
     fs.writeFileSync(LOGGED_OUT, '');
@@ -431,12 +538,36 @@ async function waitUntil(fn, ms, msg) {
     assert.ok(log.includes('CFG ' + path.join(HOME, '.claude-max')), 'yanlış CLAUDE_CONFIG_DIR');
     assert.match(log, /"answers":\{"Kapanışta main'e birleştireyim mi\?":"Evet"\}/);
     assert.match(log, /--setting-sources=user,project,local/);
-    assert.match(log, /"--allowedTools=mcp__panel__publish_artifact,mcp__panel__show,mcp__panel__show_widget,mcp__panel__wrap_up,mcp__panel__open,mcp__panel__hatirla,mcp__panel__hatirla_oku,mcp__panel__defter,mcp__panel__danis,mcp__blender,mcp__figma-console"/, 'Blender/figma-console izinsiz değil: ' + (log.match(/ARGS .*setting-sources=user.*/) || [''])[0]);
+    assert.match(log, /"--allowedTools=mcp__panel__publish_artifact,mcp__panel__show,mcp__panel__show_widget,mcp__panel__wrap_up,mcp__panel__plan,mcp__panel__open,mcp__panel__hatirla,mcp__panel__hatirla_oku,mcp__panel__defter,mcp__panel__danis,mcp__blender,mcp__figma-console"/, 'Blender/figma-console izinsiz değil: ' + (log.match(/ARGS .*setting-sources=user.*/) || [''])[0]);
 
     step('Slash komut önerisi');
     await page.fill(P + '.composer-input', '/ta');
     await page.dispatchEvent(P + '.composer-input', 'input');
-    assert.deepEqual(await page.$$eval(P + '.slash-item', (o) => o.map((x) => x.textContent)), ['/tasarim']);
+    await page.waitForFunction((sel) => document.querySelector(sel)?.textContent.includes('Arayüz tasarımı'), P + '.slash-item', { timeout: 5000 });
+    assert.deepEqual(await page.$$eval(P + '.slash-item', (o) => o.map((x) => [...x.children].map((c) => c.textContent))), [['/tasarim', '<ekran>', 'Arayüz tasarımı yönergeleri']]);
+    await page.fill(P + '.composer-input', '');
+
+    step('Skill\'ler: sohbetin yazma alanındaki menü /ad yazar; kapatılan skill açık oturumda commands_changed ile "/" önerilerinden düşer');
+    await page.fill(P + '.composer-input', 'şu ekranı düzelt');
+    await page.click(P + '.composer .skills-btn');
+    await page.click('.skills-pop .sk-row[data-name="tasarim"]');
+    assert.equal(await page.inputValue(P + '.composer-input'), '/tasarim şu ekranı düzelt', 'skill mesajın başına girmedi');
+    await page.fill(P + '.composer-input', '');
+    const skMark = fakeLog().length;
+    await page.click(P + '.composer .skills-btn');
+    await page.click('.skills-pop .sk-manage');
+    await page.selectOption('.skills-modal .sk-item[data-name="tasarim"] .sk-mode', 'off');
+    await waitUntil(() => /^SKILLS (?!.*tasarim)/m.test(fakeLog().slice(skMark)), 8000, 'açık oturum ayar değişikliğini görmedi (commands_changed)');
+    await page.keyboard.press('Escape');
+    await page.fill(P + '.composer-input', '/ta');
+    await page.dispatchEvent(P + '.composer-input', 'input');
+    assert.equal(await page.locator(P + '.slash-box:not([hidden])').count(), 0, 'kapatılan skill "/" önerilerinde');
+    await page.click(P + '.composer .skills-btn');
+    await page.click('.skills-pop .sk-manage');
+    await page.selectOption('.skills-modal .sk-item[data-name="tasarim"] .sk-mode', 'on');
+    await page.keyboard.press('Escape');
+    await page.fill(P + '.composer-input', '/ta');
+    await page.waitForFunction((sel) => !!document.querySelector(sel), P + '.slash-box:not([hidden]) .slash-item[data-cmd="/tasarim"]', { timeout: 8000 });
     await page.fill(P + '.composer-input', '');
 
     step('Kancalar: panel SDK callback\'lerini kaydeder; sahte CLI gerçek protokolle çağırır; bağlam ve block ulaşır. Sıkıştırma izni ve bağlam göstergesi');
@@ -1281,15 +1412,64 @@ async function waitUntil(fn, ms, msg) {
     assert.equal(await page.textContent(WB + ' .wb-ask'), 'Testleri şimdi yazayım mı?');
     assert.deepEqual(await page.$$eval(WB + ' .wb-actions button', (o) => o.map((b) => [b.textContent, b.className])), [['Evet, yaz', 'primary-btn'], ['Sonra', 'ghost-btn']]);
     assert.ok(await page.$eval(C + '.chat-list', (l) => l.lastElementChild.classList.contains('wrap-box')), 'kutu turun sonuna taşınmadı');
-    assert.equal(await page.isVisible(C + '.plan-bar'), true, 'yarım görev listesi yazma alanının üstünde değil');
+    // TodoWrite da sohbetteki kartı günceller; kart görünürken sabit liste gizli, yukarı kaydırınca çıkar
+    assert.equal(await page.textContent(C + '.plan-card .pc-count'), '1/3');
+    await page.screenshot({ path: path.join(OUT, '6n-tur-sonu.png') });
+    assert.equal(await page.isHidden(C + '.plan-bar'), true, 'kart görünürken sabit liste de çıktı');
+    await page.$eval(C + '.chat-scroll', (s) => { s.scrollTop = 0; });
+    await page.waitForSelector(C + '.plan-bar:not([hidden])', { timeout: 3000 });
     assert.equal(await page.textContent(C + '.plan-bar .pb-count'), '1/3');
     assert.equal(await page.textContent(C + '.plan-bar .pb-cur'), 'Testler yazılıyor');
-    await page.screenshot({ path: path.join(OUT, '6n-tur-sonu.png') });
+    await page.$eval(C + '.chat-scroll', (s) => { s.scrollTop = s.scrollHeight; });
     await page.click(WB + ' .wb-actions .primary-btn');
     await turnDone('Hepsi bitti');
     assert.equal(await page.locator(C + '.msg-user').last().innerText(), 'tamam, bitir: testleri yaz');
     assert.deepEqual(await page.$$eval(WB + ' .wb-actions button', (o) => o.map((b) => [b.disabled, b.classList.contains('chosen')])), [[true, true], [true, false]]);
     assert.equal(await page.isHidden(C + '.plan-bar'), true, 'görevler bitince liste kaybolmadı');
+
+    step('Görev listesi (panelin plan aracı): kart iş sürerken en altta, adımlar ilerler; canlı gösterge ve yazma alanının ışığı; tur bitince kart yerinde kalır');
+    assert.match(fakeLog(), /^APPEND "Görev listesi: dosya düzenleyen.*mcp__panel__plan.*advance: true/m, 'sistem istemine görev listesi talimatı gitmedi');
+    await page.fill(C + '.composer-input', 'planla ve uygula');
+    await page.press(C + '.composer-input', 'Enter');
+    await waitUntil(() => /PLAN SURUYOR/.test(fakeLog()), 15000, 'plan turu komuta gelmedi');
+    await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .plan-card.pinned .pc-count')?.textContent === '1/3', null, { timeout: 5000 });
+    const live = await page.$eval(C + '.chat-scroll', (s) => {
+      const card = [...s.querySelectorAll('.plan-card')].pop();
+      const act = s.querySelector('.live-act');
+      return {
+        sonda: s.querySelector('.chat-list').lastElementChild === card, sabit: card.classList.contains('pinned'),
+        adimlar: [...card.querySelectorAll('.pc-item')].map((li) => [li.querySelector('.pc-text').textContent, li.className.replace('pc-item ', '').replace(' just', '')]),
+        baslik: card.querySelector('.pc-title').textContent, satir: s.querySelectorAll('.tool-row .tool-name').length > 0,
+        gosterge: !act.hidden && act.querySelector('.la-text').textContent, sure: /^\d+ sn$/.test(act.querySelector('.la-time').textContent),
+        isik: s.closest('.chat-main').querySelector('.composer-box').classList.contains('working'),
+        grup: !!s.querySelector('.tool-group.running'),
+      };
+    });
+    assert.deepEqual(live, {
+      sonda: true, sabit: true, adimlar: [['Kodu oku', 'completed'], ['Düzeltmeyi yaz', 'in_progress'], ['Testleri koş', 'pending']],
+      baslik: 'Düzeltmeyi yaz', satir: true, gosterge: 'Komut çalıştırıyor', sure: true, isik: true, grup: true,
+    }, 'iş sürerken görev kartı ya da canlı gösterge yanlış');
+    assert.equal(await page.$$eval(C + '.tool-row .tool-name', (o) => o.filter((x) => /plan/i.test(x.textContent)).length), 0, 'plan aracı satır olarak göründü');
+    await page.waitForTimeout(700); // tikin çizilmesi ve geçişler bitsin
+    await page.screenshot({ path: path.join(OUT, '6o-plan-suruyor.png') });
+    await turnDone('Plan tamam');
+    assert.ok(!/PLANPERM/.test(fakeLog()), 'plan aracı izin sordu');
+    assert.match(fakeLog(), /PLANMCP\s+"Liste güncellendi \(3\/3\)\."/, 'ana süreç son advance\'i 3/3 saymadı');
+    const after = await page.$eval(C + '.chat-scroll', (s) => {
+      const card = [...s.querySelectorAll('.plan-card')].pop();
+      return {
+        kartlar: s.querySelectorAll('.plan-card').length, done: card.classList.contains('done'), sabit: card.classList.contains('pinned'),
+        hepsi: [...card.querySelectorAll('.pc-item')].every((li) => li.classList.contains('completed')), sayi: card.querySelector('.pc-count').textContent,
+        baslik: card.querySelector('.pc-title').textContent,
+        // son yanıt ve saati kartın üstünde, kart listenin sonunda
+        sira: [...s.querySelector('.chat-list').children].slice(-3).map((x) => x.className.split(' ')[0]),
+        gosterge: s.querySelector('.live-act').hidden, isik: s.closest('.chat-main').querySelector('.composer-box').classList.contains('working'),
+      };
+    });
+    assert.deepEqual(after, { kartlar: 2, done: true, sabit: false, hepsi: true, sayi: '3/3', baslik: 'Hepsi tamamlandı',
+      sira: ['msg-assistant', 'msg-time', 'plan-card'], gosterge: true, isik: false }, 'tur bitince görev kartı ya da gösterge yanlış');
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: path.join(OUT, '6p-plan-bitti.png') });
 
     step('Ayrı kopya (worktree): sohbet kendi dalında, ana klasör değişmez; değişiklikli kopya kapanınca korunur');
     const gitOut = (...args) => require('child_process').execFileSync('git', ['-C', DEPO, ...args], { encoding: 'utf8' });
@@ -1411,6 +1591,18 @@ async function waitUntil(fn, ms, msg) {
       kodDili: el.querySelector('.codeblock .code-head span')?.textContent,
     })), { sahte: [], kodDili: 'js' }, 'panelin sınıfı/id\'si yanıtta kaldı ya da kod dili kayboldu');
     assert.match(await page.getAttribute('meta[http-equiv="Content-Security-Policy"]', 'content'), /form-action 'none'/);
+
+    step('Sohbet: Claude\'un son yanıtının altında saati; önceki turların saati kalkar');
+    const stamp = await page.$$eval(C + '.chat-list > .msg-time', (els) => els.map((el) => ({
+      text: el.textContent, at: Number(el.dataset.at), title: !!el.title,
+      prev: el.previousElementSibling?.classList.contains('msg-assistant') && el.previousElementSibling.textContent.includes('görev kutucuğu'),
+      last: [...el.parentElement.querySelectorAll(':scope > .msg-assistant')].pop() === el.previousElementSibling,
+    })));
+    assert.equal(stamp.length, 1, 'saat tek bir yanıtın altında değil: ' + stamp.length);
+    assert.match(stamp[0].text, /^\d{2}:\d{2}$/, 'saat biçimi yanlış');
+    assert.ok(Date.now() - stamp[0].at < 60000 && stamp[0].title, 'saat bu turun zamanı değil');
+    assert.deepEqual([stamp[0].prev, stamp[0].last], [true, true], 'saat son yanıtın hemen altında değil');
+    await page.screenshot({ path: path.join(OUT, '4y-yanit-saati.png') });
 
     step('Sohbet: Claude\'un yanıtında seçilen metin "Yanıtla" ile alıntı olarak yazma alanına girer');
     const replyP = page.locator(C + '.msg-assistant:has-text("Devam etmek için") p').first();
@@ -2153,7 +2345,7 @@ async function waitUntil(fn, ms, msg) {
     assert.deepEqual(await memHits('witcher'), [['h2', 'dusmus']], 'silinen kaydın dizini gitti');
 
     step('Hafıza: başın hatirla / hatirla_oku araçları (izinsiz), sistem istemindeki talimat, "Hafızada ara" penceresi');
-    assert.match(fakeLog().split('\n').find((l) => l.startsWith('APPEND ')) || '', /^APPEND null$/, 'baş olmayan sohbete hafıza talimatı gitti');
+    assert.doesNotMatch(fakeLog().split('\n').find((l) => l.startsWith('APPEND ')) || '', /hatirla|projenin beyni/, 'baş olmayan sohbete hafıza talimatı gitti');
     const memMark = fakeLog().length;
     await page.click('.acct.active .octo-row:has-text("WFC")');
     await page.waitForFunction((oc) => state.activeTab.max?.chatId && state.activeTab.max.octopusId === oc, adoptedId, { timeout: 15000 });

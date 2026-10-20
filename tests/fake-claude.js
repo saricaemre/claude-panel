@@ -17,6 +17,88 @@ const sid = argOf('resume') || require('crypto').randomUUID();
 log('SID', sid);
 // Danışma (danis.js, P6.1): panel dalı --resume ve --max-turns=1 ile açar; gerçek Claude Code gibi dal dosyasını cwd'nin proje klasöründen okur
 const DANIS = !!argOf('resume') && argOf('max-turns') === '1';
+
+// ---------- Skill'ler (skills.js; gerçek Claude Code 2.1.300'de 2026-10-20'de ölçülen davranış) ----------
+// Kişisel: <ayar klasörü>/skills/<klasör>/SKILL.md ve commands/<ad>.md; proje: cwd'den eve kadar .claude/skills; açık eklentinin skills/ klasörü
+// (<eklenti>:<klasör>); yerleşik: code-review. skillOverrides anahtarı klasör adı (frontmatter adı değil), katmanlar user < project < local < --settings,
+// eklenti skill'i ayarı yok sayar. Açıklamanın sonuna kaynak eklenir ("(user)"). Ayar dosyası değişince commands_changed yollanır.
+const SETTINGS_FLAG = (() => { const i = process.argv.indexOf('--settings'); try { return i > 0 ? JSON.parse(process.argv[i + 1]) : {}; } catch { return {}; } })();
+const CFG_DIR = process.env.CLAUDE_CONFIG_DIR || require('path').join(require('os').homedir(), '.claude');
+function skillState() {
+  const P = require('path');
+  const home = require('os').homedir();
+  const rd = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+  const dirs = (d) => { try { return fs.readdirSync(d); } catch { return []; } };
+  const front = (f) => {
+    const m = fs.readFileSync(f, 'utf8').match(/^---\n([\s\S]*?)\n---/);
+    const o = {};
+    for (const l of (m ? m[1].split('\n') : [])) { const i = l.indexOf(':'); if (i > 0) o[l.slice(0, i).trim()] = l.slice(i + 1).trim().replace(/^"(.*)"$/, '$1'); }
+    return o;
+  };
+  const all = [];
+  const scan = (root, source, label) => {
+    for (const d of dirs(P.join(root, 'skills'))) {
+      const f = P.join(root, 'skills', d, 'SKILL.md');
+      if (!fs.existsSync(f)) continue;
+      const m = front(f);
+      all.push({ key: d, name: m.name || d, description: m.description || '', argumentHint: m['argument-hint'] || '', source, label, userOnly: m['disable-model-invocation'] === 'true' });
+    }
+    for (const f of dirs(P.join(root, 'commands')).filter((x) => x.endsWith('.md'))) {
+      const m = front(P.join(root, 'commands', f));
+      all.push({ key: f.slice(0, -3), name: f.slice(0, -3), description: m.description || '', argumentHint: m['argument-hint'] || '', source, label });
+    }
+  };
+  scan(CFG_DIR, 'userSettings', 'user');
+  for (let d = process.cwd(); d !== home && d !== P.dirname(d); d = P.dirname(d)) scan(P.join(d, '.claude'), 'projectSettings', 'project');
+  const user = rd(P.join(CFG_DIR, 'settings.json')) || {};
+  const installed = rd(P.join(CFG_DIR, 'plugins', 'installed_plugins.json'))?.plugins || {};
+  for (const [id, on] of Object.entries(user.enabledPlugins || {})) {
+    const at = on && installed[id]?.[0]?.installPath;
+    for (const d of at ? dirs(P.join(at, 'skills')) : []) {
+      const f = P.join(at, 'skills', d, 'SKILL.md');
+      if (fs.existsSync(f)) all.push({ key: null, name: `${id.split('@')[0]}:${d}`, description: front(f).description || '', argumentHint: '', source: 'plugin' });
+    }
+  }
+  all.push({ key: 'code-review', name: 'code-review', description: 'Değişiklikleri hatalara karşı inceler', argumentHint: '', source: 'built-in', builtin: true });
+  const ov = Object.assign({}, user.skillOverrides, rd(P.join(process.cwd(), '.claude', 'settings.json'))?.skillOverrides,
+    rd(P.join(process.cwd(), '.claude', 'settings.local.json'))?.skillOverrides, SETTINGS_FLAG.skillOverrides);
+  for (const s of all) {
+    const v = s.source === 'plugin' ? 'on' : ov[s.key] || 'on';
+    s.mode = s.userOnly && v !== 'off' ? 'user-invocable-only' : v;
+  }
+  const visible = all.filter((s) => s.mode !== 'off');
+  const commands = [
+    ...visible.map((s) => ({ name: s.name, description: s.description + (s.label ? ` (${s.label})` : ''), argumentHint: s.argumentHint,
+      ...(s.key && s.key !== s.name ? { aliases: [s.key] } : {}), ...(s.builtin ? { builtin: true } : {}) })),
+    { name: 'compact', description: 'Konuşmayı özetler', argumentHint: '<talimat>', builtin: true },
+    { name: 'context', description: 'Bağlam kullanımını gösterir', argumentHint: '', builtin: true },
+  ];
+  const frontmatter = visible.filter((s) => s.mode === 'on' || s.mode === 'name-only')
+    .map((s) => ({ name: s.name, source: s.source, tokens: s.mode === 'name-only' ? 3 : 10 + s.description.length / 4 | 0 }));
+  return { commands, frontmatter, skills: visible.map((s) => s.name) };
+}
+if (process.argv.includes('--settings')) log('SKILLPROBE', JSON.stringify(SETTINGS_FLAG), 'CWD', process.cwd());
+let skillNames = '';
+(() => {
+  const f = (() => { try { return fs.realpathSync(require('path').join(CFG_DIR, 'settings.json')); } catch { return null; } })();
+  if (!f) return;
+  let timer = null;
+  try {
+    // Panel dosyayı geçici dosyayla değiştirir (rename): dosya değil klasör izlenir
+    fs.watch(require('path').dirname(f), (_ev, name) => {
+      if (name && name !== require('path').basename(f)) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const st = skillState();
+        const names = st.commands.map((c) => c.name).join(',');
+        if (names === skillNames) return;
+        skillNames = names;
+        log('SKILLS', names);
+        out({ type: 'system', subtype: 'commands_changed', commands: st.commands, session_id: sid, uuid: uuid() });
+      }, 150);
+    }).unref();
+  } catch {}
+})();
 // Ayar klasöründe .fake-logged-out varsa süreç girişsiz açılmış sayılır (gerçek Claude Code girişi açılışta okur)
 // Ayar klasörü boşsa gerçek Claude Code gibi ~/.claude
 const LOGGED_OUT = fs.existsSync(require('path').join(process.env.CLAUDE_CONFIG_DIR || require('path').join(require('os').homedir(), '.claude'), '.fake-logged-out'));
@@ -43,7 +125,8 @@ rl.on('line', async (line) => {
     if (sub === 'initialize') hookReg = m.request.hooks || {};
     // Sistem istemine ek (systemPrompt.append): SDK initialize'da appendSystemPrompt olarak verir; başta hafıza talimatı (P3.2)
     if (sub === 'initialize') log('APPEND', JSON.stringify(m.request.appendSystemPrompt ?? null));
-    if (sub === 'initialize') response = { commands: [], models: [
+    if (sub === 'initialize') skillNames = skillState().commands.map((c) => c.name).join(',');
+    if (sub === 'initialize') response = { commands: skillState().commands, models: [
       { value: 'opus', displayName: 'Opus 5.5', description: 'En güçlü', supportsEffort: true, supportedEffortLevels: ['low','medium','high','xhigh','max'] },
       { value: 'sonnet', displayName: 'Sonnet 5.5', description: 'Hızlı', supportsEffort: true, supportedEffortLevels: ['low','medium','high'] }],
       // accountInfo(): gerçek Claude Code 2.1.300'de ölçülen iki biçim (girişsiz / girişli)
@@ -64,6 +147,8 @@ rl.on('line', async (line) => {
       response = { categories: [{ name: 'Messages', tokens: total, color: 'purple', kind: 'used' }, { name: 'Free space', tokens: max - total, color: 'gray', kind: 'free' }],
         totalTokens: total, maxTokens: max, rawMaxTokens: max, percentage: ctxPct, gridRows: [], model: 'claude-opus-5-5', memoryFiles: [], mcpTools: [], agents: [],
         isAutoCompactEnabled: true, autoCompactThreshold: Math.round(max * 0.967), apiUsage: null };
+      const sk = skillState();
+      response.skills = { totalSkills: sk.frontmatter.length, includedSkills: sk.frontmatter.length, tokens: sk.frontmatter.reduce((n, x) => n + x.tokens, 0), skillFrontmatter: sk.frontmatter };
     }
     if (sub === 'get_usage') {
       const at = (h) => new Date(Date.now() + h * 3600e3).toISOString();
@@ -85,7 +170,7 @@ rl.on('line', async (line) => {
     const ups = t.startsWith('/compact') ? [] : await hookCallback('UserPromptSubmit', { prompt });
     if (turn === 1) {
       out({ type: 'system', subtype: 'hook_response', hook_id: 'h1', hook_name: 'SessionStart:startup', hook_event: 'SessionStart', output: '', stdout: 'AÇILIŞ PARTİSİ — SessionStart hook\'u koştu\n\nOturum başı doğrulaması: 13/13 kapı yeşil\nsıradaki iş IS-279\nadr-araligi: K686-K688', stderr: '', outcome: 'success', uuid: uuid(), session_id: sid });
-      out({ type: 'system', subtype: 'init', cwd: process.cwd(), session_id: sid, model: MODEL_IDS[argOf('model')] || 'claude-opus-5-5', permissionMode: 'default', effort: argOf('effort') || 'high', tools: ['Read', 'Bash'], mcp_servers: [{ name: 'figma', status: 'connected' }, { name: 'blender', status: 'connected' }], slash_commands: ['compact', 'review', 'tasarim', 'context'], skills: ['tasarim'], agents: ['gorsel-dogrulayici'], claude_code_version: '2.1.300', apiKeySource: 'none', output_style: 'default', plugins: [], uuid: uuid() });
+      out({ type: 'system', subtype: 'init', cwd: process.cwd(), session_id: sid, model: MODEL_IDS[argOf('model')] || 'claude-opus-5-5', permissionMode: 'default', effort: argOf('effort') || 'high', tools: ['Read', 'Bash'], mcp_servers: [{ name: 'figma', status: 'connected' }, { name: 'blender', status: 'connected' }], slash_commands: skillState().commands.map((c) => c.name), skills: skillState().skills, agents: ['gorsel-dogrulayici'], claude_code_version: '2.1.300', apiKeySource: 'none', output_style: 'default', plugins: [], uuid: uuid() });
     }
     const blocked = ups.find((r) => r?.decision === 'block');
     if (DANIS) return danisAnswer(prompt);
@@ -108,6 +193,7 @@ rl.on('line', async (line) => {
     else if (/rapor/i.test(t)) await artifactTurn();
     else if (/blender/i.test(t)) await mcpTurn();
     else if (/tuzak/i.test(t)) await trapTurn();
+    else if (/^planla ve uygula/i.test(t)) await planTurn();
     else if (/simülatör/i.test(t)) await simTurn();
     else if (/tarayıcı/i.test(t)) await browserTurn(t);
     else if (/terminali oku/i.test(t)) await terminalTurn();
@@ -682,6 +768,24 @@ async function wrapTurn() {
   await panelTool('WRAP', 'wrap_up', 'wt2', { recap: 'Kapılar yeşil, iki test kaldı. Hiçbir şey commit edilmedi.', ask: 'Testleri şimdi yazayım mı?',
     actions: [{ label: 'Evet, yaz', message: 'tamam, bitir: testleri yaz' }, { label: 'Sonra' }] });
   await streamText('Kapıları koştum.');
+  finish('success');
+}
+// Panelin görev listesi aracı (mcp__panel__plan): plan verir, araçlar çalışırken adım adım ilerletir.
+// Komut 3 sn sürer: e2e o arada "iş sürerken" hâlini (kart en altta, 1/3, canlı gösterge) ölçer.
+async function planTurn() {
+  const items = [['Kodu oku', 'in_progress'], ['Düzeltmeyi yaz', 'pending'], ['Testleri koş', 'pending']].map(([content, status]) => ({ content, status }));
+  await panelTool('PLAN', 'plan', 'pl1', { items });
+  asst([{ type: 'tool_use', id: 'pl2', name: 'Read', input: { file_path: process.cwd() + '/README.md' } }]);
+  await sleep(300);
+  toolRes('pl2', '# okundu');
+  await panelTool('PLAN', 'plan', 'pl3', { advance: true });
+  asst([{ type: 'tool_use', id: 'pl4', name: 'Bash', input: { command: 'npm test' } }]);
+  log('PLAN SURUYOR');
+  await sleep(3000);
+  toolRes('pl4', 'geçti');
+  await panelTool('PLAN', 'plan', 'pl5', { advance: true });
+  await panelTool('PLAN', 'plan', 'pl6', { advance: true });
+  await streamText('Plan tamam, üç adım bitti.');
   finish('success');
 }
 async function todoDoneTurn() {

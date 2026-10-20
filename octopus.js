@@ -312,7 +312,7 @@ function maxArms(chatId) {
   return rec ? rec.settings?.maxArms || 8 : null;
 }
 
-// Kolun son görev listesi (TodoWrite): kaç iş bitti, kaç iş var
+// Kolun son görev listesi (TodoWrite ya da panelin plan aracı): kaç iş bitti, kaç iş var
 function noteTodos(chatId, todos) {
   const b = live.get(chatId);
   if (b?.role !== 'arm' || shuttingDown || !Array.isArray(todos)) return;

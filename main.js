@@ -212,6 +212,7 @@ ipcMain.handle('config:save', (_e, patch) => {
   if (patch.chatPrefs) cfg.chatPrefs = { ...(cfg.chatPrefs || {}), ...patch.chatPrefs };
   if (Array.isArray(patch.environments)) cfg.environments = environments.sanitize(patch.environments);
   if (typeof patch.keepAwake === 'boolean') cfg.keepAwake = patch.keepAwake;
+  if (typeof patch.sidebarHidden === 'boolean') cfg.sidebarHidden = patch.sidebarHidden;
   if (typeof patch.editor === 'string') cfg.editor = patch.editor;
   if (patch.autoCompact === 'ask' || patch.autoCompact === 'allow') cfg.autoCompact = patch.autoCompact;
   if (patch.welcome === 'pending' || patch.welcome === 'done') cfg.welcome = patch.welcome;
@@ -327,6 +328,8 @@ function buildMenu() {
     {
       label: 'Görünüm',
       submenu: [
+        { label: 'Kenar çubuğunu gizle / göster', accelerator: 'CmdOrCtrl+B', click: () => sendCmd('sidebar') },
+        { type: 'separator' },
         { label: 'Yazıyı büyüt', accelerator: 'CmdOrCtrl+=', click: () => sendCmd('font', 1) },
         { label: 'Yazıyı küçült', accelerator: 'CmdOrCtrl+-', click: () => sendCmd('font', -1) },
         { label: 'Yazı boyutunu sıfırla', accelerator: 'CmdOrCtrl+0', click: () => sendCmd('font', 0) },

@@ -367,7 +367,8 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
     h('div', { class: 'welcome-mark' }, '✳'),
     h('div', { class: 'welcome-title' }, `${tilde(cwd).split('/').pop() || 'Proje'} üzerinde ne yapalım?`),
     h('div', { class: 'welcome-sub' }, `${a.name} hesabı · ${tilde(cwd)}`));
-  const scroller = h('div', { class: 'chat-scroll' }, welcome, list);
+  const actEl = activityEl(); // çalışırken canlı gösterge (renderer/activity.js)
+  const scroller = h('div', { class: 'chat-scroll' }, welcome, list, actEl);
 
   // --- Yazma alanı
   const input = h('textarea', { class: 'composer-input', rows: 1, placeholder: 'Claude\'a yazın…' });
@@ -385,12 +386,13 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
     h('div', { class: 'composer-inner' },
       slashBox,
       tab.planBar = planBar(),
-      h('div', { class: 'composer-box' },
+      tab.composerBox = h('div', { class: 'composer-box' },
         attach, input,
         h('div', { class: 'composer-bar' },
           h('button', { class: 'plus-btn', title: 'Dosya veya fotoğraf ekle', onclick: () => fileInput.click() }, icon('plus', 17)),
           fileInput,
           connectorsButton(acctId, () => tab.cwd),
+          skillsButton(acctId, () => tab.cwd, () => tab.input),
           h('span', { class: 'spacer' }),
           stopBtn, sendBtn)),
       h('div', { class: 'composer-meta' },
@@ -423,7 +425,7 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   const host = h('div', { class: 'term-host chat-host' + (bg ? '' : ' active') + (window.innerWidth > 1250 ? ' side-open' : '') }, main, artPane, simPane, browserPane, changesPane, octoPane, side);
   host.__tab = tab;
   Object.assign(tab, {
-    host, list, scroller, artPane, simPane, browserPane, changesPane, octoPane, welcome, input, attach, slashBox, sendBtn, stopBtn, picker, modeSel,
+    host, list, scroller, actEl, artPane, simPane, browserPane, changesPane, octoPane, welcome, input, attach, slashBox, sendBtn, stopBtn, picker, modeSel,
     statusEl, progressBody, progressCount, contextBody, sessionBody,
   });
   syncSelects(tab);
@@ -537,7 +539,10 @@ function scrollDown(tab, force) {
 }
 function append(tab, el) {
   const stick = nearBottom(tab);
-  tab.list.append(el);
+  // İş sürerken görev kartı en altta kalır (renderer/wrapup.js → renderPlanCard)
+  const card = tab.planCard;
+  if (card && card !== el && card.classList.contains('pinned') && card.parentNode === tab.list) tab.list.insertBefore(el, card);
+  else tab.list.append(el);
   if (stick) scrollDown(tab, true);
   return el;
 }
@@ -560,6 +565,7 @@ function setStatus(tab, kind, text) {
 }
 function setBusy(tab, busy) {
   tab.busy = busy;
+  if (busy) startActivity(tab); else stopActivity(tab); // renderer/activity.js
   tab.stopBtn.hidden = !busy;
   tab.sendBtn.hidden = busy && !tab.input.value.trim();
   setStatus(tab, busy ? 'busy' : 'idle', busy ? 'Çalışıyor' : '');
@@ -592,6 +598,28 @@ function assistantText(tab, text) {
   markStarted(tab);
   endGroup(tab);
   return append(tab, mdInto(h('div', { class: 'msg-assistant md' }), text));
+}
+
+// Claude'un son yanıtının altında saati (Claude uygulamasındaki gibi): tur bitince
+// son metin mesajına konur, bir öncekinden kalkar. Geçmişte zaman yok (SDK vermiyor).
+function replyTime(t) {
+  const d = new Date(t);
+  const time = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString()
+    ? time : d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' }) + ' ' + time;
+}
+function stampLastReply(tab) {
+  const at = tab.lastReplyAt;
+  tab.lastReplyAt = null;
+  if (!at) return;
+  const msgs = tab.list.querySelectorAll(':scope > .msg-assistant:not(.live)');
+  const last = msgs[msgs.length - 1];
+  if (!last) return;
+  tab.list.querySelectorAll(':scope > .msg-time').forEach((el) => el.remove());
+  const full = new Date(at).toLocaleString('tr-TR', { dateStyle: 'long', timeStyle: 'medium' });
+  const stick = nearBottom(tab);
+  last.after(h('div', { class: 'msg-time', title: full, 'data-at': String(at) }, replyTime(at)));
+  if (stick) scrollDown(tab, true);
 }
 
 function thinkingBlock(tab, text) {
@@ -637,11 +665,18 @@ function updateGroup(tab, group) {
   if (group.running.size) text = group.last ? `${group.last}` : text;
   group.summaryText.textContent = text.charAt(0).toLocaleUpperCase('tr') + text.slice(1);
   group.spinner.className = 'grp-spin' + (group.running.size ? ' on' : group.errors ? ' err' : '');
+  group.el.classList.toggle('running', group.running.size > 0);
 }
 
 function toolCard(tab, block, parentCard) {
   const { id, name, input } = block;
   if (tab.toolCards.has(id)) return tab.toolCards.get(id).el;
+  // Panelin görev listesi aracı satır olarak görünmez, kartı günceller (renderer/wrapup.js)
+  // Aynı çağrı iki kez gelirse (geçmiş + canlı) advance iki kez ilerlemesin diye kimlikler ayrı tutulur
+  if (name === PLAN_TOOL && !parentCard) {
+    if (!(tab.planCalls ||= new Set()).has(id)) { tab.planCalls.add(id); applyPlan(tab, input); }
+    return null;
+  }
   const status = h('span', { class: 'tool-status running' });
   const body = h('div', { class: 'tool-body' });
   const view = toolInputView(tab, name, input);
@@ -669,6 +704,7 @@ function toolCard(tab, block, parentCard) {
     group.running.add(id);
     group.last = `${toolLabel(name)}: ${toolSummary(tab, name, input)}`;
     updateGroup(tab, group);
+    activityForTool(tab, name);
     if (nearBottom(tab)) scrollDown(tab, true);
   }
   if (name === 'TodoWrite') updateProgress(tab, input.todos);
@@ -686,6 +722,7 @@ function toolResult(tab, block) {
     card.group.running.delete(block.tool_use_id);
     if (block.is_error) card.group.errors++;
     updateGroup(tab, card.group);
+    if (!card.group.running.size) setActivity(tab, 'Düşünüyor');
   }
   if (block.is_error) card.el.classList.add('error');
   if (FILE_TOOLS.has(card.name) && !block.is_error && card.input?.file_path) {
@@ -730,6 +767,7 @@ function updateProgress(tab, todos) {
   tab.progressCount.textContent = tab.todos.length ? `${done} / ${tab.todos.length}` : '';
   tab.progressBody.innerHTML = '';
   tab.progressBody.append(tab.todos.length ? todoList(tab.todos) : h('div', { class: 'side-empty' }, 'Görev yok.'));
+  renderPlanCard(tab); // sohbetteki kutucuklu kart (renderer/wrapup.js)
   updatePlanBar(tab);
 }
 
@@ -816,6 +854,7 @@ function handleChatMsg(chatId, msg) {
         if (key.startsWith(id + ':') && types.has(live.type)) { live.el.remove(); tab.live.delete(key); }
       }
       renderBlocks(tab, msg, false);
+      if (types.has('text')) tab.lastReplyAt = Date.now();
       markActivity(tab);
       return;
     }
@@ -828,7 +867,9 @@ function handleChatMsg(chatId, msg) {
       finishGroups(tab);
       endGroup(tab);
       setBusy(tab, false);
+      settlePlanCard(tab);
       settleWrapUp(tab);
+      stampLastReply(tab);
       updatePlanBar(tab);
       deliverSessionEvents(tab);
       offerRetention(tab); // renderer/compaction.js
@@ -867,6 +908,7 @@ function handleSystem(tab, msg) {
   switch (msg.subtype) {
     case 'init': {
       tab.slash = (msg.slash_commands || []).map((c) => '/' + c.replace(/^\//, ''));
+      loadChatCommands(tab); // açıklamalar (renderer/skills.js)
       if (msg.permissionMode) tab.permissionMode = msg.permissionMode;
       if (msg.effort) tab.effort = msg.effort;
       updateSession(tab, { model: msg.model, version: msg.claude_code_version });
@@ -908,7 +950,8 @@ function handleSystem(tab, msg) {
       if (msg.content || msg.text) note(tab, msg.content || msg.text, msg.level === 'warning' ? 'warn' : 'muted');
       return;
     case 'commands_changed':
-      if (Array.isArray(msg.slash_commands)) tab.slash = msg.slash_commands.map((c) => '/' + String(c.name || c).replace(/^\//, ''));
+      // Skill açılıp kapanınca ya da yeni skill bulununca Claude Code tam listeyi yollar (SDKCommandsChangedMessage.commands)
+      setChatCommands(tab, msg.commands);
       return;
     default:
       return;
@@ -924,6 +967,7 @@ function handleStream(tab, msg) {
     if (type !== 'text' && type !== 'thinking') return;
     markStarted(tab);
     endGroup(tab);
+    setActivity(tab, type === 'text' ? 'Yazıyor' : 'Düşünüyor');
     const key = `${tab.curMsgId}:${ev.index}`;
     const el = type === 'text'
       ? h('div', { class: 'msg-assistant md live' })
@@ -978,6 +1022,7 @@ function handleChatEnd(chatId, err) {
   chatsById.delete(chatId);
   tab.exited = true;
   tab.busy = false;
+  stopActivity(tab);
   tab.stopBtn.hidden = true;
   tab.sendBtn.hidden = false;
   finishGroups(tab);
@@ -1235,10 +1280,15 @@ function updateSlash(tab) {
   if (!/^\/[^\s]*$/.test(v) || !tab.slash.length) { box.hidden = true; return; }
   const matches = tab.slash.filter((c) => c.toLowerCase().startsWith(v.toLowerCase())).slice(0, 8);
   box.innerHTML = '';
-  matches.forEach((c, i) => box.append(h('div', {
-    class: 'slash-item' + (i === 0 ? ' on' : ''), 'data-cmd': c,
-    onmousedown: (e) => { e.preventDefault(); tab.input.value = c + ' '; box.hidden = true; tab.input.focus(); },
-  }, c)));
+  matches.forEach((c, i) => {
+    const info = tab.cmdInfo?.get(c);
+    box.append(h('div', {
+      class: 'slash-item' + (i === 0 ? ' on' : ''), 'data-cmd': c, title: info?.description || '',
+      onmousedown: (e) => { e.preventDefault(); tab.input.value = c + ' '; box.hidden = true; tab.input.focus(); },
+    }, h('span', { class: 'slash-name' }, c),
+    info?.argumentHint ? h('span', { class: 'slash-hint' }, info.argumentHint) : null,
+    info?.description ? h('span', { class: 'slash-desc' }, info.description) : null));
+  });
   box.hidden = !matches.length;
 }
 
