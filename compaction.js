@@ -33,8 +33,8 @@ function summarize(r) {
     autoCompact: r.isAutoCompactEnabled !== false,
     threshold: r.autoCompactThreshold ?? null,
     // Yan paneldeki Bağlam dökümü (renderer/chat.js → updateContext): pencerede yer tutan kalemler ve Claude'un skill listesi.
-    // Ertelenen araçlar (kind 'deferred'), boş yer ve sıkıştırma payı bağlamda değil.
-    categories: (r.categories || []).filter((c) => c.kind === 'used' && c.tokens > 0).map((c) => ({ name: String(c.name), tokens: c.tokens })),
+    // Ertelenen araçlar (kind 'deferred'), boş yer ve sıkıştırma payı bağlamda değil. Satır `id` ile tanınır (SDK 0.3.304+; İngilizce ad değişebilir).
+    categories: (r.categories || []).filter((c) => c.kind === 'used' && c.tokens > 0).map((c) => ({ id: c.id ? String(c.id) : null, name: String(c.name), tokens: c.tokens })),
     skills: r.skills ? { tokens: r.skills.tokens || 0, listed: (r.skills.skillFrontmatter || []).map((s) => ({ name: String(s.name), tokens: s.tokens || 0 })) } : null,
   };
 }

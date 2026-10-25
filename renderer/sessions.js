@@ -29,8 +29,9 @@ const SESSION_QUERIES = {
     if (!tab || !tab.chatId) throw new Error(`Yan oturum ${childId} açık değil`);
     const content = messageContent(text, []);
     markStarted(tab);
-    userBubble(tab, content, tab.busy);
-    window.panel.chatSend(tab.chatId, content);
+    const uuid = crypto.randomUUID(); // kolun mesajı da geri sarılabilir (renderer/chat.js → openRewind)
+    userBubble(tab, content, tab.busy, uuid);
+    window.panel.chatSend(tab.chatId, content, uuid);
     chatsById.get(parentId || tab.parentId)?.octoView?.pulse(childId, 'down'); // ahtapotta baştan kola atım
     if (!tab.busy) setBusy(tab, true);
     return {};

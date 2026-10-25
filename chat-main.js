@@ -135,16 +135,21 @@ class InputQueue {
   }
 }
 
-// Kullanıcı mesajı (yazma alanından, karttan ya da ana süreçten: dogus.js) Claude Code'a gider
-function pushUser(id, c, content) {
+// Kullanıcı mesajı (yazma alanından, karttan ya da ana süreçten: dogus.js) Claude Code'a gider.
+// uuid: arayüzün verdiği kimlik; Claude Code kayda bu kimlikle yazar, kod checkpoint'i de ona bağlanır (geri sarma, 2026-10-25'te gerçek CLI'de ölçüldü)
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function pushUser(id, c, content, uuid) {
+  const msg = { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, origin: { kind: 'human' } };
+  if (typeof uuid === 'string' && UUID_RE.test(uuid)) {
+    msg.uuid = uuid;
+    // Kayıt okunamazsa (sahte CLI kayıt yazmaz) konuşmanın geri sarılacağı yer: o an akışta görülen son kayıt.
+    // Claude çalışırken giden mesaj turun ortasında araya girer, kendi kaydı ve checkpoint'i olmaz (at: false).
+    // epoch: o ana kadarki sıkıştırma sayısı; sonradan sıkıştırılan mesaja konuşma geri sarılamaz
+    c.forks.set(uuid, { at: busy.has(id) ? false : c.lastChain, epoch: c.epoch });
+  }
   sessions.noteBusy(id);
   setBusy(id, true);
-  c.queue.push({
-    type: 'user',
-    message: { role: 'user', content },
-    parent_tool_use_id: null,
-    origin: { kind: 'human' },
-  });
+  c.queue.push(msg);
 }
 
 // ---------- Sohbetler ----------
@@ -158,8 +163,9 @@ let send = () => {};
 const busy = new Set();
 let blocker = null;
 let keepAwake = () => true;
+// Arka planda görevi süren sohbet de sayılır (Mac uyursa arka plandaki komut ve alt ajan da durur)
 function updateAwake() {
-  const want = busy.size > 0 && keepAwake();
+  const want = (busy.size > 0 || [...chats.values()].some((c) => c.bgTasks > 0)) && keepAwake();
   if (want && blocker == null) blocker = powerSaveBlocker.start('prevent-app-suspension');
   else if (!want && blocker != null) { powerSaveBlocker.stop(blocker); blocker = null; }
 }
@@ -195,7 +201,23 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
     return env;
   }
 
+  // Aynı oturum iki sohbette açılmaz: iki Claude Code süreci aynı kayda yazar, eski bellekli süreç yazınca kayıt dallanır. Hesaplar
+  // projects klasörünü paylaşabildiği için başka hesabın sohbeti de sayılır. Arayüz önce açık sekmeye geçer (renderer/chat.js →
+  // openSessionTab); bu son savunma. Başlatılmakta olanlar da sayılır (opening): denetimle chats.set arasında await var.
+  const opening = new Map(); // oturum kimliği -> hesap
+  function sessionOwner(sessionId) {
+    if (opening.has(sessionId)) return opening.get(sessionId);
+    for (const c of chats.values()) if (c.getSessionId() === sessionId) return c.accountId;
+    return null;
+  }
+
   ipcMain.handle('chat:start', async (_e, opts) => {
+    const claim = opts?.mode === 'resume' && opts.resumeId ? opts.resumeId : null;
+    if (claim) {
+      const owner = sessionOwner(claim);
+      if (owner) return { ok: false, error: `Bu oturum ${getAccount(owner)?.name || owner} hesabında açık bir sohbette; aynı oturum iki sohbette açılamaz.` };
+      opening.set(claim, opts.accountId);
+    }
     try {
       const { accountId, cwd, mode, resumeId, model, permissionMode, effort, envId, parentId, title, worktree: wantWorktree, octopus: wantOctopus } = opts;
       const sdk = await loadSdk();
@@ -222,6 +244,9 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
         }
       }
 
+      // Claude Code kendiliğinden tur açınca (arka plan görevi bitti) session_state_changed gelsin: arayüz "çalışıyor" gösterir.
+      // Değişken olmadan gelmiyor (2026-10-25'te gerçek CLI 2.1.300'de ölçüldü)
+      env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1';
       const id = nextChatId++;
       const queue = new InputQueue();
       const pending = new Map();
@@ -286,7 +311,7 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
       // Ayrı kopyada açılmaz: kopya kapanınca silinir, baş oraya geri dönemezdi. Sistem istemi (hafıza talimatı) buna bağlı olduğu için
       // seçeneklerden önce; arada await yok, sohbet kaydıyla (chats.set) aynı eşzamanlı adımda kalır.
       const octoId = wantOctopus && !worktree && !parentId
-        ? octopus.bindHead(id, { octopus: wantOctopus, accountId, project: { key: project, cwd: dir, name: path.basename(project) || project } })
+        ? octopus.bindHead(id, { octopus: wantOctopus, accountId, sessionId: claim, project: { key: project, cwd: dir, name: path.basename(project) || project } })
         : null;
       if (octoId) sessions.relink(id, octoId); // baş yeniden açıldı: açık kolları yeni sohbete bağlanır
       if (armRef) octopus.bindArm(id, armRef);
@@ -306,6 +331,12 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
           'mcp__panel__hatirla', 'mcp__panel__hatirla_oku', 'mcp__panel__defter', 'mcp__panel__danis', ...autoAllowTools()],
         includePartialMessages: true,
         includeHookEvents: true,
+        // Kod checkpoint'leri: her mesajdan önce Claude'un dosya araçlarıyla değişecek dosyalar yedeklenir, rewindFiles ile geri gelir.
+        // Yedekler ayar klasöründe (file-history), süreç değişince de kullanılır (ölçüldü). Bash'in ve alt ajanların değiştirdikleri yedeklenmez.
+        enableFileCheckpointing: true,
+        // Arka plan görevlerini arayüz tek tek durdurur (chat:stopTask): "Durdur" yalnız turu keser, arka plandaki alt ajanlar sürer.
+        // Bildirilmezse "Durdur" arka plandaki alt ajanları da öldürür (ölçüldü; arka plan Bash'i öldürmüyor)
+        perTaskStopAffordance: true,
         hooks: hooks.create({ chatId: id, accountId }), // Claude Code kancaları (hooks.js): günlük, otomatik sıkıştırma izni (compaction.js), defteri masaya koyma (defter.js)
         allowDangerouslySkipPermissions: true, // "Tam yetki" moduna sonradan geçebilmek için
         stderr: (d) => { stderrTail = (stderrTail + d).slice(-4000); },
@@ -341,51 +372,70 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
       const c = {
         q: null, queue: null, pending, accountId, project, worktree, dir, parentId: parentId || null, getSessionId: () => sessionId,
         body: 0, waiters: [], model: model || null, effort: effort || null, permissionMode: permissionMode || null, rebirthing: false,
+        // Geri sarma: akışta görülen son zincir kaydı (yeni oturumda null: ilk mesajın öncesi yok; sürdürülende bilinmiyor) ve mesaj başına o anki değeri
+        lastChain: mode === 'new' ? null : undefined, forks: new Map(), epoch: 0, rewinding: false,
+        bgTasks: 0, // arka planda süren görev sayısı (süreç başına; yeni bedende sıfır)
+        configDir: env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), // oturum kaydı burada (yalnız okunur)
       };
       chats.set(id, c);
 
       // Bir beden: süreç ve mesaj akışı. Eski bedenin geç gelen mesajları, kapanışı ve tur sonu ölçümü yok sayılır (c.body).
-      const startBody = (opts) => {
+      // probe: deneme bedeni (geri sarma: c.rewindTo). Açılışı doğrulanana kadar mesajları bekletilir, kapanışı sohbeti kapatmaz;
+      // dönen release() bekletilenleri akıtır ve bedeni asıl beden yapar.
+      const startBody = (opts, probe) => {
         const body = ++c.body;
         const queue = new InputQueue();
         const q = sdk.query({ prompt: queue, options: opts });
         Object.assign(c, { q, queue });
         let turnText = []; // bu turun Claude metni (ana süreçten gönderilen turlar onu bekler: c.turn)
+        let held = probe ? [] : null;
+        const handle = (msg) => {
+          if (msg.session_id && msg.session_id !== sessionId) { sessionId = msg.session_id; octopus.noteSession(id, sessionId); }
+          // Zincirdeki son kayıt (Claude'un mesajı ya da araç sonucu; alt ajanınki sayılmaz): kayıttaki ebeveynle aynı kimlik (ölçüldü)
+          if (msg.uuid && !msg.parent_tool_use_id && !msg.isReplay && (msg.type === 'assistant' || (msg.type === 'user' && Array.isArray(msg.message?.content)))) c.lastChain = msg.uuid;
+          // Claude Code'un kendiliğinden açtığı tur (arka plan görevi bitti): panel de meşgul sayar (uyanık tutma, geri sarma, kolun durumu)
+          if (msg.type === 'system' && msg.subtype === 'session_state_changed' && msg.state === 'running' && !busy.has(id)) { sessions.noteBusy(id); setBusy(id, true); }
+          // Arka plandaki görevlerin tamamı (her değişimde yeniden): uyanık tutma ve geri sarma uyarısı bundan
+          if (msg.type === 'system' && msg.subtype === 'background_tasks_changed') { c.bgTasks = (msg.tasks || []).filter((t) => !t.ambient).length; updateAwake(); }
+          if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
+            c.epoch++; // geri sarma: bundan önceki mesajların öncesine dönülemez (Claude Code "No message found" der)
+            if (msg.uuid) c.lastChain = msg.uuid; // sınır da zincirde bir kayıttır; sonraki mesaj buraya geri sarılabilir
+            defter.noteCompacted(id); // SessionStart (compact) gelmezse defter sonraki mesajda
+            sinav.noteDue(id, 'compact'); // PostCompact kancası gelmezse de sınav yapılır
+          }
+          send('chat:msg', id, msg);
+          track(msg);
+          if (msg.type === 'assistant' && !msg.parent_tool_use_id) {
+            const blocks = msg.message?.content || [];
+            const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+            sessions.noteText(id, text);
+            if (text) turnText.push(text);
+            const todo = blocks.findLast((b) => b.type === 'tool_use' && b.name === 'TodoWrite');
+            if (todo) octopus.noteTodos(id, todo.input?.todos); // kolun ilerlemesi ahtapot kaydına
+          }
+          if (msg.type === 'result') {
+            setBusy(id, false);
+            sessions.turnEnded(id, msg.subtype === 'success');
+            compaction.refresh(id, q).then((u) => { if (c.body === body) sinav.turnEnded(id, u); }); // sınavın tahmini bu ölçümden
+            hafiza.noteTurn();
+            c.waiters.shift()?.({ result: msg, text: turnText.join('\n') });
+            turnText = [];
+          }
+        };
         (async () => {
           try {
             for await (const msg of q) {
-              if (c.body !== body) break;
-              if (msg.session_id && msg.session_id !== sessionId) { sessionId = msg.session_id; octopus.noteSession(id, sessionId); }
-              if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
-                defter.noteCompacted(id); // SessionStart (compact) gelmezse defter sonraki mesajda
-                sinav.noteDue(id, 'compact'); // PostCompact kancası gelmezse de sınav yapılır
-              }
-              send('chat:msg', id, msg);
-              track(msg);
-              if (msg.type === 'assistant' && !msg.parent_tool_use_id) {
-                const blocks = msg.message?.content || [];
-                const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-                sessions.noteText(id, text);
-                if (text) turnText.push(text);
-                const todo = blocks.findLast((b) => b.type === 'tool_use' && b.name === 'TodoWrite');
-                if (todo) octopus.noteTodos(id, todo.input?.todos); // kolun ilerlemesi ahtapot kaydına
-              }
-              if (msg.type === 'result') {
-                setBusy(id, false);
-                sessions.turnEnded(id, msg.subtype === 'success');
-                compaction.refresh(id, q).then((u) => { if (c.body === body) sinav.turnEnded(id, u); }); // sınavın tahmini bu ölçümden
-                hafiza.noteTurn();
-                c.waiters.shift()?.({ result: msg, text: turnText.join('\n') });
-                turnText = [];
-              }
+              // Eski beden: döngü biter. Geri sarmanın denemesi sürerken bitmez (deneme tutmazsa bu beden geri gelir), mesajı atlanır
+              if (c.body !== body) { if (c.probing) continue; break; }
+              if (held) held.push(msg); else handle(msg);
             }
-            if (c.body === body) send('chat:end', id, null);
+            if (c.body === body && !held) send('chat:end', id, null);
           } catch (err) {
-            if (c.body !== body) return;
+            if (c.body !== body || held) return;
             const detail = stderrTail.trim().split('\n').slice(-6).join('\n');
             send('chat:end', id, (err?.message || String(err)) + (detail ? '\n' + detail : ''));
           } finally {
-            if (c.body === body) {
+            if (c.body === body && !held) {
               for (const { resolve } of pending.values()) resolve({ behavior: 'deny', message: 'Oturum kapandı' });
               pending.clear();
               for (const w of c.waiters.splice(0)) w(null);
@@ -405,6 +455,7 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
         })();
         // Model listesini arka planda iste
         q.supportedModels?.().then((models) => { if (c.body !== body) return; c.models = models; send('chat:models', id, models); }).catch(() => {}); // c.models: sessions start'ın model adı
+        return () => { const h = held || []; held = null; for (const m of h) handle(m); };
       };
       startBody(options);
 
@@ -426,7 +477,48 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
         try { old.queue.close(); } catch {}
         try { old.q.close(); } catch {}
         sinav.noteDue(id, 'rebirth'); // yeni bedenin ilk turundan sonra sınav
+        c.lastChain = null;
+        c.forks.clear();
+        c.bgTasks = 0; // eski sürecin arka plan görevleri onunla kapandı
+        updateAwake();
         return c.turn(text);
+      };
+
+      // Konuşmayı geri sarma: aynı oturum, at'e (geri sarılan mesajın kayıttaki ebeveyni) kadar yüklenen yeni bir süreçte sürer.
+      // Oturum kimliği değişmez (ölçüldü): ahtapot kaydı, kollar, bölmeler aynı kalır. Kayıt dallanır; geçmiş yüklenince yeni dal görünür.
+      // Yeni süreç önce deneme bedenidir: Claude Code bilinmeyen ya da son sıkıştırmadan önceki bir noktada açılışta "No message found…"
+      // hatasıyla kapanır (ölçüldü, ~0,7 sn), mesajsız getContextUsage da aynı hatayla reddedilir. O zaman eski beden yerinde kalır.
+      c.rewindTo = async (at) => {
+        const old = { q: c.q, queue: c.queue, body: c.body, lastChain: c.lastChain };
+        const mcp = await artifacts.createMcpServer(sdk, { cwd: dir, accountId, getSessionId: () => sessionId, onArtifact, extraTools, load });
+        const o = { ...options, mcpServers: { panel: mcp }, resume: sessionId, resumeSessionAt: at };
+        delete o.continue;
+        for (const k of ['model', 'effort', 'permissionMode']) if (c[k]) o[k] = c[k];
+        const tail = stderrTail;
+        stderrTail = '';
+        const release = startBody(o, true);
+        c.probing = true;
+        try {
+          await withTimeout(c.q.getContextUsage({ detail: 'summary' }), 30000);
+        } catch (err) {
+          c.probing = false;
+          const bad = { q: c.q, queue: c.queue };
+          Object.assign(c, { q: old.q, queue: old.queue, body: old.body, lastChain: old.lastChain });
+          stderrTail = tail;
+          try { bad.queue.close(); } catch {}
+          try { bad.q.close(); } catch {}
+          const why = String(err?.message || err);
+          throw new Error(/No message found/i.test(why) ? 'Bu nokta son sıkıştırmadan önce kalıyor; konuşma oraya geri sarılamaz.' : 'Claude Code o noktadan açılamadı: ' + why);
+        }
+        c.probing = false;
+        release();
+        c.lastChain = at;
+        c.bgTasks = 0; // eski sürecin arka plan görevleri onunla kapanır
+        updateAwake();
+        try { old.queue.close(); } catch {}
+        try { old.q.close(); } catch {}
+        defter.untable(id); // masadaki özeti koyan mesaj silinmiş olabilir; sonraki ilk mesaj yeniden koyar
+        compaction.refresh(id, c.q).catch(() => {}); // bağlam halkası kısalan konuşmayı göstersin
       };
 
       // Sınav (sinav.js): başın sıkıştırmasından sonra, tur sonunda; dal danışmayla aynı yoldan açılır
@@ -444,6 +536,8 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
       return { ok: true, id, cwd: dir, title: folderTitle, worktree: worktree && { branch: worktree.branch, path: worktree.path }, octopus: octoId };
     } catch (err) {
       return { ok: false, error: err?.message || String(err) };
+    } finally {
+      if (claim) opening.delete(claim);
     }
   });
 
@@ -463,14 +557,100 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
     return out;
   };
 
-  ipcMain.on('chat:send', (_e, id, raw) => {
+  ipcMain.on('chat:send', (_e, id, raw, uuid) => {
     const c = chats.get(id);
     const content = cleanContent(raw);
     if (!c || !content.length) return;
-    if (c.rebirthing) return; // yeniden doğuş sürerken (dogus.js) turlar karışmasın; arayüz de göndermez
+    if (c.rebirthing || c.rewinding) return; // yeniden doğuş (dogus.js) ya da geri sarma sürerken turlar karışmasın; arayüz de göndermez
     // Kolun görev tanımı, ilk mesajına eklenen defter kısmı olmadan (defter.js → armNote)
     octopus.noteBrief(id, defter.stripArmNote(typeof content === 'string' ? content : content.filter((b) => b.type === 'text').map((b) => b.text).join('\n')));
-    pushUser(id, c, content);
+    pushUser(id, c, content, uuid);
+  });
+
+  // ---------- Arka plan görevleri (Claude Code'un /tasks'ı ve Ctrl+B'si; 2026-10-25'te gerçek CLI 2.1.300'de ölçüldü) ----------
+  // Tek görevi durdurur: task_notification 'stopped' gelir; durdurulan alt ajandan sonra Claude Code kendiliğinden tur açar, Bash'ten sonra açmaz
+  const TASK_ID_RE = /^[\w-]{1,80}$/;
+  ipcMain.handle('chat:stopTask', async (_e, id, taskId) => {
+    const c = chats.get(id);
+    if (!c?.q) return { ok: false, error: 'Sohbet kapalı.' };
+    if (!TASK_ID_RE.test(String(taskId))) return { ok: false, error: 'Görev kimliği geçersiz.' };
+    try { await withTimeout(c.q.stopTask(taskId), 15000); return { ok: true }; } catch (err) { return { ok: false, error: err?.message || String(err) }; }
+  });
+  // Ön planda süren Bash ya da alt ajanı arka plana alır: araç "arka plana alındı" diye hemen döner, tur sürer. Ancak görev olduktan
+  // sonra işe yarar (Bash ~3 sn sonra task_started ile görev olur; önce çağrılırsa true döner ama bir şey olmaz, ölçüldü)
+  ipcMain.handle('chat:backgroundTask', async (_e, id, toolUseId) => {
+    const c = chats.get(id);
+    if (!c?.q) return { ok: false, error: 'Sohbet kapalı.' };
+    if (!TASK_ID_RE.test(String(toolUseId))) return { ok: false, error: 'Araç kimliği geçersiz.' };
+    try { return { ok: !!(await withTimeout(c.q.backgroundTasks(toolUseId), 15000)) }; } catch (err) { return { ok: false, error: err?.message || String(err) }; }
+  });
+
+  // ---------- Geri sarma (Claude Code'un /rewind'i): kod checkpoint'e, konuşma o mesajın öncesine ----------
+  // Konuşmanın geri sarılacağı yer: mesajın kayıttaki ebeveyni (kesin; kayıt yalnız okunur). Kayıt yoksa (sahte CLI kayıt yazmaz)
+  // mesaj gönderildiğinde akışta görülen son kayıt; ikisi gerçek CLI'de aynı kimlik (2026-10-25'te ölçüldü).
+  // reason: first (oturumun ilk mesajı, öncesi yok), queued (Claude çalışırken araya girdi: kayıtta kendi satırı yok), missing
+  const REWIND_WHY = {
+    first: 'Bu, oturumun ilk mesajı; öncesinde dönülecek bir konuşma yok. Baştan başlamak için yeni sohbet açın.',
+    queued: 'Bu mesaj Claude çalışırken araya girdi; kendi turu olmadığı için konuşma ona geri sarılamaz. Bir önceki mesajı seçin.',
+    missing: 'Bu mesaj oturum kaydında bulunamadı.',
+    compacted: 'Bu mesaj son sıkıştırmadan önce kalıyor; konuşma oraya geri sarılamaz.',
+  };
+  async function rewindPoint(c, uuid) {
+    const no = (reason) => ({ ok: false, reason, text: REWIND_WHY[reason] });
+    const f = c.forks.get(uuid); // bu süreçte gönderildiyse
+    if (f && f.epoch < c.epoch) return no('compacted');
+    const sid = c.getSessionId();
+    const file = sid && dogus.sessionFile(c.configDir, sid);
+    if (file) {
+      const o = await dogus.findEntry(file, uuid, 'user').catch(() => null);
+      if (o) return o.parentUuid ? { ok: true, at: o.parentUuid } : no('first');
+      return no(f?.at === false ? 'queued' : 'missing');
+    }
+    if (f?.at === false) return no('queued');
+    if (f?.at === null) return no('first');
+    return f?.at ? { ok: true, at: f.at } : no('missing');
+  }
+  // Claude Code'un kod geri sarma hatası (İngilizce): bilineni Türkçe
+  const codeWhy = (e) => (/no file checkpoint/i.test(e || '') ? 'Bu mesajın kod checkpoint\'i yok (Claude çalışırken araya girmiş olabilir).' : e || 'Kod geri sarılamadı.');
+  const rewindBlocked = (id, c) => (!c?.q ? 'Sohbet kapalı.' : busy.has(id) || c.rebirthing || c.rewinding
+    ? 'Claude çalışırken geri sarılamaz; turun bitmesini bekleyin ya da durdurun.' : null);
+  // Ön izleme: kodda ne değişecek (rewindFiles dryRun), konuşma geri sarılabilir mi
+  ipcMain.handle('chat:rewindPreview', async (_e, id, uuid) => {
+    const c = chats.get(id);
+    const blocked = rewindBlocked(id, c);
+    if (blocked) return { ok: false, error: blocked };
+    if (!UUID_RE.test(String(uuid))) return { ok: false, error: 'Mesajın kimliği yok.' };
+    const [code, convo] = await Promise.all([
+      withTimeout(c.q.rewindFiles(uuid, { dryRun: true }), 20000).catch((e) => ({ canRewind: false, error: e?.message || String(e) }))
+        .then((r) => (r.canRewind ? r : { ...r, error: codeWhy(r.error) })),
+      rewindPoint(c, uuid),
+    ]);
+    return { ok: true, code, convo, bgTasks: c.bgTasks }; // konuşma geri sarılınca eski süreç kapanır, arka plandaki görevleri de
+  });
+  // Uygula: önce kod (başarısızsa konuşmaya dokunulmaz), sonra konuşma
+  ipcMain.handle('chat:rewind', async (_e, id, uuid, choice = {}) => {
+    const c = chats.get(id);
+    const blocked = rewindBlocked(id, c);
+    if (blocked) return { ok: false, error: blocked };
+    if (!UUID_RE.test(String(uuid))) return { ok: false, error: 'Mesajın kimliği yok.' };
+    c.rewinding = true;
+    try {
+      let files = null;
+      if (choice.code) {
+        files = await withTimeout(c.q.rewindFiles(uuid), 60000);
+        if (!files?.canRewind) return { ok: false, error: codeWhy(files?.error) };
+      }
+      if (choice.convo) {
+        const p = await rewindPoint(c, uuid);
+        if (!p.ok) return { ok: false, error: p.text, files };
+        await c.rewindTo(p.at);
+      }
+      return { ok: true, files };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    } finally {
+      c.rewinding = false;
+    }
   });
 
   ipcMain.on('chat:permissionReply', (_e, id, rid, reply) => {

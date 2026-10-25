@@ -19,7 +19,11 @@ contextBridge.exposeInMainWorld('panel', {
   termReply: (id, reply) => ipcRenderer.send('term:reply', id, reply),
 
   chatStart: (opts) => ipcRenderer.invoke('chat:start', opts),
-  chatSend: (id, content) => ipcRenderer.send('chat:send', id, content),
+  chatSend: (id, content, uuid) => ipcRenderer.send('chat:send', id, content, uuid), // uuid: mesajın kimliği (geri sarma)
+  chatRewindPreview: (id, uuid) => ipcRenderer.invoke('chat:rewindPreview', id, uuid),
+  chatRewind: (id, uuid, choice) => ipcRenderer.invoke('chat:rewind', id, uuid, choice), // choice: { code, convo }
+  chatStopTask: (id, taskId) => ipcRenderer.invoke('chat:stopTask', id, taskId), // arka plandaki tek görevi durdur
+  chatBackgroundTask: (id, toolUseId) => ipcRenderer.invoke('chat:backgroundTask', id, toolUseId), // ön plandaki komutu arka plana al
   // Seçilen/bırakılan dosyanın diskteki yolu (Electron 32+'da File.path yok); panodan gelen görselde boş
   filePath: (file) => { try { return webUtils.getPathForFile(file) || ''; } catch { return ''; } },
   chatPermissionReply: (id, rid, reply) => ipcRenderer.send('chat:permissionReply', id, rid, reply),
@@ -102,6 +106,7 @@ contextBridge.exposeInMainWorld('panel', {
   // "Projeyi Octopus'a al" (alma.js): klasörü yalnız okuyarak tara, ahtapotu kur; ahtapotun ayarları (kol sınırı, hafıza)
   octopusSurvey: (accountId, cwd) => ipcRenderer.invoke('octopus:survey', accountId, cwd),
   octopusImport: (accountId, opts) => ipcRenderer.invoke('octopus:import', accountId, opts),
+  octopusDelete: (octoId) => ipcRenderer.invoke('octopus:delete', octoId),
   octopusSettings: (octoId, patch) => ipcRenderer.invoke('octopus:settings', octoId, patch),
   // Defter (defter.js): ahtapotun satırları, arayüzden yazma (add, edit, supersede, pin, unpin, close, revert), satırın kaynağı, değişince bildirim
   defterList: (octoId) => ipcRenderer.invoke('defter:list', octoId),

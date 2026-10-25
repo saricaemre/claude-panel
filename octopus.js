@@ -7,6 +7,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 let send = () => {};
+let accountName = (id) => id; // hata metinlerinde hesabın adı (main.js)
 const records = new Map(); // ahtapot kimliği -> kayıt (her değişiklik hemen diske yazılır)
 let loaded = false;
 // Açık sohbetlerin ahtapottaki yeri: chatId -> { octoId, role: 'head' | 'arm', armId, draft }
@@ -124,6 +125,20 @@ function setExam(octoId, exam) {
   return exam;
 }
 
+// Ahtapotu silmek (kenar çubuğunda sağ tık "Ahtapotu sil"): panelin kaydı klasörüyle gider (ahtapot.json, defter, sınavlar, devir notları).
+// Claude Code'un oturum dosyalarına ve projeye dokunulmaz (İ1); baş ve kollar geçmişten düz sohbet olarak açılabilir.
+// Başın ya da bir kolun sekmesi açıkken reddedilir: sınav, yeniden doğuş ve kol durumları kaydı yeniden yazardı.
+const bound = (octoId) => [...live.values()].some((b) => b.octoId === octoId);
+function remove(octoId) {
+  const rec = get(octoId);
+  if (!rec) throw new Error('Ahtapot bulunamadı.');
+  if (bound(octoId)) throw new Error('Önce ahtapotun başının ve kollarının sekmelerini kapatın.');
+  records.delete(octoId);
+  fs.rmSync(path.join(root(), octoId), { recursive: true, force: true, maxRetries: 3 });
+  send('octopus:changed', rec.accountId);
+  return rec;
+}
+
 function forProject(accountId, key) {
   load();
   return [...records.values()].find((r) => r.accountId === accountId && r.project?.key === key) || null;
@@ -134,12 +149,38 @@ function listForAccount(accountId) {
   return [...records.values()].filter((r) => r.accountId === accountId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+// Oturum bütün hesaplardaki kayıtlarda baş (şimdiki ya da önceki beden) ya da kol mu? Hesaplar projects klasörünü paylaşabildiği için
+// (ayarlari-esitle.sh) aynı oturum başka hesapta da açılır; forProject hesaba bakar, bu bakmaz. Bir oturum yalnız bir kayıtta yer alır.
+function ownerOf(sessionId) {
+  if (!sessionId) return null;
+  load();
+  for (const rec of records.values()) {
+    if (rec.head?.sessionId === sessionId) return { rec, role: 'head' };
+    if (rec.head?.bodies?.some((b) => b.sessionId === sessionId)) return { rec, role: 'fossil' };
+    const arm = rec.arms.find((a) => a.sessionId === sessionId);
+    if (arm) return { rec, role: 'arm', arm };
+  }
+  return null;
+}
+function ownedError(o) {
+  const where = `${accountName(o.rec.accountId)} hesabındaki "${o.rec.project?.name || o.rec.id}" ahtapotunun`;
+  const what = o.role === 'head' ? 'başı' : o.role === 'fossil' ? 'önceki bedeni (fosil)' : `kolu (${o.arm.title || o.arm.id})`;
+  return new Error(`Bu oturum ${where} ${what}; bir oturum iki ahtapotta yer alamaz.`);
+}
+// Yeni kayıtta baş olacak oturum başka bir kayıtta varsa hata (adopt, bindHead 'new', alma.js → importProject)
+function assertFree(sessionId) {
+  const o = ownerOf(sessionId);
+  if (o) throw ownedError(o);
+}
+
 // ---------- chat-main.js ve sessions.js kancaları ----------
 
 // Sohbet baş olarak başlıyor: octopus 'new' (yeni ahtapot) ya da var olan ahtapotun kimliği (baş "Devam et" ile açıldı).
-// Ahtapotun kimliğini döner; aynı projede zaten ahtapot varsa yenisi açılmaz (null).
-function bindHead(chatId, { octopus, accountId, project }) {
+// Ahtapotun kimliğini döner; aynı projede zaten ahtapot varsa yenisi açılmaz (null). Yeni ahtapotta devam edilen oturum (sessionId)
+// başka bir kayıtta baş ya da kolsa hata (ownerOf); var olan kayıtla açılış kendi başını açar, denetlenmez.
+function bindHead(chatId, { octopus, accountId, project, sessionId }) {
   if (octopus === 'new') {
+    assertFree(sessionId);
     if (forProject(accountId, project.key)) return null;
     const id = 'oc_' + crypto.randomBytes(8).toString('hex');
     live.set(chatId, { octoId: id, role: 'head', draft: { accountId, project } });
@@ -160,7 +201,8 @@ function noteSession(chatId, sessionId) {
       // Sohbet kapanırken iki kez gelmesin diye taslak önce silinir
       const { accountId, project } = b.draft;
       delete b.draft;
-      if (!forProject(accountId, project.key)) create({ id: b.octoId, accountId, project, sessionId });
+      // Oturum kimliği başka bir kayıtta duruyorsa da açılmaz ("Devam et" ile sürdürülen oturum kimliğini korur)
+      if (!forProject(accountId, project.key) && !ownerOf(sessionId)) create({ id: b.octoId, accountId, project, sessionId });
       else live.delete(chatId);
     } else {
       setHead(b.octoId, sessionId, b.nextReason || 'resume');
@@ -180,8 +222,10 @@ function expectBody(chatId, reason) {
 
 // Var olan bir sohbet beyin olur ("Bu sohbeti beyin yap"). Yalnız panelin kaydı yazılır; oturum dosyasına ve projeye dokunulmaz (İ1).
 // Oturum kimliği henüz yoksa (mesajsız yeni sohbet) yeni baş gibi ilk session_id ile yazılır.
+// Oturum başka bir kayıtta (herhangi bir hesapta) baş, fosil ya da kolsa reddedilir: ikinci kayıt aynı oturumu ikinci kez baş yapardı.
 function adopt(chatId, { accountId, project, sessionId }) {
   if (live.has(chatId)) throw new Error('Bu sohbet zaten bir ahtapota bağlı.');
+  assertFree(sessionId);
   if (forProject(accountId, project.key)) throw new Error('Bu projenin zaten bir ahtapotu var; kenar çubuğundaki "Ahtapotlar" listesinden açın.');
   if (!sessionId) return bindHead(chatId, { octopus: 'new', accountId, project });
   const rec = create({ accountId, project, sessionId, reason: 'adopted' });
@@ -344,7 +388,8 @@ function shutdown() { shuttingDown = true; }
 
 const onChange = (fn) => { listeners.push(fn); };
 
-function setup({ getWindow }) {
+function setup({ getWindow, getAccountName }) {
+  if (getAccountName) accountName = (id) => getAccountName(id) || id;
   send = (...args) => {
     const w = getWindow();
     if (w && !w.isDestroyed()) w.webContents.send(...args);
@@ -358,6 +403,6 @@ function setup({ getWindow }) {
 }
 
 module.exports = {
-  setup, get, create, setHead, addArm, setArm, setSettings, setExam, forProject, listForAccount, privateDir, root,
+  setup, get, create, remove, bound, setHead, addArm, setArm, setSettings, setExam, forProject, listForAccount, ownerOf, assertFree, privateDir, root,
   HEAD_PROMPT, ARM_PROMPT, REPORT_MAX, PEER_MARK, peerNote, bindHead, adopt, noteSession, expectBody, armStarted, findArm, bindArm, headChat, armChat, closeArm, updateArm, isArm, roleOf, maxArms, noteTodos, noteBrief, chatClosed, shutdown, onChange, now,
 };

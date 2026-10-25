@@ -44,6 +44,9 @@ function load(octoId) {
   return c;
 }
 
+// Ahtapot silindi (alma.js): bellekteki olaylar da gitsin
+const dropCache = (octoId) => { cache.delete(octoId); };
+
 function append(octoId, evs) {
   const c = load(octoId);
   let n = c.events.reduce((m, e) => Math.max(m, e.n), 0);
@@ -459,6 +462,8 @@ function markTabled(chatId, octoId) {
   tabled.set(chatId, { octoId, via: 'prompt', at: Date.now() });
   missed.delete(chatId);
 }
+// Konuşma geri sarıldı (chat-main.js → rewindTo): yeni bir süreç açıldı, özeti koyan mesaj silinmiş olabilir; sonraki ilk mesaj yeniden koyar ("Devam et" gibi)
+const untable = (chatId) => { tabled.delete(chatId); };
 const forget = (chatId) => { tabled.delete(chatId); missed.delete(chatId); };
 
 // ---------- Claude'un aracı: defter (§7.6; izinsiz, her yazma sohbette satır olarak görünür ve geri alınabilir) ----------
@@ -564,4 +569,4 @@ function setup({ getWindow }) {
   });
 }
 
-module.exports = { setup, createTool, apply, view, line, cleanPattern, previewImport, HEAD_PROMPT, TYPES, ORDER, STOP, armNote, stripArmNote, headDigest, noteCompacted, noteMissed, markTabled, forget };
+module.exports = { setup, createTool, apply, view, line, cleanPattern, previewImport, HEAD_PROMPT, TYPES, ORDER, STOP, armNote, stripArmNote, headDigest, noteCompacted, noteMissed, markTabled, untable, forget, dropCache };

@@ -90,11 +90,7 @@ function renderPlanCard(tab) {
       h('summary', {}, ring, h('span', { class: 'pc-title' }), h('span', { class: 'pc-count' }), h('span', { class: 'spacer' }), icon('chevronDown', 13)),
       h('div', { class: 'pc-bar' }, h('i')),
       h('ol', { class: 'pc-list' }));
-    tab.planCard = card;
-    tab.planSeen?.disconnect();
-    // Kart görünürken yazma alanının üstündeki sabit liste gizlenir (ikisi aynı şeyi gösterir)
-    tab.planSeen = new IntersectionObserver(([e]) => { tab.planCardVisible = e.isIntersecting; updatePlanBar(tab); }, { root: tab.scroller });
-    tab.planSeen.observe(card);
+    watchPlanCard(tab, card);
   }
   const list = card.querySelector('.pc-list');
   const prev = card._todos || [];
@@ -123,9 +119,30 @@ function renderPlanCard(tab) {
   }
 }
 
+// Sohbetin güncel kartı. Kart görünürken yazma alanının üstündeki sabit liste gizlenir (ikisi aynı şeyi gösterir).
+function watchPlanCard(tab, card) {
+  tab.planCard = card;
+  tab.planSeen?.disconnect();
+  tab.planSeen = null;
+  tab.planCardVisible = false;
+  if (!card) return;
+  tab.planSeen = new IntersectionObserver(([e]) => { tab.planCardVisible = e.isIntersecting; updatePlanBar(tab); }, { root: tab.scroller });
+  tab.planSeen.observe(card);
+}
+
 // Tur sonu: kart yerinde kalır, bundan sonra gelenler altına eklenir
 function settlePlanCard(tab) {
   tab.planCard?.classList.remove('pinned');
+}
+
+// Konuşma geri sarıldı (renderer/chat.js → truncateFrom): görev listesi sohbette kalan son kartın hâline döner;
+// silinen kısımdaki kart güncel kart olmaktan çıkar, sonraki plan yeni kart açar ya da kalan kartı günceller
+function restorePlanAfterRewind(tab) {
+  const cards = tab.list.querySelectorAll('.plan-card');
+  const card = cards[cards.length - 1] || null;
+  if (tab.planCard !== card) watchPlanCard(tab, card);
+  card?.classList.remove('pinned');
+  updateProgress(tab, (card?._todos || []).map((t) => ({ ...t })), false);
 }
 
 // Sabit görev listesi: yarım görev varken ve sohbetteki kart görünmüyorken yazma alanının üstünde (hepsi bitince kaybolur)

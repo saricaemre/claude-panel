@@ -5,6 +5,117 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 
 ---
 
+## 2026-10-25 · Agent SDK 0.3.300 → 0.3.310 (CLI 2.1.310)
+
+- **İstek**: Claude Code eksikleri planının 9. maddesi (Emre'nin sırası: 5–8'in ölçümleri güncel CLI'de yapılsın).
+- **İnceleme**:
+  - Sürüm notları: SDK 0.3.301–0.3.310 ve CLI 2.1.301–2.1.310, `gh api` ile.
+  - Tip farkı: `sdk.d.ts`'te 232 satır eklenmiş, kaldırılan yok (10 satırlık fark yalnız açıklama metni). Panelin çağırdığı 19 yöntemin ve fonksiyonun hepsi yeni pakette, deneysel kullanım çağrısı da aynı adla.
+  - Panele değebilecek değişiklikler:
+    - İzin kipi verilmeyen oturum üçüncü taraf sağlayıcıda `default` başlıyor. Panel kipi init'ten okuduğu için etkilenmez.
+    - `subagent_type: "fork"` alt ajanları SDK'da da açık.
+    - Özel `ANTHROPIC_BASE_URL` arkasında araç araması artık açık (yalnız ölçümleri etkiliyor).
+    - `get_usage`'a `recommendations` ve `fix` eklendi; panel `skipBehaviors` ile çağırdığı için gelmiyor.
+    - Bağlam satırlarına `id` eklendi.
+- **Ölçüm** (0 token; gerçek CLI, sahte API, girişsiz geçici ayar klasörü). Eski SDK `/tmp`'e ayrıca kuruldu, her betik iki sürümle koşulup çıktılar `diff`'lendi:
+  - `geri-sarma.mjs`: aynı (yalnız klasör adı farklı).
+  - `arka-plan.mjs`: aynı olay sırası. Bir kez de `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` ile koşuldu, `session_state_changed` dizisi aynı.
+  - Yeni `olcum/surum.mjs`:
+    - Aynı çıkanlar: kancalar (`SessionStart` startup'ta çağrılmıyor, `UserPromptSubmit` block API'ye gitmiyor, `PreCompact` block `/compact`'ı atlatıyor), girişsiz `accountInfo` biçimi, `supportedModels`'in `supportedEffortLevels`'ı, `initializationResult().commands`, `skillFrontmatter` alanları.
+    - Farklı çıkanlar: init'e `additional_directories` ve `original_cwd` eklendi. Bağlam satırlarına `id` geldi. Sahte API arkasında araç araması açık: panelin `alwaysLoad`'lu aracı `tools`'ta, işaretsizi ertelenmiş. Opus 5.5'te `TodoWrite` ve `TaskCreate` yine yok; Sonnet 4.5'in `Task*` araçları ertelenmiş.
+- **Yapılan**:
+  - `package.json` → `^0.3.310`. Kilit dosyasında yalnız SDK ve platform paketleri değişti.
+  - Yan panelin Bağlam dökümü satırları `id` ile adlandırıyor (compaction.js geçirir, renderer/chat.js → `CTX_NAMES`). Bilinmeyen satır Claude Code'un adıyla görünür. SDK bunu öneriyor, çünkü İngilizce ad değişebilir.
+  - Sahte CLI: bağlam satırlarına gerçek `id`'ler, kayıt sürümü 2.1.310.
+  - Ölçüm betiği `olcum/surum.mjs`.
+  - Belgeler: CLAUDE.md §5'e "Agent SDK yükseltmesi" (yükseltme sırası) eklendi; "Panelin araçları ve bağlam" ve "Görev listesi aracı" notlarına 2.1.310 ölçümü yazıldı; §7'ye açık iş eklendi. PLAN.md'de tablo, madde 9'un sonucu ve §4 güncellendi.
+- **Kararlar**: Yeni SDK özellikleri (per-tool `permission_policy`, `reloadPlugins({ addPlugins })`, `getContextUsage`'ın eklenti/MCP talimat payları) bu işte kullanılmadı, ihtiyaç doğunca kullanılır. `npm audit`'in 4 uyarısı (electron, undici, body-parser, fast-uri) yükseltmeden önce de vardı; SDK'dan gelmiyor, dokunulmadı.
+- **Doğrulama**: `npm run check` temiz. e2e'deki bağlam dökümü assert'i ('Claude Code araçları', 'Skill listesi') artık yalnız `id` eşlemesiyle geçiyor. Sahte CLI'nin `system_tools` kimliği bilerek bozulunca test kırmızıya döndü (`bağlam dökümü: Konuşma,System tools,Skill listesi`). Bozma geri alınınca `npm test` ilk koşuda yeşil (95 adım). Görünen bir değişiklik yok, adlar aynı Türkçe etiketler. Gerçek hesapla panelde denenmedi.
+- **Bekleyen**: Emre: `bash kur.sh` (panel kapalıyken) ve gerçek hesapla bir tur (sohbet, yan paneldeki Bağlam dökümü, model/efor değişimi, kullanım). Sıradaki iş: madde 3, Değişiklikler bölmesinden Claude'a satır yorumu.
+
+## 2026-10-25 · Claude Code eksikleri: kalan işler plana yazıldı
+
+- **İstek**: Emre: bağlam şişmesin, kalan işler bir plana yazılsın, ayrı oturumlarda yapılsın.
+- **Yapılan**: `docs/claude-code-eksikleri/PLAN.md` (durum tablosu; her oturumun düzeni; 3–10. maddelerde amaç, bilinenler, ölçülecekler, tasarım önerisi, dosyalar, e2e). 1. ve 2. maddelerin ölçüm betikleri `olcum/`'a alındı (önce `/tmp`'teydi; aynı dosyalar, ikisi de bu oturumda gerçek CLI'yle koştu). Öneri: 9 (SDK güncellemesi) 5–8'den önce.
+
+## 2026-10-25 · Arka plan görevleri: şerit, tek tek durdurma, "Arka plana al"
+
+- **İstek**: Claude Code eksikleri listesinin 2. maddesi (Emre: "sıradakine geç"). Panel arka planda süren komutları ve alt ajanları göstermiyordu; "Durdur" arka plandaki alt ajanları da öldürüyordu; görev bitince Claude Code'un kendiliğinden açtığı tur panelde "boşta" görünüyordu.
+- **Ölçüm** (gerçek Claude Code 2.1.300, `ANTHROPIC_BASE_URL` yerel sahte API'ye, girişsiz geçici ayar klasörü, 0 token; betikler `/tmp/rewind-betik/arka*.mjs`, depoya girmedi):
+  - Alt ajanlar bu sürümde varsayılan olarak arka planda (`Agent` → "Async agent launched", tur biter). Bash `run_in_background` ile aynı.
+  - `background_tasks_changed` her değişimde tamamı; `task_started` / `task_progress` / `task_updated` / `task_notification` ayrıntılar. Alt ajanın kendi ön plan Bash'i `task_started` verir ama listeye girmez.
+  - Görev bitince Claude Code kendiliğinden tur açar (Bash bitti; alt ajan bitti ya da durduruldu; durdurulan Bash'ten sonra açmaz). `session_state_changed` yalnız `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` ile geliyor.
+  - `perTaskStopAffordance` yokken "Durdur" arka plandaki alt ajanı öldürdü (Bash'i öldürmedi); varken ikisi de sürdü.
+  - `stopTask` Bash'i ve alt ajanı durduruyor (`stopped`).
+  - `backgroundTasks(toolUseId)` ön plandaki Bash'i ancak görev olduktan sonra (~3 sn, `task_started is_backgrounded: false`) arka plana alıyor; önce çağrılınca `true` dönüp bir şey yapmıyor.
+- **Yapılan**:
+  - Ana süreç: `perTaskStopAffordance: true`, sohbet ortamına `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`, `chat:stopTask`, `chat:backgroundTask`; kendiliğinden açılan tur meşgul sayılır; uyanık tutma arka plan görevlerini de sayar (`c.bgTasks`); geri sarma ön izlemesi süren görevleri söyler (konuşma geri sarılınca eski süreçle birlikte durur).
+  - Arayüz (renderer/activity.js): yazma alanının üstünde "N görev arka planda" şeridi; açılınca her görev (tür ikonu, açıklama, alt ajanın türü ve o an ne yaptığı, araç sayısı, süre) ve tek tek "Durdur", ikiden çoksa "Hepsini durdur". Satırlar yerinde güncellenir (ilerleme geldikçe "Durdur" imlecin altında değişmesin). Araç satırında "arka planda" / "bitti" / "durduruldu". Ön planda süren komut görev olunca canlı göstergede "Arka plana al".
+  - Sahte CLI: ölçülen davranış (turlar "arka planda komut", "arka planda ajan", "uzun komut çalıştır", "yavaş düşün"; bitirme dosyaları `<günlük>.arka-bitir`, `.ajan-bitir`). Hata sonucuna `errors` dizisi eklendi: yokken SDK `errors.map`'te çöküyor, sohbet "Claude Code kapandı" diyordu (yalnız sahte CLI'nin eksiği).
+- **Kararlar**: `agentProgressSummaries` kapalı (az da olsa token harcar; açılırsa alt ajanın satırında "şu an ne yapıyor" özeti olur). Görev çıktısı (`output_file`) gösterilmiyor. Kolların arka plan görevleri yalnız kendi sekmelerinde.
+- **Doğrulama**: `npm run check` temiz. `npm test` son koşuda yeşil; e2e'ye "Arka plan görevleri" adımı eklendi: şerit (sayı, tür, alt ajanın o an ne yaptığı, "Hepsini durdur"), "Durdur"un arka plandaki görevlere dokunmaması (`INTERRUPT arka=2 surdu`), şeritten alt ajanı durdurma ve ardından Claude Code'un kendiliğinden açtığı turun "çalışıyor" görünmesi, komutun kendiliğinden bitmesi (araç satırında "bitti", şerit kalkar), ön plandaki komutu "Arka plana al". İlk koşu sahte CLI'nin `errors`'suz hata sonucunda düştü (yukarıda). Bozma denemesi: `perTaskStopAffordance` çıkarıldı → kırmızı. Ekran görüntüleri: `tests/out/6l-arka-plan.png`, `6m-arka-plana-al.png`.
+- **Bekleyen**: gerçek hesapla panelde bir tur (Emre): alt ajanlı bir istek, "Durdur", şeritten tek görev durdurma, uzun bir komutu "Arka plana al". Listedeki sıradaki iş: Değişiklikler bölmesinden Claude'a satır yorumu.
+
+
+## 2026-10-25 · Geri sarma: kod checkpoint'e, konuşma o mesajın öncesine
+
+- **İstek**: Claude Code'da olup panelde olmayan, hızı ve iş kalitesini etkileyen özellikler sıralandı (2026-10-24); Emre "hepsini sıra sıra, ilk baştakinden başla" dedi. Birincisi geri sarma: Claude yanlış yola girince düzeltme üstüne yazılıyor, hatalı deneme bağlamda kalıyordu.
+- **Ölçüm** (gerçek Claude Code 2.1.300, `ANTHROPIC_BASE_URL` yerel sahte API'ye, girişsiz geçici ayar klasörü, 0 token; betikler `/tmp/rewind-betik/`, depoya girmedi):
+  - SDK'ya verilen `SDKUserMessage.uuid` kayda o kimlikle yazılıyor, kod checkpoint'i ona bağlanıyor.
+  - `rewindFiles(uuid, { dryRun: true })` dosyaları ve satırları sayıyor, gerçeği dosyayı geri getiriyor; mesajdan önce olmayan dosyayı siliyor. Süreç değişince (resume) eski mesajlarda da çalışıyor.
+  - `resumeSessionAt: <mesajın parentUuid'i>` konuşmayı tam o mesajın öncesine kesiyor, oturum kimliği aynı kalıyor, `getSessionMessages` yeni dalı veriyor. Normal turda ebeveyn, akıştaki son Claude mesajının `uuid`'si.
+  - Claude çalışırken giden mesaj ayrı tur olmuyor, sonraki araç adımında araya giriyor (kayıtta `attachment/queued_command`, checkpoint yok). Listedeki 6. maddenin açık sorusu da böylece cevaplandı: panelde de CLI'deki gibi turun ortasında okunuyor.
+  - Bilinmeyen ya da sıkıştırma öncesi `resumeSessionAt`: ~0,7 sn'de "No message found…" hata sonucu ve kapanış; mesajsız `getContextUsage` da reddediliyor. Sıkıştırma sonrası nokta sorunsuz açılıyor.
+  - `resumeDropsTurn` yalnız son tur atılırken kabul ediliyor, birden çok turda reddediyor.
+- **Yapılan**:
+  - Ana süreç (chat-main.js): `enableFileCheckpointing`, mesaj kimliği (`pushUser`), `chat:rewindPreview` (kodda ne değişecek + konuşma geri sarılabilir mi: `rewindPoint`) ve `chat:rewind` (önce kod, sonra konuşma). Konuşma `c.rewindTo` ile aynı oturumda yeni bir bedende sürer; yeni beden önce deneme bedeni (`startBody(o, true)`: mesajları bekletilir, kapanışı sohbeti kapatmaz), `getContextUsage` geçmezse eski beden geri gelir.
+  - Kesme noktası: kayıt dosyası varsa mesajın `parentUuid`'i (`dogus.findEntry`, dosyayı sondan 1 MB'lık parçalarla arar), yoksa gönderildiği an akışta görülen son kayıt. Bu süreçte sıkıştırılan mesaj ön izlemede ayrılır (`epoch`).
+  - Arayüz: kullanıcı balonunun solunda üstüne gelince "Geri sar" düğmesi; pencere değişecek dosyaları ve satırları, konuşmanın durumunu ve Bash notunu gösterir; seçenekler "Kodu ve konuşmayı" / "Yalnız konuşmayı" / "Yalnız kodu" (yalnız anlamlı olanlar). Konuşma geri sarılınca mesaj ve sonrası listeden kalkar, mesaj yazma kutusuna döner; araç kartları ve görev listesi kalanlara göre (`truncateFrom`, `restorePlanAfterRewind`). Sohbette "geri sarıldı" notu kalır.
+  - Defter: geri sarmadan sonra özet sonraki ilk mesajda yeniden masaya konur (`defter.untable`, "Devam et" gibi).
+  - Sahte CLI: checkpoint ve `rewind_files`, `--resume-session-at`, bilinmeyen noktada hata sonucu + çıkış, sıkıştırma eski zinciri düşürür, kimlikler süreçler arasında eşsiz; turlar "dosyaya yaz: <ad> <içerik>" ve "konuşmayı hatırla".
+- **Kararlar**:
+  - Oturumun ilk mesajına konuşma geri sarılmaz (öncesi yok; yeni oturum ahtapot kaydını değiştirirdi), yalnız kod.
+  - `resumeDropsTurn` kullanılmaz (birden çok turu atan geri sarmayı reddediyor).
+  - Kod geri sarılıp konuşma geri sarılamazsa kod geri sarılmış kalır, sohbette not düşülür.
+- **Doğrulama**: `npm run check` (64 dosya temiz). `npm test` son koşuda yeşil; e2e'ye "Geri sarma" adımı eklendi (yalnız kod, yalnız konuşma ve Claude'un geri sarılanı hatırlamaması, oturum kimliğinin değişmemesi, ilk mesaj, sıkıştırma öncesi, açılamayan noktada eski sürecin kalması, kayıt okuyucu). Koşular: 1. tarayıcının indirme adımında bilinen kararsızlıkla düştü (§7, geri sarmadan önce); 2–4. kendi adımımın beklentileri düzeltildi (geri sarılan konuşmayla silinen not, talimatsız `/compact`'ta Enter'ın öneriyi seçmesi) ve sahte CLI'nin kapanırken gelen `get_context_usage`'a yanıt vermesi (deneme bedeni geçiyordu; gerçek CLI yanıt vermiyor, ölçüldü) düzeltildi. Bozma denemesi: `rewindTo`'dan `resumeSessionAt` çıkarıldı → kırmızı ("yeni süreç o noktadan açılmadı"). `dogus.findEntry` gerçek kayıtta 33/33, parça sınırlarını aşan 19 MB'lık yapay dosyada 400/400 kaydı buldu. Ekran görüntüleri: `tests/out/6k1-geri-sar-dugme.png`, `6k2-geri-sar.png` (ilk görüntü açılış animasyonunun ortasında alınmıştı, kart saydam görünüyordu; test animasyonu bekliyor).
+- **Gerçek hesap**: Emre panelde gerçek hesapla denedi, çalışıyor (2026-10-25).
+- **Bekleyen**: İlk mesaja konuşma geri sarma, eklerin geri konması, "buradan itibaren özetle" yok. Listedeki sıradaki iş: arka plan görevleri bölmesi ve tek tek durdurma.
+
+
+## 2026-10-21 · Aynı oturum iki sekmede açılmaz, ikinci kez beyin olmaz
+
+- **İstek**: 2026-10-21 incelemesinde Kızıl Elma'nın başı (oturum 0620994f…) Max'te ve Pro'da aynı anda iki Claude Code sürecinde açık bulundu. İkisi aynı jsonl'a yazıyor; eski bellekli Max süreci yazarsa kayıt dallanır (kolun raporu baş boştayken kendiliğinden iletildiği için kullanıcı yazmadan da olabilir). Aynı oturum için iki ahtapot kaydı da var (oc_3f5d… Max: 12 kol ve defter; oc_ea33… Pro: boş), çünkü kayıt (hesap, proje) çiftine bağlı ve `adopt` başka hesaba bakmıyordu. Nedeni ortak `projects` klasörü (`ayarlari-esitle.sh`): her hesabın geçmiş seçicisi üç hesabın oturumlarını gösteriyor.
+- **Yapılan**:
+  - Arayüz: `createChatTab` resume'da bütün hesapların açık sohbet sekmelerinde aynı `sessionId`'yi arar (`openSessionTab`). Varsa o sekmeye ve hesabına geçer, toast "Bu oturum <hesap> hesabında açık." yazar; `draft` varsa o sekmeye konur. Geçmiş seçici, "Bu oturuma devam et", artifact'ten "Claude'la düzenle", ahtapotun başı, kolu ve fosili bu yoldan geçer.
+  - "Devam et" (`continue`): başka açık sohbet varsa klasörün son oturumu listeden bulunur (`lastSessionOf`). O oturum açıksa ona geçilir. Değilse sekme ilk `session_id`'ye kadar onu `continueOf` olarak taşır.
+  - Ana süreç: `chat:start` resume'da aynı oturumu taşıyan açık ya da başlatılmakta olan (`opening`) sohbet varsa reddeder.
+  - Octopus: `octopus.ownerOf` bütün hesapların kayıtlarına bakar: baş, önceki beden, kol. `adopt`, `bindHead('new')` (devam edilen oturumla), ilk `session_id`'de taslak baş ve "Projeyi Octopus'a al" (`assertFree`) reddeder. Hata metni hesabı, ahtapotu ve rolü söyler: `Bu oturum Max hesabındaki "WFC" ahtapotunun başı; …`.
+  - Geçmiş seçicinin boş metni "Bu klasörde geçmiş oturum yok." oldu. Eski "bu hesapla açılmış" ifadesi yanlıştı: liste hesaba göre süzülmüyor.
+- **Kararlar**:
+  - Var olan kayıtla açılış (baş "Devam et") denetlenmez, kendi başını açar.
+  - Var olan çift kayıt (oc_ea33…, Pro) silinmedi; Emre'nin kararı.
+  - Ahtapotun hesaplar arası tek kayıt olup olmayacağı ayrı bir tasarım kararı.
+  - Aynı hesapta zaten açık olan sekmeye giden yollar (kenar çubuğunda kol, fosil) eskisi gibi sessizce geçer. Toast yalnız ortak denetim yakalayınca çıkar.
+- **Doğrulama**: `npm run check`; `npm test` yeşil. e2e'ye iki adım eklendi:
+  - "Aynı oturum iki sekmede açılmaz": Max'te açık oturumu Pro'da açma denemesi Max'teki sekmeyi döner ve o hesaba geçer. Toast metni denetlenir. Max'te "Devam et" yeni sekme açmaz. Ana süreçte doğrudan `chatStart` reddedilir. Sahte CLI'de ikinci `--resume` yok. Pro'nun boş geçmiş metni denetlenir.
+  - "başka hesabın ahtapotunda baş olan oturum ikinci kez beyin olmaz": Pro'da "Bu sohbeti beyin yap" tam hata metniyle reddedilir. `chatStart({ octopus: 'new' })` ve `octopusImport` de reddedilir. Yeni kayıt klasörü açılmaz, Pro'nun listesi boş kalır.
+  - Var olan "beyin yap" adımındaki "aynı projede ikinci kez" denetimi artık yeni bir sohbetle yapılıyor: aynı oturumu ikinci kez açmak açık başı döndürür, bu da assert edilir.
+  - Üç bozma koşusu: (1) arayüz denetimi kapalı → "başka hesapta açma denemesi açık sekmeyi dönmedi"; (2) ana süreç denetimi kapalı → "ana süreç aynı oturumu ikinci kez başlattı"; (3) `adopt`'taki denetim kapalı → (b) adımı reddetme toast'ını beklerken zaman aşımı. Üçünde de kırmızı, geri alınınca yeşil.
+  - İlk koşu, adımın geçmiş penceresini kapatan seçicisi gizli Ayarlar penceresinin düğmesine denk geldiği için düştü (test hatası, düzeltildi).
+- **Bekleyen**:
+  - Terminalde `--resume` ile açılan oturum (app.js → `launch 'resume-id'`, geçmiş seçicinin "Terminal" düğmesi, "Terminalde aç") denetlenmiyor. Sohbette açık bir oturum terminalde de açılabilir.
+  - Hiç açık sohbet yokken "Devam et" ile açılan sekme, ilk mesajına kadar hangi oturumu sürdürdüğünü bilmez. O arada aynı oturum başka hesapta açılabilir.
+  - "Devam et" ile başka hesabın kolu açılırsa sohbet düz açılır (`findArm` hesaba bakar).
+  - Emre'nin gerçek panelde denemesi (`bash kur.sh` sonrası): Kızıl Elma'nın başı Max'te açıkken Pro'nun geçmişinden açmak.
+
+## 2026-10-20 · Ahtapotu silmek
+
+- **İstek** (Emre): kenar çubuğundaki ahtapotu (ör. Kızıl Elma) sağ tıklayıp silebilmek.
+- **Yapılan**: ahtapot satırına sağ tık menüsü (`octopusMenu`: "Başa geç"/"Başı aç", "Ahtapotu sil"). Onay penceresinden sonra açık baş ve kol sekmeleri kapanır (çalışan varsa sorulur), ana süreçte `octopus:delete` (alma.js → `deleteOctopus`): `octopus.remove` kaydı ve `<userData>/octopus/<id>/` klasörünü (ahtapot.json, defter, sınav, devir) siler, defterin önbelleği düşer, proje başka bir kapsamda değilse hafıza dizininden düşer (`refreshCoverage`).
+- **Kararlar**: Claude Code'un oturum dosyalarına ve projeye dokunulmaz (İ1); baş ve kollar geçmişten düz sohbet olarak açılabilir. Kalıcı arşiv kalır (yalnız "Hafızayı sil" siler). Başın ya da bir kolun sohbeti ana süreçte hâlâ bağlıysa silme reddedilir (sınav, doğuş, kol durumları kaydı yeniden yazmasın); sekmeler yeni kapandıysa 5 sn beklenir.
+- **Doğrulama**: `npm run check`; e2e'ye adım ("ahtapotu silmek": menü öğeleri, Vazgeç'te hiçbir şey silinmez, Sil'de baş sekmesi kapanır, klasör gider, kenar çubuğundan kalkar, bellekte kayıt yok, `projects` klasörü aynı). Klasör silme bilerek kapatılınca adım "ahtapotun klasörü silinmedi" ile kırmızı; geri alınca `npm test` yeşil. Bir bozma koşusu ilgisiz bir yerde (ahtapot bölmesi ekran görüntüsü zaman aşımı) düştü, yinelenince geçti.
+- **Bekleyen**: gerçek panelde Emre'nin bir denemesi (`bash kur.sh` sonrası).
+
 ## 2026-10-20 — Kol açarken model ve efor
 
 **İstek:** Emre başa "Opus 5.5 çok yüksek eforuyla bir iş kolu aç" dedi, kol orta eforla açıldı. `sessions start`'ta model ve efor alanı yoktu; yan oturum hesabın yeni sohbet seçimini (`chatPrefs`) alıyordu. Baş bunu ancak kolu açtıktan sonra söyleyebildi.

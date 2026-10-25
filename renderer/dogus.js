@@ -81,6 +81,7 @@ function rebirthEvent(tab, ev) {
     if (ev.step === 'birth') {
       if (ev.note && card) noteDetails(card, ev.note, 'Devir notu');
       divider(tab, 'Yeni beden · devir notuyla açıldı');
+      resetTasks(tab); // eski bedenin arka plan görevleri onunla kapandı (renderer/activity.js)
       setBusy(tab, true);
     }
   } else if (ev.kind === 'note') {

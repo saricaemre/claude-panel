@@ -88,6 +88,7 @@ async function importProject(accountId, { cwd, sessionId, memory, imports }) {
   if (!project) throw new Error('Klasör bulunamadı.');
   if (octopus.forProject(accountId, project.key)) throw new Error('Bu projenin zaten bir ahtapotu var; kenar çubuğundaki "Ahtapotlar" listesinden açın.');
   if (!isUuid(sessionId)) throw new Error('Beyin olacak oturum seçilmedi.');
+  octopus.assertFree(sessionId); // başka hesabın ahtapotunda baş ya da kol olan oturum ikinci kez baş olmaz
   const r = await opts.listSessions(accountId, project.key);
   const s = r?.ok && r.sessions.find((x) => x.sessionId === sessionId);
   if (!s) throw new Error('Seçilen oturum bu projenin geçmişinde bulunamadı.');
@@ -140,6 +141,16 @@ async function removeMemoryProject(accountId, key) {
   return { ok: true };
 }
 
+// Ahtapotu silmek: kayıt klasörü gider (octopus.remove), proje başka bir kapsamda değilse hafıza dizininden düşer (arşiv kalır)
+// Arayüz sekmeleri az önce kapattıysa sohbetler ana süreçte biraz sonra kapanır (chat-main.js → octopus.chatClosed); 5 sn beklenir.
+async function deleteOctopus(octoId) {
+  for (let i = 0; i < 50 && octopus.bound(octoId); i++) await new Promise((r) => setTimeout(r, 100));
+  const rec = octopus.remove(octoId);
+  defter.dropCache(octoId);
+  await hafiza.refreshCoverage(rec.accountId, rec.project?.key);
+  return { ok: true };
+}
+
 const wrap = (fn) => async (_e, ...args) => {
   try { return await fn(...args); } catch (err) { return { ok: false, error: err?.message || String(err) }; }
 };
@@ -149,6 +160,7 @@ function setup(o) {
   ipcMain.handle('octopus:survey', wrap(survey));
   ipcMain.handle('octopus:import', wrap(importProject));
   ipcMain.handle('octopus:settings', wrap(setOctopus));
+  ipcMain.handle('octopus:delete', wrap(deleteOctopus));
   ipcMain.handle('memory:add', wrap(addMemoryProject));
   ipcMain.handle('memory:remove', wrap(removeMemoryProject));
 }

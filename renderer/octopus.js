@@ -116,6 +116,38 @@ function armMenu(e, acctId, rec, arm) {
   ], 'octo-arm-menu');
 }
 
+// Ahtapotun açık sekmeleri: baş ve kollar
+const octoTabs = (acctId, rec) => openChatTabs(acctId).filter((t) => t.octopusId === rec.id || rec.arms.some((a) => a.sessionId && a.sessionId === t.sessionId));
+
+// Kenar çubuğunda ahtapot satırına sağ tık
+function octopusMenu(e, acctId, rec) {
+  const head = openChatTabs(acctId).some((t) => t.octopusId === rec.id);
+  openMenuAt(e, [
+    { header: rec.project.name },
+    { icon: 'chat', label: head ? 'Başa geç' : 'Başı aç', onclick: () => openOctopus(acctId, rec) },
+    { icon: 'trash', label: 'Ahtapotu sil', danger: true, desc: 'Kayıt, defter ve kol listesi silinir; oturumlar kalır', onclick: () => deleteOctopus(acctId, rec) },
+  ], 'octo-menu');
+}
+
+// Ahtapotu silmek: onaydan sonra açık sekmeleri kapanır (çalışan varsa sorulur), panelin kaydı silinir (octopus:delete).
+// Claude Code'un oturumları ve proje dosyaları kalır; baş ve kollar geçmişten düz sohbet olarak açılabilir.
+async function deleteOctopus(acctId, rec) {
+  const open = octoTabs(acctId, rec);
+  const ok = await dialogModal({
+    title: `"${rec.project.name}" ahtapotu silinsin mi?`,
+    body: 'Panelin bu ahtapot için tuttuğu kayıt silinir: kol listesi, defter, sınavlar ve devir notları. Bu geri alınamaz. ' +
+      'Claude Code\'un oturumları ve proje dosyaları kalır; baş ve kollar geçmişten düz sohbet olarak açılabilir.' +
+      (open.length ? ` Açık olan ${open.length} sekmesi de kapanır.` : ''),
+    okLabel: 'Sil', danger: true,
+  });
+  if (!ok) return;
+  for (const t of open) closeTab(t);
+  if (octoTabs(acctId, rec).length) return toast('Sekmeler kapanmadığı için ahtapot silinmedi.');
+  const r = await window.panel.octopusDelete(rec.id);
+  if (!r?.ok) return toast(r?.error || 'Ahtapot silinemedi.', 4500);
+  toast(`"${rec.project.name}" ahtapotu silindi.`);
+}
+
 // Fosil: başın önceki bedeni (yeniden doğuşla ya da yeni kimlikle "Devam et"le geride kalan oturum; dogus.js). Açılınca düz bir sohbet olur
 // (ahtapota bağlanmaz); baş ona danis ile danışır.
 function openFossil(acctId, rec, body) {
@@ -142,6 +174,7 @@ function octopusSidebar(acctId) {
           class: 'octo-row' + (headTab && headTab === active ? ' on' : ''),
           title: `${tilde(rec.project.cwd)}\n${rec.arms.length} kol${closed ? ` (${closed} kapandı; ahtapot bölmesinde "Diğer kollar")` : ''}\n${headTab ? 'Baş açık' : 'Tıklayınca baş "Devam et" ile açılır'}`,
           onclick: (e) => { e.stopPropagation(); openOctopus(acctId, rec); },
+          oncontextmenu: (e) => octopusMenu(e, acctId, rec),
         }, icon('octopus', 14), h('span', { class: 'octo-name' }, rec.project.name),
         headTab ? h('span', { class: 'octo-live', title: 'Baş açık' }) : null,
         arms.length ? h('span', { class: 'octo-count', title: `${arms.length} açık kol` }, arms.length) : null),

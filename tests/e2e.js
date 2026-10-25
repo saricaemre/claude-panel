@@ -1245,6 +1245,185 @@ async function waitUntil(fn, ms, msg) {
     assert.equal(await page.isHidden(C + '.changes-toggle .top-badge'), true);
     await page.evaluate(() => { closeTab(state.activeTab.max, true); activateTab('max', window.__sohbet); });
 
+    step('Geri sarma: kod checkpoint\'e döner, konuşma o mesajın öncesine kesilir; ilk mesaj, sıkıştırma öncesi, açılamayan noktada eski süreç kalır');
+    const GERI = path.join(HOME, 'GeriSar');
+    fs.mkdirSync(GERI, { recursive: true });
+    const gA = path.join(GERI, 'a.txt'), gB = path.join(GERI, 'b.txt');
+    const rwMark = fakeLog().length;
+    await page.evaluate((dir) => createChatTab('max', dir, 'new'), GERI);
+    await page.waitForFunction(() => state.activeTab.max?.chatId && state.activeTab.max !== window.__sohbet, null, { timeout: 10000 });
+    const RB = C + '.chat-list > .msg-user';
+    const idleRw = () => page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), null, { timeout: 15000 });
+    const rwSay = async (text) => {
+      const n = await page.locator(C + '.chat-list > .msg-assistant').count();
+      await page.fill(C + '.composer-input', text);
+      await page.press(C + '.composer-input', 'Enter');
+      await page.waitForFunction((n) => document.querySelectorAll('.acct-pane.active .chat-host.active .chat-list > .msg-assistant').length > n
+        && !document.querySelector('.acct-pane.active .chat-host[data-status="busy"]'), n, { timeout: 15000 });
+    };
+    const rewindAt = async (i, shot) => {
+      const b = page.locator(RB).nth(i);
+      await b.hover();
+      if (shot) { // üstüne gelince balonun solunda beliren düğme
+        await page.waitForFunction((i) => getComputedStyle(document.querySelectorAll('.acct-pane.active .chat-host.active .chat-list > .msg-user')[i].querySelector('.mu-rewind')).opacity === '1', i);
+        await page.screenshot({ path: path.join(OUT, shot) });
+      }
+      await b.locator('.mu-rewind').click();
+      await page.waitForSelector('.rewind-dlg');
+    };
+    const rwButtons = () => page.$$eval('.rewind-dlg [data-rewind]', (o) => o.map((x) => x.dataset.rewind));
+    const lastReply = () => page.$$eval(C + '.chat-list > .msg-assistant', (o) => o[o.length - 1].textContent.trim());
+    await rwSay('dosyaya yaz: a.txt bir');
+    await rwSay('dosyaya yaz: a.txt iki');
+    await rwSay('dosyaya yaz: b.txt yeni');
+    assert.equal(fs.readFileSync(gA, 'utf8'), 'iki\n');
+    assert.ok(fs.existsSync(gB));
+    assert.match(fakeLog().slice(rwMark), /CHECKPOINT acik/, 'panel kod checkpoint\'ini açmadı (enableFileCheckpointing)');
+    const rwIds = await page.$$eval(RB, (o) => o.map((b) => b.dataset.uuid));
+    assert.equal(rwIds.length, 3);
+    for (const u of rwIds) assert.ok(fakeLog().includes('MSGUUID ' + u), 'mesajın kimliği Claude Code\'a gitmedi: ' + u);
+    // 1) Yalnız kod, ikinci mesaja: a.txt "bir"e döner, ondan sonra yazılan b.txt silinir, konuşma yerinde
+    await rewindAt(1, '6k1-geri-sar-dugme.png');
+    assert.match(await page.textContent('.rewind-dlg [data-sec="code"]'), /2 dosya bu mesajdan önceki hâline döner \(\+1 −2 satır\)/);
+    assert.deepEqual(await page.$$eval('.rewind-dlg .rw-files li', (o) => o.map((x) => x.textContent)), ['a.txt', 'b.txt']);
+    assert.match(await page.textContent('.rewind-dlg [data-sec="convo"]'), /Bu mesaj ve sonrası sohbetten silinir/);
+    assert.deepEqual(await rwButtons(), ['code', 'convo', 'both']);
+    await page.waitForFunction(() => !document.querySelector('.rewind-dlg').getAnimations({ subtree: true }).some((a) => a.playState === 'running')); // açılış animasyonu (pop) bitsin
+    await page.screenshot({ path: path.join(OUT, '6k2-geri-sar.png') });
+    await page.click('.rewind-dlg [data-rewind="code"]');
+    await page.waitForSelector(C + '.chat-note.rewound');
+    assert.equal(fs.readFileSync(gA, 'utf8'), 'bir\n', 'kod geri sarılmadı');
+    assert.equal(fs.existsSync(gB), false, 'mesajdan sonra yazılan dosya silinmedi');
+    assert.equal(await page.locator(RB).count(), 3, 'yalnız kod geri sarılınca konuşma değişmemeli');
+    assert.match(await page.textContent(C + '.chat-note.rewound'), /Kod bu mesajın öncesine geri sarıldı \(2 dosya, \+1 −2\); konuşma yerinde/);
+    // 2) Yalnız konuşma, ikinci mesaja: o mesaj ve sonrası kalkar, metni yazma kutusuna döner; aynı oturum ilk turun sonundan sürer
+    const sidBefore = await page.evaluate(() => state.activeTab.max.sessionId);
+    const rwMark2 = fakeLog().length;
+    await rewindAt(1);
+    assert.match(await page.textContent('.rewind-dlg [data-sec="code"]'), /değişen dosya yok/);
+    assert.deepEqual(await rwButtons(), ['convo'], 'kodda değişecek bir şey yokken yalnız konuşma seçilebilmeli');
+    await page.click('.rewind-dlg [data-rewind="convo"]');
+    await page.waitForFunction(() => document.querySelectorAll('.acct-pane.active .chat-host.active .chat-list > .msg-user').length === 1, null, { timeout: 15000 });
+    assert.equal(await page.inputValue(C + '.composer-input'), 'dosyaya yaz: a.txt iki', 'geri sarılan mesaj yazma kutusuna dönmedi');
+    const rwLog2 = fakeLog().slice(rwMark2);
+    assert.match(rwLog2, /ARGS .*--resume=.*--resume-session-at=/, 'yeni süreç o noktadan açılmadı');
+    assert.match(rwLog2, /RESUMEAT \S+ kayit=4/, 'konuşma ilk turun sonundan (4. kayıt) sürmeli');
+    assert.equal(await page.locator(C + '.chat-list .tool-row').count(), 1, 'silinen turların araç satırları kalmamalı');
+    assert.match(await page.textContent(C + '.chat-note.rewound >> nth=-1'), /Konuşma bu mesajın öncesine geri sarıldı; dosyalara dokunulmadı/);
+    await page.fill(C + '.composer-input', '');
+    await rwSay('konuşmayı hatırla');
+    assert.equal(await lastReply(), 'Bellekteki mesajlar: dosyaya yaz: a.txt bir | konuşmayı hatırla', 'Claude geri sarılan mesajları hâlâ hatırlıyor');
+    assert.equal(await page.evaluate(() => state.activeTab.max.sessionId), sidBefore, 'geri sarmada oturum kimliği değişmemeli');
+    // 3) İlk mesaj: konuşmanın öncesi yok, kod geri sarılabilir (a.txt o mesajdan önce yoktu: silinir)
+    await rewindAt(0);
+    assert.match(await page.textContent('.rewind-dlg [data-sec="convo"]'), /oturumun ilk mesajı/);
+    assert.deepEqual(await rwButtons(), ['code']);
+    await page.click('.rewind-dlg [data-rewind="code"]');
+    // Notlar: 2. adımın notu ve bu (1. adımın notu ikinci mesajdan sonraydı, konuşmayla birlikte silindi)
+    await page.waitForFunction(() => document.querySelectorAll('.acct-pane.active .chat-host.active .chat-note.rewound').length === 2, null, { timeout: 15000 });
+    assert.equal(fs.existsSync(gA), false, 'ilk mesajdan önce olmayan dosya silinmeli');
+    // 4) Sıkıştırmadan sonra: öncesindeki mesaja konuşma geri sarılamaz, ön izleme söyler
+    await page.fill(C + '.composer-input', '/compact geri sarma denemesi'); // talimatsız "/compact"ta Enter öneriyi seçer, göndermez
+    await page.press(C + '.composer-input', 'Enter');
+    await waitUntil(() => /SIKISTIRMA manual yapıldı/.test(fakeLog().slice(rwMark2)), 15000, 'sıkıştırma yapılmadı');
+    await idleRw();
+    await rewindAt(1);
+    assert.match(await page.textContent('.rewind-dlg [data-sec="convo"]'), /son sıkıştırmadan önce/);
+    assert.deepEqual(await rwButtons(), []);
+    assert.equal(await page.textContent('.rewind-dlg .ghost-btn'), 'Kapat');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.rewind-dlg', { state: 'detached' });
+    // 5) Claude Code o noktadan açılamazsa (deneme bedeni hatayla kapanır) eski süreç yerinde kalır, sohbet sürer
+    await rwSay('dosyaya yaz: c.txt üç');
+    fs.writeFileSync(LOG + '.resume-at-bozuk', '');
+    const n5 = await page.locator(RB).count();
+    await rewindAt(n5 - 1);
+    await page.click('.rewind-dlg [data-rewind="convo"]');
+    await page.waitForSelector('#toast:not([hidden]):has-text("Geri sarılamadı: Bu nokta son sıkıştırmadan önce kalıyor")', { timeout: 15000 });
+    fs.rmSync(LOG + '.resume-at-bozuk');
+    assert.equal(await page.locator(RB).count(), n5, 'açılamayan geri sarmada konuşma silinmemeli');
+    assert.equal(await page.evaluate(() => state.activeTab.max.exited), false, 'açılamayan geri sarma sohbeti kapattı');
+    await rwSay('konuşmayı hatırla');
+    assert.match(await lastReply(), /dosyaya yaz: c\.txt üç \| konuşmayı hatırla$/, 'eski süreç yerinde kalmadı');
+    // Kayıt okuyucu (gerçek CLI'de konuşmanın geri sarılacağı yer kayıttaki ebeveyndir): sondan arar, türe bakar, araya giren mesajın kendi satırı yok
+    const kayit = path.join(TMP, 'geri-kayit.jsonl');
+    fs.writeFileSync(kayit, [{ type: 'user', uuid: 'u-1', parentUuid: null }, { type: 'assistant', uuid: 'a-1', parentUuid: 'u-1' },
+      { type: 'attachment', uuid: 'q-1', parentUuid: 'a-1', attachment: { type: 'queued_command', prompt: 'x' } },
+      { type: 'user', uuid: 'u-2', parentUuid: 'q-1', pad: 'ş'.repeat(1.5e6) }].map((x) => JSON.stringify(x)).join('\n') + '\n');
+    assert.deepEqual(await app.evaluate(async (_e, f) => {
+      const d = process.mainModule.require('./dogus.js');
+      return [(await d.findEntry(f, 'u-2', 'user'))?.parentUuid, (await d.findEntry(f, 'u-1', 'user'))?.parentUuid, await d.findEntry(f, 'a-1', 'user'), await d.findEntry(f, 'yok')];
+    }, kayit), ['q-1', null, null, null]);
+    await page.evaluate(() => { closeTab(state.activeTab.max, true); activateTab('max', window.__sohbet); });
+
+    step('Arka plan görevleri: şeritte listelenir, "Durdur" onlara dokunmaz, tek tek durdurulur, ön plandaki komut arka plana alınır, bitince Claude kendiliğinden tur açar');
+    const ARKA = path.join(HOME, 'Arka');
+    fs.mkdirSync(ARKA, { recursive: true });
+    const bgMark = fakeLog().length;
+    await page.evaluate((dir) => createChatTab('max', dir, 'new'), ARKA);
+    await page.waitForFunction(() => state.activeTab.max?.chatId && state.activeTab.max !== window.__sohbet, null, { timeout: 10000 });
+    const TB = C + '.tasks-bar';
+    const BUSY = '.acct-pane.active .chat-host.active[data-status="busy"]';
+    const sayBg = async (text, until) => {
+      await page.fill(C + '.composer-input', text);
+      await page.press(C + '.composer-input', 'Enter');
+      await page.waitForFunction((u) => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes(u)
+        && !document.querySelector('.acct-pane.active .chat-host.active[data-status="busy"]'), until, { timeout: 15000 });
+    };
+    // Claude Code kendiliğinden tur açınca "çalışıyor" görünür (session_state_changed), sonra yanıtı gelir
+    const autoTurn = async (until) => {
+      await page.waitForSelector(BUSY, { timeout: 15000 });
+      await page.waitForFunction((u) => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes(u)
+        && !document.querySelector('.acct-pane.active .chat-host.active[data-status="busy"]'), until, { timeout: 15000 });
+    };
+    await sayBg('arka planda komut', 'Komutu arka planda başlattım');
+    assert.match(fakeLog().slice(bgMark), /GOREV perTaskStopAffordance=true oturumDurumu=acik/, 'panel perTaskStopAffordance ya da oturum durumu olaylarını açmadı');
+    await page.waitForSelector(TB + ':not([hidden])');
+    assert.equal(await page.textContent(TB + ' .tb-count'), '1 görev arka planda');
+    assert.equal(await page.textContent(TB + ' .tb-cur'), 'Testleri koş');
+    assert.equal(await page.textContent(C + '.tool-bgchip'), 'arka planda', 'araç satırında "arka planda" yok');
+    await sayBg('arka planda ajan', 'Alt ajanı arka planda başlattım');
+    await page.waitForFunction((s) => document.querySelector(s + ' .tb-count')?.textContent === '2 görev arka planda', TB);
+    await page.click(TB + ' > summary');
+    await page.waitForFunction((s) => /Dosya okuyor · \d+ araç/.test(document.querySelector(s + ' .tb-row[data-type="local_agent"] .tb-meta')?.textContent || ''), TB, { timeout: 5000 });
+    assert.match(await page.textContent(TB + ' .tb-row[data-type="local_agent"] .tb-meta'), /^Alt ajan · Explore · Dosya okuyor/);
+    assert.equal(await page.textContent(TB + ' .tb-row[data-type="local_bash"] .tb-desc'), 'Testleri koş');
+    assert.equal(await page.locator(TB + ' .tb-stopall').count(), 1, 'iki görevde "Hepsini durdur" olmalı');
+    await page.screenshot({ path: path.join(OUT, '6l-arka-plan.png') });
+    // "Durdur" yalnız turu keser: arka plandaki komut ve alt ajan sürer (perTaskStopAffordance)
+    await page.fill(C + '.composer-input', 'yavaş düşün');
+    await page.press(C + '.composer-input', 'Enter');
+    await page.waitForSelector(BUSY);
+    await page.click(C + '.stop-btn');
+    await waitUntil(() => /INTERRUPT arka=2 surdu/.test(fakeLog().slice(bgMark)), 10000, 'Durdur arka plandaki görevlere dokunmamalı');
+    await page.waitForFunction(() => !document.querySelector('.acct-pane.active .chat-host.active[data-status="busy"]'), null, { timeout: 10000 });
+    assert.equal(await page.textContent(TB + ' .tb-count'), '2 görev arka planda');
+    // Tek görevi durdur: alt ajan durur, Claude Code kendiliğinden tur açar; komut sürer
+    await page.click(TB + ' .tb-row[data-type="local_agent"] .tb-stop');
+    await autoTurn('Alt ajan durduruldu: Kodu incele');
+    assert.match(fakeLog().slice(bgMark), /STOPTASK a\S+ var/);
+    assert.equal(await page.textContent(TB + ' .tb-count'), '1 görev arka planda');
+    assert.equal(await page.textContent(C + '.tool-bgchip >> nth=1'), 'durduruldu');
+    // Komut kendiliğinden biter: Claude haber verir, şerit kalkar, araç satırı "bitti"
+    fs.writeFileSync(LOG + '.arka-bitir', '');
+    await autoTurn('Arka plandaki komut bitti: Testleri koş');
+    await page.waitForSelector(TB + '[hidden]', { state: 'attached' });
+    assert.equal(await page.textContent(C + '.tool-bgchip >> nth=0'), 'bitti');
+    // Ön planda uzun süren komut: görev olunca göstergede "Arka plana al"; tıklanınca tur sürer, komut şeride geçer
+    await page.fill(C + '.composer-input', 'uzun komut çalıştır');
+    await page.press(C + '.composer-input', 'Enter');
+    await page.waitForSelector(C + '.live-act .la-bg:not([hidden])', { timeout: 10000 });
+    await page.screenshot({ path: path.join(OUT, '6m-arka-plana-al.png') });
+    await page.click(C + '.live-act .la-bg');
+    await page.waitForFunction(() => document.querySelector('.acct-pane.active .chat-host.active .chat-list')?.textContent.includes('Komut arka planda sürüyor')
+      && !document.querySelector('.acct-pane.active .chat-host.active[data-status="busy"]'), null, { timeout: 15000 });
+    assert.match(fakeLog().slice(bgMark), /BACKGROUND fgl\S+ alindi/, 'komut arka plana alınmadı');
+    assert.equal(await page.textContent(TB + ' .tb-cur'), 'Uzun testler');
+    fs.writeFileSync(LOG + '.arka-bitir', '');
+    await autoTurn('Arka plandaki komut bitti: Uzun testler');
+    await page.waitForSelector(TB + '[hidden]', { state: 'attached' });
+    await page.evaluate(() => { closeTab(state.activeTab.max, true); activateTab('max', window.__sohbet); });
+
     step('Editörde aç / Finder\'da göster: open aracı izin sormaz; seçili editör satırıyla, klasör, Finder; ayardan editör değişir');
     await page.evaluate((dir) => createChatTab('max', dir, 'new'), DEPO);
     await page.waitForFunction(() => state.activeTab.max?.chatId && state.activeTab.max !== window.__sohbet, null, { timeout: 10000 });
@@ -1993,6 +2172,38 @@ async function waitUntil(fn, ms, msg) {
     assert.match(fakeLog(), new RegExp('--resume=' + SESSION));
     await page.screenshot({ path: path.join(OUT, '5-gecmis.png') });
 
+    step('Aynı oturum iki sekmede açılmaz: başka hesapta (Pro) ya da "Devam et"le yeniden açma denemesi açık sekmeye geçer; ana süreç de reddeder');
+    const openChats = () => page.evaluate(() => Object.fromEntries(Object.entries(state.tabs).map(([a, l]) => [a, l.filter((t) => t.kind === 'chat' && !t.exited).map((t) => t.sessionId)])));
+    const resumesOf = (sid) => fakeLog().split('\n').filter((l) => l.startsWith('ARGS ') && l.includes(`"--resume=${sid}"`)).length;
+    const dupBefore = await openChats();
+    const dupResumes = resumesOf(SESSION);
+    assert.equal(await page.evaluate(() => state.activeTab.max.sessionId), SESSION);
+    // Pro'nun geçmişinden açılıyor (hesaplar projects klasörünü paylaşınca aynı oturum orada da listelenir)
+    await page.evaluate(() => selectAccount('pro', 'code'));
+    const dupTab = await page.evaluate(([dir, sid]) => createChatTab('pro', dir, 'resume', sid).then((t) => [t.acctId, t.sessionId, t === state.activeTab.max]), [PROJECT, SESSION]);
+    assert.deepEqual(dupTab, ['max', SESSION, true], 'başka hesapta açma denemesi açık sekmeyi dönmedi');
+    assert.deepEqual(await page.evaluate(() => [state.active, state.view.max, state.activeTab.max.sessionId]), ['max', 'code', SESSION], 'açık sekmenin hesabına geçilmedi');
+    assert.equal(await page.textContent('#toast'), 'Bu oturum Max hesabında açık.');
+    assert.equal(await page.isVisible('#toast'), true);
+    // Aynı hesapta "Devam et" (continue): klasörün son oturumu açık, yeni sekme açılmaz
+    await page.click(P + '.tab-add');
+    await page.click(P + `.recent-row:has([title="${PROJECT}"]) .mini >> text=Devam et`);
+    await page.waitForFunction((sid) => state.activeTab.max?.sessionId === sid, SESSION, { timeout: 10000 });
+    assert.deepEqual(await openChats(), dupBefore, 'aynı oturum için yeni sohbet sekmesi açıldı');
+    // Ana süreç son savunma: arayüz atlansa da aynı oturum ikinci kez başlatılmaz
+    const dupStart = await page.evaluate(([dir, sid]) => window.panel.chatStart({ accountId: 'pro', cwd: dir, mode: 'resume', resumeId: sid }), [PROJECT, SESSION]);
+    if (dupStart.ok) await page.evaluate((id) => window.panel.chatClose(id), dupStart.id);
+    assert.equal(dupStart.ok, false, 'ana süreç aynı oturumu ikinci kez başlattı');
+    assert.match(dupStart.error, /^Bu oturum Max hesabında açık bir sohbette/);
+    await page.waitForTimeout(500);
+    assert.equal(resumesOf(SESSION), dupResumes, 'aynı oturum için ikinci bir Claude Code süreci açıldı');
+    // Boş geçmiş: liste hesaba göre süzülmez (ortak projects klasörü), metin bunu söylemez
+    await page.evaluate((dir) => showSessionPicker('pro', dir), PROJECT);
+    await page.waitForSelector('.modal .session-list .empty-recent:not(:has-text("Yükleniyor"))', { timeout: 20000 });
+    assert.equal(await page.textContent('.modal .session-list .empty-recent'), 'Bu klasörde geçmiş oturum yok.');
+    await page.click('.modal:has(.session-list) .modal-head .icon-btn');
+    await page.evaluate(() => selectAccount('max', 'code'));
+
     step('Ortam: eklenir ve seçilir; değişkenler ve kurulum betiği sohbete ve terminale ulaşır, hatalı betik sohbeti başlatmaz');
     const cfgFile = () => JSON.parse(fs.readFileSync(path.join(USER_DATA, 'config.json'), 'utf8'));
     const until = async (fn, msg, ms = 10000) => {
@@ -2509,8 +2720,34 @@ async function waitUntil(fn, ms, msg) {
     await page.click(C + '.chat-more');
     assert.equal(await page.locator('.pop-menu .pop-item.checked:has-text("Bu sohbet projenin beyni")').count(), 1);
     await page.evaluate(() => closeMenu());
-    assert.match((await page.evaluate(([dir, sid]) => createChatTab('max', dir, 'resume', sid).then((t) => window.panel.octopusAdopt(t.chatId)), [PROJECT, SESSION])).error, /zaten bir ahtapotu var/);
+    // Aynı oturum ikinci sekmede açılmaz (açık başa dönülür); aynı projede başka bir sohbet de beyin olamaz
+    assert.equal(await page.evaluate(([dir, sid]) => createChatTab('max', dir, 'resume', sid).then((t) => t.octopusId), [PROJECT, SESSION]), adoptedId, 'açık baş yerine yeni sekme açıldı');
+    assert.match((await page.evaluate((dir) => createChatTab('max', dir, 'new').then((t) => window.panel.octopusAdopt(t.chatId)), PROJECT)).error, /zaten bir ahtapotu var/);
     await page.evaluate(() => { for (const t of state.tabs.max.filter((x) => x.cwd.endsWith('/WFC'))) closeTab(t, true); });
+
+    step('Octopus: başka hesabın ahtapotunda baş olan oturum ikinci kez beyin olmaz ("Bu sohbeti beyin yap", yeni ahtapot olarak açma, "Projeyi Octopus\'a al")');
+    const octoDirs = () => fs.readdirSync(OCTO_ROOT).filter((n) => n.startsWith('oc_')).sort();
+    const dirsBefore = octoDirs();
+    // Max'in başı (SESSION) sekmesi kapalıyken Pro'da düz sohbet olarak açılabilir
+    await page.evaluate(([dir, sid]) => createChatTab('pro', dir, 'resume', sid), [PROJECT, SESSION]);
+    await page.waitForFunction((sid) => state.active === 'pro' && state.activeTab.pro?.chatId && state.activeTab.pro.sessionId === sid, SESSION, { timeout: 15000 });
+    await page.click(C + '.chat-more');
+    await page.click('.pop-menu .pop-item:has-text("Bu sohbeti beyin yap")');
+    await page.waitForFunction(() => /ahtapotunun başı/.test(document.querySelector('#toast')?.textContent || ''), null, { timeout: 5000 });
+    assert.equal(await page.textContent('#toast'), 'Bu oturum Max hesabındaki "WFC" ahtapotunun başı; bir oturum iki ahtapotta yer alamaz.');
+    assert.equal(await page.evaluate(() => state.activeTab.pro.octopusId || null), null, 'reddedilen sohbet baş oldu');
+    assert.equal(await page.isVisible(C + '.octo-toggle'), false);
+    await page.evaluate(() => closeTab(state.activeTab.pro, true));
+    // Yeni ahtapotun başı olarak açmak (bindHead 'new') ve "Projeyi Octopus'a al" da reddedilir
+    const asHead = await page.evaluate(([dir, sid]) => window.panel.chatStart({ accountId: 'pro', cwd: dir, mode: 'resume', resumeId: sid, octopus: 'new' }), [PROJECT, SESSION]);
+    if (asHead.ok) await page.evaluate((id) => window.panel.chatClose(id), asHead.id);
+    assert.equal(asHead.ok, false, 'başka hesabın başı yeni ahtapotun başı olarak açıldı');
+    assert.match(asHead.error, /Max hesabındaki "WFC" ahtapotunun başı/);
+    const asImport = await page.evaluate(([dir, sid]) => window.panel.octopusImport('pro', { cwd: dir, sessionId: sid }), [PROJECT, SESSION]);
+    assert.equal(asImport.ok, false);
+    assert.match(asImport.error, /Max hesabındaki "WFC" ahtapotunun başı/);
+    assert.deepEqual([octoDirs(), await page.evaluate(() => window.panel.octopusList('pro'))], [dirsBefore, []], 'Pro\'da ikinci bir ahtapot kaydı açıldı');
+    await page.evaluate(() => selectAccount('max', 'code'));
 
     step('Hafıza: ahtapot projesinin kayıtları dizine girer; Türkçe arama, bağlamdaki yer, tekilleştirme, gizli anahtar, yarım satır');
     const MEM_FILE = path.join(projDir, 'hafiza-1.jsonl');
@@ -3316,6 +3553,37 @@ async function waitUntil(fn, ms, msg) {
     await page2.waitForSelector(OC2 + '.oc-pane', { timeout: 5000 });
     await waitUntil(async () => (await ocArms2()).length === 0, 5000, 'kapanan kollar bölmede: ' + JSON.stringify(await ocArms2()));
     await page2.screenshot({ path: path.join(OUT, '7y-octopus-kollar-kapandi.png') });
+    assert.deepEqual(errors, [], 'arayüz hataları');
+    assert.deepEqual(await mainErrors(app2), [], 'ana süreç hataları (2)');
+
+    step('Octopus: ahtapotu silmek. Kenar çubuğunda sağ tık "Ahtapotu sil"; onayla açık baş sekmesi kapanır, kayıt klasörü gider, oturum dosyaları kalır');
+    const ROW = `.acct.active .octo[data-id="${octoBefore.id}"] .octo-row`;
+    const octoMenuItems = () => page2.$$eval('.octo-menu .pop-item .pop-label > span', (o) => o.map((x) => x.textContent));
+    const listTree = (d) => { try { return fs.readdirSync(d, { recursive: true }).sort(); } catch { return []; } };
+    const projectsBefore = listTree(path.join(HOME, '.claude-max', 'projects'));
+    await page2.click(ROW, { button: 'right' });
+    await page2.waitForSelector('.octo-menu', { timeout: 3000 });
+    assert.deepEqual(await octoMenuItems(), ['Başa geç', 'Ahtapotu sil']);
+    // Vazgeç: hiçbir şey silinmez
+    await page2.click('.octo-menu .pop-item:has-text("Ahtapotu sil")');
+    await page2.waitForSelector('.dlg .danger-btn', { timeout: 3000 });
+    assert.match(await page2.textContent('.dlg .dlg-body'), /Açık olan 1 sekmesi de kapanır/);
+    await page2.waitForTimeout(150);
+    await page2.screenshot({ path: path.join(OUT, '7z-octopus-sil-onay.png') });
+    await page2.click('.dlg .ghost-btn');
+    await page2.waitForTimeout(300);
+    assert.ok(fs.existsSync(path.join(octoDir, 'ahtapot.json')), 'vazgeçince ahtapot silindi');
+    assert.equal(await page2.locator(ROW).count(), 1);
+    // Sil: baş sekmesi kapanır, klasör (kayıt, defter) gider, kenar çubuğundan kalkar
+    await page2.click(ROW, { button: 'right' });
+    await page2.click('.octo-menu .pop-item:has-text("Ahtapotu sil")');
+    await page2.click('.dlg .danger-btn');
+    await waitUntil(() => !fs.existsSync(octoDir), 8000, 'ahtapotun klasörü silinmedi');
+    await page2.waitForSelector(`.acct.active .octo[data-id="${octoBefore.id}"]`, { state: 'detached', timeout: 5000 });
+    assert.deepEqual(await page2.evaluate(() => state.tabs.max.filter((t) => t.kind === 'chat').map((t) => t.octopusId || t.title)), [], 'başın sekmesi kapanmadı');
+    assert.equal(await app2.evaluate((_e, id) => process.mainModule.require('./octopus.js').get(id), octoBefore.id), null, 'kayıt bellekte kaldı');
+    // Claude Code'un kayıt klasörüne dokunulmaz (İ1)
+    assert.deepEqual(listTree(path.join(HOME, '.claude-max', 'projects')), projectsBefore, 'oturum kayıtları değişti');
     assert.deepEqual(errors, [], 'arayüz hataları');
     assert.deepEqual(await mainErrors(app2), [], 'ana süreç hataları (2)');
 

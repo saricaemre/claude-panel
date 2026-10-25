@@ -323,18 +323,49 @@ function selectEl(cls, title, options, onchange) {
 
 // ---------- Sekme oluşturma ----------
 
+// Oturumun açık sohbet sekmesi, bütün hesaplarda. Hesaplar projects klasörünü paylaşabildiği için (ayarlari-esitle.sh) aynı oturum
+// başka hesabın geçmişinde de görünür; iki sekme iki Claude Code süreci demektir, ikisi aynı kayda yazar (ana süreçte de reddedilir).
+// continueOf: "Devam et" (continue) ile açılan sekmenin, ilk session_id gelene kadar sürdürdüğü varsayılan oturum.
+function openSessionTab(sessionId) {
+  if (!sessionId) return null;
+  for (const list of Object.values(state.tabs)) {
+    const t = list.find((x) => x.kind === 'chat' && !x.exited && (x.sessionId || x.continueOf) === sessionId);
+    if (t) return t;
+  }
+  return null;
+}
+
+// "Devam et": Claude Code klasörün en son oturumunu sürdürür; aynısı listeden bulunur (yalnız okunur)
+async function lastSessionOf(acctId, cwd) {
+  const r = await window.panel.chatSessions(acctId, cwd);
+  if (!r?.ok) return null;
+  return r.sessions.filter((s) => !s.cwd || s.cwd === cwd).sort((x, y) => y.lastModified - x.lastModified)[0]?.sessionId || null;
+}
+
 // opts.background: yan oturum (sessions.js); hesap, görünüm ve etkin sekme değişmez. opts.parentId: başlatan sohbet
 async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   const a = acct(acctId);
   const pane = state.panes[acctId];
   if (!a || !pane) return;
   const bg = !!opts.background;
+  // Devam edilen oturum bir sekmede açıksa (hangi hesapta olursa olsun) o sekmeye geçilir
+  const continueOf = mode === 'continue' && Object.values(state.tabs).flat().some((t) => t.kind === 'chat' && !t.exited)
+    ? await lastSessionOf(acctId, cwd) : null;
+  const open = mode === 'resume' ? openSessionTab(resumeId) : openSessionTab(continueOf);
+  if (open) {
+    if (!bg) {
+      showTab(open.acctId, open);
+      toast(`Bu oturum ${acct(open.acctId)?.name || open.acctId} hesabında açık.`);
+    }
+    if (opts.draft) setDraft(open, opts.draft);
+    return open;
+  }
   if (!bg && (state.active !== acctId || state.view[acctId] !== 'code')) selectAccount(acctId, 'code');
 
   const prefs = state.cfg.chatPrefs?.[acctId] || {};
   const tab = {
     kind: 'chat', acctId, cwd, mode, title: '…', exited: false, activity: false, attention: false,
-    chatId: null, sessionId: resumeId || null, busy: false, models: [], model: '', effort: opts.effort ?? prefs.effort ?? '',
+    chatId: null, sessionId: resumeId || null, continueOf, busy: false, models: [], model: '', effort: opts.effort ?? prefs.effort ?? '',
     modelChoice: opts.model ?? prefs.model ?? '', permissionMode: prefs.mode || '', envId: opts.envId ?? envOf(acctId)?.id ?? '',
     toolCards: new Map(), live: new Map(), attachments: [], slash: [], pendingPerms: new Map(),
     group: null, todos: [], started: false, parentId: opts.parentId || null, autoTurns: 0, pendingEvents: [], pr: null,
@@ -372,7 +403,7 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
     h('div', { class: 'welcome-mark' }, '✳'),
     h('div', { class: 'welcome-title' }, h('em', {}, tilde(cwd).split('/').pop() || 'Proje'), ' üzerinde ne yapalım?'),
     h('div', { class: 'welcome-sub' }, `${a.name} hesabı · ${tilde(cwd)}`));
-  const actEl = activityEl(); // çalışırken canlı gösterge (renderer/activity.js)
+  const actEl = activityEl(tab); // çalışırken canlı gösterge (renderer/activity.js)
   const scroller = h('div', { class: 'chat-scroll' }, welcome, list, actEl);
 
   // --- Yazma alanı
@@ -392,6 +423,7 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   const composer = h('div', { class: 'composer' },
     h('div', { class: 'composer-inner' },
       slashBox,
+      tab.tasksBar = tasksBar(), // arka plandaki görevler (renderer/activity.js)
       tab.planBar = planBar(),
       tab.composerBox = h('div', { class: 'composer-box' },
         attach, input,
@@ -596,7 +628,8 @@ function setBusy(tab, busy) {
   renderTabs(tab.acctId);
 }
 
-function userBubble(tab, content, queued) {
+// uuid: mesajın Claude Code'daki kimliği (canlıda arayüz verir, geçmişte kayıttan gelir); varsa balonda "Geri sar" düğmesi
+function userBubble(tab, content, queued, uuid) {
   const blocks = Array.isArray(content) ? content : [];
   const texts = typeof content === 'string' ? [content] : blocks.filter((b) => b.type === 'text').map((b) => b.text);
   const files = texts.map(parseFileBlock).filter(Boolean);
@@ -606,11 +639,13 @@ function userBubble(tab, content, queued) {
   if (!imgs.length && !files.length && /^\s*<(command-|local-command|system-reminder|bash-)/.test(text)) return null;
   markStarted(tab);
   endGroup(tab);
-  const el = h('div', { class: 'msg-user' + (queued ? ' queued' : '') },
+  const el = h('div', { class: 'msg-user' + (queued ? ' queued' : ''), 'data-uuid': uuid || null },
     imgs.length ? h('div', { class: 'user-imgs' }, imgs.map((b) => h('img', { src: `data:${b.source?.media_type};base64,${b.source?.data}` }))) : null,
     files.length ? h('div', { class: 'user-files' }, files.map((f) =>
       h('div', { class: 'attach-file', title: f.path || f.name }, fileChipBody(f.name, f.embedded ? 'İçerik eklendi' : 'Yol verildi')))) : null,
-    text ? h('div', { class: 'user-text' }, text) : null);
+    text ? h('div', { class: 'user-text' }, text) : null,
+    uuid ? h('button', { class: 'mu-rewind', title: 'Bu mesaja geri sar (kod, konuşma ya da ikisi)', 'aria-label': 'Bu mesaja geri sar',
+      onclick: (e) => { e.stopPropagation(); openRewind(tab, el); } }, icon('history', 15)) : null);
   if (!tab.titleSet && text) {
     tab.titleSet = true;
     tab.sessionTitle = text.slice(0, 80);
@@ -785,21 +820,23 @@ function finishGroups(tab) {
 
 // ---------- Yan panel ----------
 
-function updateProgress(tab, todos) {
+// card: sohbetteki kart da güncellensin (geri sarmada hayır: kalan kart yerinde durur)
+function updateProgress(tab, todos, card = true) {
   tab.todos = todos || [];
   const done = tab.todos.filter((t) => t.status === 'completed').length;
   tab.progressCount.textContent = tab.todos.length ? `${done} / ${tab.todos.length}` : '';
   tab.progressBody.innerHTML = '';
   tab.progressBody.append(tab.todos.length ? todoList(tab.todos) : h('div', { class: 'side-empty' }, 'Görev yok.'));
-  renderPlanCard(tab); // sohbetteki kutucuklu kart (renderer/wrapup.js)
+  if (card) renderPlanCard(tab); // sohbetteki kutucuklu kart (renderer/wrapup.js)
   updatePlanBar(tab);
 }
 
 // Bağlam bölümü: klasör, ortam, pencerede yer tutan kalemler, MCP sunucuları, skill'ler. Döküm tur sonundaki ölçümden (compaction.js → summarize).
 // init'in skills'i Claude Code'un bildiği bütün skill'lerdir; "Yalnız ben çağırırım" yapılanlar ve yazarın kullanıcıya bıraktıkları Claude'un
 // listesine girmez, bağlamda yer tutmaz (2026-10-20, gerçek CLI'de ölçüldü). Ölçüm gelince ikisi ayrı gösterilir.
-const CTX_NAMES = { 'System prompt': 'Sistem istemi', 'System tools': 'Claude Code araçları', 'MCP tools': 'MCP araçları', 'MCP server instructions': 'MCP talimatları',
-  'Memory files': 'CLAUDE.md ve bellek', 'Skills': 'Skill listesi', 'Custom agents': 'Ajanlar', 'Messages': 'Konuşma' };
+// Satırlar `id` ile adlandırılır (SDK: İngilizce ad değişebilir, id değişmez); bilinmeyen satır Claude Code'un verdiği adla görünür.
+const CTX_NAMES = { system_prompt: 'Sistem istemi', system_tools: 'Claude Code araçları', mcp_tools: 'MCP araçları', mcp_instructions: 'MCP talimatları',
+  memory_files: 'CLAUDE.md ve bellek', skills: 'Skill listesi', custom_agents: 'Ajanlar', messages: 'Konuşma' };
 
 function updateContext(tab, init) {
   if (init) tab.ctxInit = init;
@@ -810,7 +847,7 @@ function updateContext(tab, init) {
   if (u?.categories?.length) {
     rows.push(h('div', { class: 'side-label' }, u.totalTokens ? `Bağlamda ~${fmtTokens(u.totalTokens)} token` : 'Bağlamda'));
     rows.push(h('div', { class: 'side-ctx' }, ...[...u.categories].sort((a, b) => b.tokens - a.tokens).map((c) =>
-      h('div', { class: 'side-ctx-row' }, h('span', {}, CTX_NAMES[c.name] || c.name), h('span', { class: 'side-ctx-n' }, fmtTokens(c.tokens))))));
+      h('div', { class: 'side-ctx-row' }, h('span', {}, CTX_NAMES[c.id] || c.name), h('span', { class: 'side-ctx-n' }, fmtTokens(c.tokens))))));
   }
   const mcp = init.mcp_servers || [];
   if (mcp.length) {
@@ -875,12 +912,12 @@ function renderBlocks(tab, msg, fromHistory) {
     if (msg.error && !fromHistory) note(tab, 'Hata: ' + (typeof msg.error === 'string' ? msg.error : JSON.stringify(msg.error)), 'error');
   } else if (msg.type === 'user' || msg.message?.role === 'user') {
     if (typeof content === 'string') {
-      if (!parent && fromHistory) userBubble(tab, content);
+      if (!parent && fromHistory) userBubble(tab, content, false, msg.uuid);
       return;
     }
     const results = (content || []).filter((b) => b.type === 'tool_result');
     for (const r of results) toolResult(tab, r);
-    if (!results.length && !parent && fromHistory) userBubble(tab, content);
+    if (!results.length && !parent && fromHistory) userBubble(tab, content, false, msg.uuid);
   }
 }
 
@@ -994,9 +1031,17 @@ function handleSystem(tab, msg) {
     case 'api_retry':
       setStatus(tab, 'busy', `Yeniden deneniyor (${msg.attempt}/${msg.max_retries})`);
       return;
+    // Claude Code kendiliğinden tur açınca da gelir (arka plan görevi bitti; chat-main.js CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS verir)
     case 'session_state_changed':
       if (msg.state === 'running' && !tab.busy) setBusy(tab, true);
       if (msg.state === 'idle' && tab.busy) setBusy(tab, false);
+      return;
+    case 'task_started':
+    case 'task_updated':
+    case 'task_progress':
+    case 'task_notification':
+    case 'background_tasks_changed':
+      handleTaskMsg(tab, msg); // arka plan görevleri (renderer/activity.js)
       return;
     case 'local_command_output':
     case 'informational':
@@ -1077,6 +1122,7 @@ function handleChatEnd(chatId, err) {
   tab.exited = true;
   tab.busy = false;
   stopActivity(tab);
+  resetTasks(tab);
   tab.stopBtn.hidden = true;
   tab.sendBtn.hidden = false;
   finishGroups(tab);
@@ -1473,10 +1519,12 @@ function submit(tab) {
 function sendMessage(tab, content) {
   if (!tab.chatId) return;
   if (tab.reborning) return toast('Yeniden doğuş sürüyor; bitince yazabilirsiniz.');
+  if (tab.rewinding) return toast('Geri sarma sürüyor; bitince yazabilirsiniz.');
   tab.autoTurns = 0; // kullanıcı yazdı: yan oturum ve PR bildirimleri yeniden kendiliğinden iletilebilir
   closeWrapBoxes(tab);
-  userBubble(tab, content, tab.busy);
-  window.panel.chatSend(tab.chatId, content);
+  const uuid = crypto.randomUUID(); // Claude Code kayda ve kod checkpoint'ine bu kimlikle yazar (geri sarma)
+  userBubble(tab, content, tab.busy, uuid);
+  window.panel.chatSend(tab.chatId, content, uuid);
   tab.stick = true;
   scrollDown(tab, true);
   if (!tab.busy) setBusy(tab, true);
@@ -1486,6 +1534,95 @@ async function interrupt(tab) {
   if (!tab.chatId || !tab.busy) return;
   setStatus(tab, 'busy', 'Durduruluyor');
   await window.panel.chatInterrupt(tab.chatId);
+}
+
+// ---------- Geri sarma (Claude Code'un /rewind'i; ana süreç: chat-main.js → chat:rewindPreview / chat:rewind) ----------
+// Balondaki düğme: önce ön izleme (kodda değişecek dosyalar, konuşma geri sarılabilir mi), sonra seçim penceresi.
+// Konuşma geri sarılınca mesaj ve sonrası listeden kalkar, mesaj yazma kutusuna döner (düzeltip yeniden gönderilir).
+async function openRewind(tab, el) {
+  const uuid = el.dataset.uuid;
+  if (!uuid || !tab.chatId || tab.exited) return toast('Sohbet kapalı; geri sarmak için önce "Devam et" ile açın.');
+  if (tab.busy || tab.reborning || tab.rewinding) return toast('Claude çalışırken geri sarılamaz; turun bitmesini bekleyin ya da durdurun.');
+  const p = await window.panel.chatRewindPreview(tab.chatId, uuid);
+  if (!p?.ok) return toast(p?.error || 'Geri sarılamadı.');
+  const choice = await rewindDialog(tab, p);
+  if (!choice) return;
+  tab.rewinding = true;
+  setStatus(tab, 'busy', 'Geri sarılıyor');
+  let r;
+  try { r = await window.panel.chatRewind(tab.chatId, uuid, choice); } finally { tab.rewinding = false; setStatus(tab, tab.busy ? 'busy' : 'idle', ''); }
+  const files = r?.files && p.code.filesChanged?.length
+    ? ` (${p.code.filesChanged.length} dosya, +${p.code.insertions || 0} −${p.code.deletions || 0})` : '';
+  if (r?.files) refreshChanges(tab);
+  if (!r?.ok) {
+    if (r?.files) note(tab, `Kod bu mesajın öncesine geri sarıldı${files}; konuşma geri sarılamadı.`, 'rewound');
+    return toast('Geri sarılamadı: ' + (r?.error || 'bilinmeyen hata'));
+  }
+  if (choice.convo) {
+    const text = el.querySelector('.user-text')?.textContent || '';
+    const lost = el.querySelector('.user-imgs, .user-files') ? ' Ekleri yeniden eklemeniz gerekir.' : '';
+    truncateFrom(tab, el);
+    resetTasks(tab); // eski süreç kapandı, arka plan görevleri onunla
+    note(tab, (choice.code ? `Kod ve konuşma bu mesajın öncesine geri sarıldı${files}.` : 'Konuşma bu mesajın öncesine geri sarıldı; dosyalara dokunulmadı.') + lost, 'rewound');
+    if (text && !tab.input.value.trim()) setDraft(tab, text);
+  } else {
+    note(tab, `Kod bu mesajın öncesine geri sarıldı${files}; konuşma yerinde.`, 'rewound');
+  }
+  scrollDown(tab, true);
+}
+
+function rewindDialog(tab, { code, convo, bgTasks }) {
+  const files = code.canRewind ? code.filesChanged || [] : [];
+  const both = files.length > 0 && convo.ok;
+  // Sağdaki birincil seçenek: ikisi, olmazsa konuşma, olmazsa kod
+  const opts = [
+    files.length && { key: 'code', label: 'Yalnız kodu', v: { code: true } },
+    convo.ok && { key: 'convo', label: 'Yalnız konuşmayı', v: { convo: true } },
+    both && { key: 'both', label: 'Kodu ve konuşmayı', v: { code: true, convo: true } },
+  ].filter(Boolean);
+  const rel = (f) => (f.startsWith(tab.cwd + '/') ? f.slice(tab.cwd.length + 1) : tilde(f));
+  const codeText = !code.canRewind ? code.error
+    : !files.length ? 'Bu mesajdan sonra Claude\'un dosya araçlarıyla değişen dosya yok.'
+    : `${files.length} dosya bu mesajdan önceki hâline döner (+${code.insertions || 0} −${code.deletions || 0} satır).`;
+  return new Promise((resolve) => {
+    const done = (v) => { modal.remove(); document.removeEventListener('keydown', onKey, true); resolve(v); };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); done(null); }
+      else if (e.key === 'Enter' && opts.length) { e.preventDefault(); done(opts[opts.length - 1].v); }
+    };
+    const modal = h('div', { class: 'modal dlg rewind-dlg' },
+      h('div', { class: 'modal-card dlg-card' },
+        h('h2', {}, 'Bu mesaja geri sar'),
+        h('div', { class: 'rw-sec', 'data-sec': 'code' }, h('div', { class: 'rw-head' }, icon('code', 14), 'Kod'), h('p', {}, codeText),
+          files.length ? h('ul', { class: 'rw-files' }, ...files.slice(0, 6).map((f) => h('li', { title: f }, rel(f))),
+            files.length > 6 ? h('li', { class: 'rw-more' }, `+${files.length - 6} dosya daha`) : null) : null),
+        h('div', { class: 'rw-sec', 'data-sec': 'convo' }, h('div', { class: 'rw-head' }, icon('chat', 14), 'Konuşma'),
+          h('p', {}, convo.ok ? 'Bu mesaj ve sonrası sohbetten silinir; mesaj yazma kutusuna geri gelir, düzeltip yeniden gönderebilirsiniz.' : convo.text),
+          convo.ok && bgTasks ? h('p', { class: 'rw-warn' }, `Arka planda ${bgTasks} görev sürüyor; konuşma geri sarılırsa durur.`) : null),
+        h('p', { class: 'rw-note' }, 'Bash komutlarının, alt ajanların ve yan oturumların değiştirdiği dosyalar geri gelmez.'),
+        h('div', { class: 'modal-actions' },
+          h('span', { class: 'spacer' }),
+          h('button', { class: 'ghost-btn', onclick: () => done(null) }, opts.length ? 'Vazgeç' : 'Kapat'),
+          ...opts.map((o, i) => h('button', { class: i === opts.length - 1 ? 'primary-btn' : 'ghost-btn', 'data-rewind': o.key, onclick: () => done(o.v) }, o.label)))));
+    modal.addEventListener('mousedown', (e) => { if (e.target === modal) done(null); });
+    document.addEventListener('keydown', onKey, true);
+    document.body.append(modal);
+    modal.querySelector('.primary-btn')?.focus();
+  });
+}
+
+// Konuşma geri sarıldı: mesaj ve sonrası listeden kalkar. Silinen araç kartları unutulur (aynı kimlikli araç yeniden çizilebilsin),
+// görev listesi kalan son karttaki hâline döner (renderer/wrapup.js → restorePlanAfterRewind)
+function truncateFrom(tab, el) {
+  const gone = [];
+  for (let n = el; n; n = n.nextElementSibling) gone.push(n);
+  for (const n of gone) n.remove();
+  for (const [id, card] of tab.toolCards) if (!card.el.isConnected) tab.toolCards.delete(id);
+  tab.planCalls?.clear();
+  endGroup(tab);
+  tab.wrapBox = null;
+  tab.lastReplyAt = null;
+  restorePlanAfterRewind(tab);
 }
 
 function openInTerminal(tab) {
@@ -1510,7 +1647,7 @@ async function showSessionPicker(acctId, dir) {
   const r = await window.panel.chatSessions(acctId, dir);
   listEl.innerHTML = '';
   if (!r?.ok || !r.sessions?.length) {
-    listEl.append(h('div', { class: 'empty-recent' }, r?.ok ? 'Bu klasörde bu hesapla açılmış oturum yok.' : 'Okunamadı: ' + r?.error));
+    listEl.append(h('div', { class: 'empty-recent' }, r?.ok ? 'Bu klasörde geçmiş oturum yok.' : 'Okunamadı: ' + r?.error));
     return;
   }
   const fmt = new Intl.DateTimeFormat('tr-TR', { dateStyle: 'medium', timeStyle: 'short' });

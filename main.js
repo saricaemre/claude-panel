@@ -487,7 +487,7 @@ app.whenReady().then(() => {
   changes.setup({ getWindow: () => win });
   sessions.setup({ getWindow: () => win });
   prwatch.setup({ getWindow: () => win });
-  octopus.setup({ getWindow: () => win });
+  octopus.setup({ getWindow: () => win, getAccountName: (id) => loadConfig().accounts.find((a) => a.id === id)?.name });
   defter.setup({ getWindow: () => win });
   sinav.setup({ getWindow: () => win });
   dogus.setup({ getWindow: () => win });

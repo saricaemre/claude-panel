@@ -61,6 +61,40 @@ function sessionFile(configDir, sessionId) {
   return null;
 }
 
+// Kimliği verilen kaydı dosyanın sonundan başa doğru arar (geri sarma: chat-main.js → rewindPoint). Kayıt dosyası GB'larca olabilir,
+// geri sarılan mesaj çoğu zaman yenidir; yalnız kimliği geçen satırlar ayrıştırılır. Aynı kayıt birden çok kez geçebilir (CLAUDE.md §5), sondaki alınır.
+async function findEntry(file, uuid, type) {
+  const fh = await fs.promises.open(file, 'r');
+  try {
+    const needle = Buffer.from(`"uuid":"${uuid}"`);
+    const CHUNK = 1 << 20;
+    let pos = (await fh.stat()).size;
+    let carry = Buffer.alloc(0); // sonraki parçadan kalan, başı bu parçada olan satır
+    while (pos > 0) {
+      const len = Math.min(CHUNK, pos);
+      pos -= len;
+      const buf = Buffer.alloc(len);
+      await fh.read(buf, 0, len, pos);
+      const all = Buffer.concat([buf, carry]);
+      let end = all.length;
+      for (let i = all.length - 1; i >= -1; i--) {
+        if (i >= 0 && all[i] !== 0x0a) continue;
+        if (i < 0 && pos > 0) { carry = all.subarray(0, end); break; } // satırın başı önceki parçada
+        const line = all.subarray(i + 1, end);
+        end = i;
+        if (!line.includes(needle)) continue;
+        try {
+          const o = JSON.parse(line.toString('utf8'));
+          if (o.uuid === uuid && (!type || o.type === type)) return o;
+        } catch {}
+      }
+    }
+    return null;
+  } finally {
+    await fh.close();
+  }
+}
+
 // Kullanıcının yazdığı metin: araç sonucu, sıkıştırma özeti, kanca ve komut kayıtları sayılmaz
 function userText(o) {
   if (o.type !== 'user' || o.isMeta || o.isCompactSummary || o.isSidechain) return null;
@@ -286,4 +320,4 @@ function setup({ getWindow }) {
   ipcMain.handle('dogus:start', (_e, chatId) => start(chatId));
 }
 
-module.exports = { setup, register, forget, plan, start, buildNote, readConversation, turnsOf, formatTurns, firstTask, MARK, NOTE_MARK };
+module.exports = { setup, register, forget, plan, start, buildNote, readConversation, turnsOf, formatTurns, firstTask, sessionFile, findEntry, MARK, NOTE_MARK };

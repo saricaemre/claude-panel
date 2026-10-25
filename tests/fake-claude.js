@@ -103,8 +103,118 @@ let skillNames = '';
 // Ayar klasörü boşsa gerçek Claude Code gibi ~/.claude
 const LOGGED_OUT = fs.existsSync(require('path').join(process.env.CLAUDE_CONFIG_DIR || require('path').join(require('os').homedir(), '.claude'), '.fake-logged-out'));
 const MODEL_IDS ={ opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5' };
-let n = 0; const uuid = () => `00000000-0000-0000-0000-${String(++n).padStart(12, '0')}`;
+// Kimlikler süreçler arasında da eşsiz (geri sarma yeni süreci eski sürecin bir kaydına kadar açar: --resume-session-at)
+const UUID_PRE = require('crypto').randomUUID().slice(0, 24);
+let n = 0; const uuid = () => `${UUID_PRE}${String(++n).padStart(12, '0')}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---------- Geri sarma (gerçek Claude Code 2.1.300'de 2026-10-25'te sahte API'yle ölçülen davranış) ----------
+// Kod checkpoint'i yalnız SDK CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=true verince; kullanıcı mesajının kimliği (SDK'ya verilen uuid)
+// checkpoint'in anahtarıdır. rewind_files dosyaları o mesajın öncesine döndürür (o an olmayan dosya silinir), dry_run yalnız sayar.
+// --resume-session-at=<kayıt>: konuşma o kayda kadar yüklenir, oturum kimliği aynı; bilinmeyen ya da son sıkıştırmadan önceki kayıtta
+// süreç "No message found…" hata sonucuyla kapanır. Gerçek CLI bunları oturum kaydında ve file-history'de tutar;
+// sahte CLI <günlük>.oturumlar/<sid>.json'da (chain: konuşma, order: kullanıcı mesajları, edits: dosyaların önceki hâli).
+// <günlük>.resume-at-bozuk dosyası varsa her --resume-session-at bilinmeyen sayılır (e2e: deneme bedeninin geri dönüşü).
+const CHECKPOINTS = process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING === 'true';
+log('CHECKPOINT', CHECKPOINTS ? 'acik' : 'kapali');
+const CONV_FILE = require('path').join(LOG + '.oturumlar', sid + '.json');
+const conv = (() => { try { return JSON.parse(fs.readFileSync(CONV_FILE, 'utf8')); } catch { return { chain: [], order: [], edits: [] }; } })();
+const saveConv = () => { fs.mkdirSync(require('path').dirname(CONV_FILE), { recursive: true }); fs.writeFileSync(CONV_FILE, JSON.stringify(conv)); };
+const RESUME_AT = argOf('resume-session-at');
+let badResumeAt = false;
+if (RESUME_AT) {
+  const i = fs.existsSync(LOG + '.resume-at-bozuk') ? -1 : conv.chain.findIndex((x) => x.uuid === RESUME_AT);
+  log('RESUMEAT', RESUME_AT, i < 0 ? 'yok' : 'kayit=' + (i + 1));
+  if (i < 0) badResumeAt = true; // initialize yanıtlandıktan sonra hata sonucu ve çıkış (SDK hatayı sonucun metniyle verir)
+  else { conv.chain = conv.chain.slice(0, i + 1); saveConv(); }
+}
+let curMsg = null; // checkpoint'i süren kullanıcı mesajı
+const chainAdd = (uuid, kind, text) => { conv.chain.push({ uuid, kind, ...(text ? { text } : {}) }); saveConv(); };
+// Claude'un dosya aracı: dosyanın bu mesajdan önceki hâli bir kez saklanır
+function writeTracked(file, content) {
+  if (CHECKPOINTS && curMsg && !conv.edits.some((e) => e.msg === curMsg && e.path === file)) {
+    conv.edits.push({ msg: curMsg, path: file, prev: fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null });
+    saveConv();
+  }
+  fs.writeFileSync(file, content);
+}
+function rewindFiles(msgId, dry) {
+  if (!CHECKPOINTS) return { canRewind: false, error: 'File checkpointing is not enabled.' };
+  const k = conv.order.indexOf(msgId);
+  if (k < 0) return { canRewind: false, error: 'No file checkpoint found for this message.' };
+  const target = new Map(); // yol -> mesajdan önceki içerik (null: yoktu)
+  for (const e of conv.edits) if (conv.order.indexOf(e.msg) >= k && !target.has(e.path)) target.set(e.path, e.prev);
+  const read = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null);
+  const lines = (s) => (s == null ? [] : s.split('\n').filter((l, i, a) => l || i < a.length - 1));
+  const changed = [...target].filter(([f, prev]) => read(f) !== prev);
+  // Gerçek CLI gibi: insertions geri gelen, deletions giden satırlar (v2 → v1: +1 −1; v1 → yok: +0 −1)
+  let insertions = 0, deletions = 0;
+  for (const [f, prev] of changed) {
+    const now = lines(read(f)), was = lines(prev);
+    insertions += was.filter((l) => !now.includes(l)).length;
+    deletions += now.filter((l) => !was.includes(l)).length;
+  }
+  log('REWIND', dry ? 'deneme' : 'uygula', msgId, changed.map(([f]) => require('path').basename(f)).join(',') || '-');
+  if (dry) return { canRewind: true, filesChanged: changed.map(([f]) => f), insertions, deletions };
+  for (const [f, prev] of changed) { if (prev == null) fs.rmSync(f, { force: true }); else fs.writeFileSync(f, prev); }
+  return { canRewind: true, skippedLinks: 0 };
+}
+
+// ---------- Arka plan görevleri (gerçek Claude Code 2.1.300'de 2026-10-25'te sahte API'yle ölçülen davranış) ----------
+// session_state_changed yalnız CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1 ile: her tur running → idle, görev bitince Claude Code kendiliğinden
+// tur açar (Bash bitti, alt ajan bitti ya da durduruldu; durdurulan Bash'ten sonra açmaz). background_tasks_changed her değişimde tamamı.
+// "Durdur" (interrupt): perTaskStopAffordance yoksa arka plandaki alt ajanlar ölür, Bash sürer; varsa ikisi de sürer.
+// Ön plandaki komut ~3 sn sonra görev olur (task_started, is_backgrounded: false); background_tasks isteğiyle arka plana geçer.
+// Testin denetimi: <günlük>.arka-bitir Bash görevlerini, <günlük>.ajan-bitir alt ajanları bitirir.
+const SESSION_STATE = process.env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS === '1';
+const sessionState = (state) => { if (SESSION_STATE) out({ type: 'system', subtype: 'session_state_changed', state, uuid: uuid(), session_id: sid }); };
+let perTaskStop = false;
+const bg = new Map(); // görev kimliği -> { type, description, toolUseId, agent, timer, tools }
+let fg = null; // ön planda süren komut: { taskId, toolUseId, toBackground }
+let bgN = 0, turnRunning = false;
+const emitBg = () => out({ type: 'system', subtype: 'background_tasks_changed',
+  tasks: [...bg].map(([task_id, t]) => ({ task_id, task_type: t.type, description: t.description, ...(t.agent ? { subagent_type: t.agent } : {}) })), uuid: uuid(), session_id: sid });
+function watchTask(id) {
+  const t = bg.get(id);
+  const flag = LOG + (t.type === 'local_agent' ? '.ajan-bitir' : '.arka-bitir');
+  t.timer = setInterval(() => {
+    if (t.type === 'local_agent') {
+      t.tools++;
+      out({ type: 'system', subtype: 'task_progress', task_id: id, tool_use_id: t.toolUseId, description: 'Running ' + t.description, subagent_type: t.agent,
+        usage: { total_tokens: 900 * t.tools, tool_uses: t.tools, duration_ms: 400 * t.tools }, last_tool_name: 'Read', uuid: uuid(), session_id: sid });
+    }
+    if (fs.existsSync(flag)) { try { fs.unlinkSync(flag); } catch {} endTask(id, 'completed'); }
+  }, 400);
+}
+function startBgTask(type, description, toolUseId, extra = {}) {
+  const id = (type === 'local_agent' ? 'a' : 'b') + process.pid + 'x' + ++bgN;
+  bg.set(id, { type, description, toolUseId, agent: extra.subagent_type || null, tools: 0 });
+  out({ type: 'system', subtype: 'task_started', task_id: id, tool_use_id: toolUseId, description, is_backgrounded: true, task_type: type, ...extra, uuid: uuid(), session_id: sid });
+  emitBg();
+  watchTask(id);
+  log('GOREVBASLADI', id, type, description);
+  return id;
+}
+// status: completed | stopped; auto: Claude Code'un kendiliğinden açtığı tur
+async function endTask(id, status, auto = true) {
+  const t = bg.get(id);
+  if (!t) return;
+  clearInterval(t.timer);
+  bg.delete(id);
+  out({ type: 'system', subtype: 'task_updated', task_id: id, patch: { status: status === 'stopped' ? 'killed' : status, end_time: Date.now() }, uuid: uuid(), session_id: sid });
+  out({ type: 'system', subtype: 'task_notification', task_id: id, tool_use_id: t.toolUseId, status, output_file: `/tmp/fake-tasks/${id}.output`,
+    summary: status === 'completed' ? `Background command "${t.description}" completed (exit code 0)` : t.description, uuid: uuid(), session_id: sid });
+  emitBg();
+  log('GOREVBITTI', id, status);
+  if (!auto || (status === 'stopped' && t.type === 'local_bash')) return;
+  for (let i = 0; i < 100 && turnRunning; i++) await sleep(50); // tur sürüyorsa bitince
+  turnRunning = true;
+  sessionState('running');
+  await sleep(800); // e2e "çalışıyor" hâlini görebilsin
+  await streamText(t.type === 'local_agent' ? `Alt ajan ${status === 'completed' ? 'bitti' : 'durduruldu'}: ${t.description}.` : `Arka plandaki komut bitti: ${t.description}.`);
+  finish('success');
+}
+
 const pending = new Map();
 let reqN = 0;
 function ask(request) {
@@ -116,13 +226,16 @@ let interrupted = false;
 let turn = 0;
 let ctxPct = 23;
 const rl = readline.createInterface({ input: process.stdin });
+let dying = false; // bilinmeyen --resume-session-at: hata sonucu yazıldı, süreç kapanıyor; gerçek CLI gibi başka isteğe yanıt yok
 rl.on('line', async (line) => {
+  if (dying) return;
   let m; try { m = JSON.parse(line); } catch { return; }
   log('IN', line.slice(0, 300));
   if (m.type === 'control_request') {
     const sub = m.request.subtype;
     let response = {};
     if (sub === 'initialize') hookReg = m.request.hooks || {};
+    if (sub === 'initialize') { perTaskStop = !!m.request.perTaskStopAffordance; log('GOREV', 'perTaskStopAffordance=' + m.request.perTaskStopAffordance, 'oturumDurumu=' + (SESSION_STATE ? 'acik' : 'kapali')); }
     // Sistem istemine ek (systemPrompt.append): SDK initialize'da appendSystemPrompt olarak verir; başta hafıza talimatı (P3.2)
     if (sub === 'initialize') log('APPEND', JSON.stringify(m.request.appendSystemPrompt ?? null));
     // Panelin baştan yüklü araçları (_meta anthropic/alwaysLoad; öbürleri araç aramasına ertelenir): YUKLU <rol> <ad,…>
@@ -140,7 +253,21 @@ rl.on('line', async (line) => {
       // accountInfo(): gerçek Claude Code 2.1.300'de ölçülen iki biçim (girişsiz / girişli)
       account: LOGGED_OUT ? { tokenSource: 'none', apiProvider: 'firstParty' }
         : { email: 'deneme@ornek.invalid', organization: 'Deneme', subscriptionType: 'Claude Max', apiProvider: 'firstParty' } };
-    if (sub === 'interrupt') interrupted = true;
+    if (sub === 'interrupt') {
+      interrupted = true;
+      // perTaskStopAffordance yoksa arka plandaki alt ajanlar da ölür (bildirimle, kendiliğinden tur açılmaz); Bash sürer
+      const agents = [...bg].filter(([, t]) => t.type === 'local_agent').map(([id]) => id);
+      log('INTERRUPT', 'arka=' + bg.size, perTaskStop ? 'surdu' : 'ajanlar-oldu=' + agents.length);
+      if (!perTaskStop) for (const id of agents) endTask(id, 'stopped', false);
+    }
+    if (sub === 'stop_task') { log('STOPTASK', m.request.task_id, bg.has(m.request.task_id) ? 'var' : 'yok'); setTimeout(() => endTask(m.request.task_id, 'stopped'), 50); }
+    if (sub === 'background_tasks') {
+      const ok = !!fg && (!m.request.tool_use_id || m.request.tool_use_id === fg.toolUseId);
+      log('BACKGROUND', m.request.tool_use_id || '-', ok ? 'alindi' : 'yok');
+      if (ok) fg.toBackground = true;
+      response = { backgrounded: ok };
+    }
+    if (sub === 'rewind_files') response = rewindFiles(m.request.user_message_id, !!m.request.dry_run);
     // Bağlantı durumu (Bağlayıcıları yönet): panelin kendi sunucusu da listede, gerçek Claude Code gibi
     if (sub === 'mcp_status') response = { mcpServers: [
       { name: 'panel', status: 'connected', scope: 'dynamic', source: 'sdk', tools: [{ name: 'publish_artifact' }] },
@@ -152,13 +279,14 @@ rl.on('line', async (line) => {
     if (sub === 'get_context_usage') {
       log('CONTEXT', m.request.detail || '-', ctxPct);
       const max = 1000000, total = Math.round(max * ctxPct / 100);
-      response = { categories: [{ name: 'Messages', tokens: total, color: 'purple', kind: 'used' }, { name: 'Free space', tokens: max - total, color: 'gray', kind: 'free' }],
+      // Satırların id'si gerçek CLI 2.1.310'daki gibi (SDK 0.3.304+; arayüz Türkçe adı id'den bulur)
+      response = { categories: [{ id: 'messages', name: 'Messages', tokens: total, color: 'purple', kind: 'used' }, { id: 'free_space', name: 'Free space', tokens: max - total, color: 'gray', kind: 'free' }],
         totalTokens: total, maxTokens: max, rawMaxTokens: max, percentage: ctxPct, gridRows: [], model: 'claude-opus-5-5', memoryFiles: [], mcpTools: [], agents: [],
         isAutoCompactEnabled: true, autoCompactThreshold: Math.round(max * 0.967), apiUsage: null };
       const sk = skillState();
       response.skills = { totalSkills: sk.frontmatter.length, includedSkills: sk.frontmatter.length, tokens: sk.frontmatter.reduce((n, x) => n + x.tokens, 0), skillFrontmatter: sk.frontmatter };
-      response.categories.unshift({ name: 'System tools', tokens: 15575, color: 'gray', kind: 'used' }, { name: 'Skills', tokens: response.skills.tokens, color: 'yellow', kind: 'used' },
-        { name: 'MCP tools (deferred)', tokens: 270000, color: 'gray', isDeferred: true, kind: 'deferred' });
+      response.categories.unshift({ id: 'system_tools', name: 'System tools', tokens: 15575, color: 'gray', kind: 'used' }, { id: 'skills', name: 'Skills', tokens: response.skills.tokens, color: 'yellow', kind: 'used' },
+        { id: 'mcp_tools_deferred', name: 'MCP tools (deferred)', tokens: 270000, color: 'gray', isDeferred: true, kind: 'deferred' });
     }
     if (sub === 'get_usage') {
       const at = (h) => new Date(Date.now() + h * 3600e3).toISOString();
@@ -169,14 +297,27 @@ rl.on('line', async (line) => {
       if (LOGGED_OUT) Object.assign(response, { subscription_type: null, rate_limits_available: false, rate_limits: null });
     }
     out({ type: 'control_response', response: { subtype: 'success', request_id: m.request_id, response } });
+    if (sub === 'initialize' && badResumeAt) {
+      dying = true;
+      const line = JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, duration_ms: 0, duration_api_ms: 0, num_turns: 0, stop_reason: null,
+        total_cost_usd: 0, usage: {}, modelUsage: {}, permission_denials: [], errors: ['No message found with message.uuid of: ' + RESUME_AT], session_id: sid, uuid: uuid() });
+      process.stdout.write(line + '\n', () => process.exit(1));
+    }
     return;
   }
   if (m.type === 'control_response') { const r = pending.get(m.response.request_id); pending.delete(m.response.request_id); r && r(m.response.response || m.response); return; }
   if (m.type === 'user') {
     turn++;
+    turnRunning = true;
+    sessionState('running');
     const t = typeof m.message.content === 'string' ? m.message.content : '';
     // Gerçek Claude Code gibi: UserPromptSubmit init'ten önce; '/compact' komutunda çağrılmaz; block turu API'ye gitmeden bitirir
     const prompt = t || (Array.isArray(m.message.content) ? m.message.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n') : '');
+    // Geri sarma: mesajın kimliği checkpoint'in anahtarı, mesaj konuşma zincirine girer
+    curMsg = m.uuid || null;
+    if (m.uuid) conv.order.push(m.uuid);
+    chainAdd(m.uuid || uuid(), 'user', prompt.slice(0, 200));
+    log('MSGUUID', m.uuid || '-');
     const ups = t.startsWith('/compact') ? [] : await hookCallback('UserPromptSubmit', { prompt });
     if (turn === 1) {
       out({ type: 'system', subtype: 'hook_response', hook_id: 'h1', hook_name: 'SessionStart:startup', hook_event: 'SessionStart', output: '', stdout: 'AÇILIŞ PARTİSİ — SessionStart hook\'u koştu\n\nOturum başı doğrulaması: 13/13 kapı yeşil\nsıradaki iş IS-279\nadr-araligi: K686-K688', stderr: '', outcome: 'success', uuid: uuid(), session_id: sid });
@@ -192,6 +333,12 @@ rl.on('line', async (line) => {
     if (t.startsWith('[Claude Panel · yeniden doğuş 1/2]')) await rebirthDefterTurn();
     else if (t.startsWith('[Claude Panel · yeniden doğuş 2/2]')) await rebirthAuditTurn(t);
     else if (t.startsWith('[Claude Panel devir notu]')) await rebirthNoteTurn(t);
+    else if (/^dosyaya yaz: \S+ /.test(t)) await writeFileTurn(t);
+    else if (/^arka planda komut/.test(t)) await bgBashTurn();
+    else if (/^arka planda ajan/.test(t)) await bgAgentTurn();
+    else if (/^uzun komut çalıştır/.test(t)) await fgLongTurn();
+    else if (/^yavaş düşün/.test(t)) { for (let i = 0; i < 100 && !interrupted; i++) await sleep(50); if (interrupted) return finish('error_during_execution'); await streamText('Düşündüm.'); finish('success'); }
+    else if (/^konuşmayı hatırla/.test(t)) { await streamText('Bellekteki mesajlar: ' + conv.chain.filter((x) => x.kind === 'user').map((x) => x.text).join(' | ')); finish('success'); }
     else if (/^\/compact\b/.test(t)) await compactTurn('manual', t.replace(/^\/compact\s*/, '') || null);
     else if (/otomatik sıkıştır/i.test(t)) await compactTurn('auto', null);
     else if (/bağlam dolsun/i.test(t)) { ctxPct = 84; await streamText('Bağlam epey doldu.'); finish('success'); }
@@ -240,8 +387,9 @@ rl.on('line', async (line) => {
     else await runTurn(m);
   }
 });
-const asst = (content, id = 'msg_' + uuid()) => out({ type: 'assistant', message: { id, type: 'message', role: 'assistant', model: 'claude-opus-5-5', content }, parent_tool_use_id: null, uuid: uuid(), session_id: sid });
-const toolRes = (tool_use_id, content, is_error) => out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id, content, is_error }] }, parent_tool_use_id: null, uuid: uuid(), session_id: sid });
+// Claude'un mesajları ve araç sonuçları konuşma zincirine girer (geri sarmada --resume-session-at bu kimliklerden birini alır)
+const asst = (content, id = 'msg_' + uuid()) => { const u = uuid(); chainAdd(u, 'assistant'); out({ type: 'assistant', message: { id, type: 'message', role: 'assistant', model: 'claude-opus-5-5', content }, parent_tool_use_id: null, uuid: u, session_id: sid }); };
+const toolRes = (tool_use_id, content, is_error) => { const u = uuid(); chainAdd(u, 'tool'); out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id, content, is_error }] }, parent_tool_use_id: null, uuid: u, session_id: sid }); };
 async function streamText(text) {
   const id = 'msg_s' + uuid();
   out({ type: 'stream_event', event: { type: 'message_start', message: { id } }, parent_tool_use_id: null, uuid: uuid(), session_id: sid });
@@ -288,7 +436,10 @@ async function compactTurn(trigger, instructions) {
     if (trigger === 'auto') await streamText('Sıkıştırmadan devam ediyorum.');
     return finish('success');
   }
-  out({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger, pre_tokens: 858824, post_tokens: 15890 }, uuid: uuid(), session_id: sid });
+  const boundary = uuid();
+  out({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger, pre_tokens: 858824, post_tokens: 15890 }, uuid: boundary, session_id: sid });
+  conv.chain = [{ uuid: boundary, kind: 'boundary' }]; // gerçek CLI gibi: sınırdan önceki kayıtlarda açılamaz ("No message found")
+  saveConv();
   out({ type: 'system', subtype: 'status', status: null, compact_result: 'success', session_id: sid, uuid: uuid() });
   log('SIKISTIRMA', trigger, 'yapıldı', JSON.stringify(instructions));
   ctxPct = /\[büyük\]/.test(instructions || '') ? 5 : 2; // [büyük]: sıkıştırmadan sonra bağlam 50 bin (sınav eşiğinin üstü)
@@ -334,6 +485,60 @@ async function runTurn(m) {
   const qa = await perm('AskUserQuestion', q);
   toolRes('t6', 'Cevap: ' + JSON.stringify(qa.updatedInput?.answers || {}));
   await streamText('Bitti. Özet:\n\n| Kapı | Sonuç |\n|---|---|\n| biome | ✓ |\n| tip | ✓ |\n\n```bash\npnpm dogrula\n```\n\nSıradaki iş: **IS-280**.');
+  finish('success');
+}
+// Arka plan görevleri: Bash run_in_background, alt ajan (Agent, varsayılan arka planda), ön planda uzun komut (arka plana alınabilir)
+async function bgBashTurn() {
+  const id = 'bgb' + process.pid + '-' + ++bgN;
+  asst([{ type: 'tool_use', id, name: 'Bash', input: { command: 'npm test', description: 'Testleri koş', run_in_background: true } }]);
+  const task = startBgTask('local_bash', 'Testleri koş', id);
+  toolRes(id, `Command running in background with ID: ${task}. Output is being written to: /tmp/fake-tasks/${task}.output. You will be notified when it completes.`);
+  await streamText('Komutu arka planda başlattım.');
+  finish('success');
+}
+async function bgAgentTurn() {
+  const id = 'bga' + process.pid + '-' + ++bgN;
+  const input = { description: 'Kodu incele', prompt: 'Kod tabanını incele', subagent_type: 'Explore', run_in_background: true };
+  asst([{ type: 'tool_use', id, name: 'Agent', input }]);
+  startBgTask('local_agent', 'Kodu incele', id, { subagent_type: 'Explore', prompt: input.prompt, spawn_depth: 1 });
+  toolRes(id, [{ type: 'text', text: 'Async agent launched successfully.' }]);
+  await streamText('Alt ajanı arka planda başlattım.');
+  finish('success');
+}
+async function fgLongTurn() {
+  const id = 'fgl' + process.pid + '-' + ++bgN;
+  asst([{ type: 'tool_use', id, name: 'Bash', input: { command: 'npm run uzun', description: 'Uzun testler' } }]);
+  await sleep(300);
+  const taskId = 'b' + process.pid + 'f' + bgN;
+  fg = { taskId, toolUseId: id, toBackground: false };
+  out({ type: 'system', subtype: 'task_started', task_id: taskId, tool_use_id: id, description: 'Uzun testler', is_backgrounded: false, task_type: 'local_bash', uuid: uuid(), session_id: sid });
+  for (let i = 0; i < 160 && !fg.toBackground && !interrupted; i++) await sleep(50);
+  const moved = fg.toBackground;
+  fg = null;
+  if (moved) {
+    bg.set(taskId, { type: 'local_bash', description: 'Uzun testler', toolUseId: id, agent: null, tools: 0 });
+    out({ type: 'system', subtype: 'task_updated', task_id: taskId, patch: { is_backgrounded: true }, uuid: uuid(), session_id: sid });
+    emitBg();
+    watchTask(taskId);
+    toolRes(id, `Command was manually backgrounded by user with ID: ${taskId}. Output is being written to: /tmp/fake-tasks/${taskId}.output`);
+    await streamText('Komut arka planda sürüyor.');
+  } else {
+    out({ type: 'system', subtype: 'task_notification', task_id: taskId, tool_use_id: id, status: 'completed', output_file: '', summary: 'Uzun testler', uuid: uuid(), session_id: sid });
+    toolRes(id, '✓ uzun testler geçti');
+    await streamText('Uzun testler bitti.');
+  }
+  finish(interrupted ? 'error_during_execution' : 'success');
+}
+// Geri sarma: "dosyaya yaz: <ad> <içerik>" dosyayı Write ile (checkpoint'li) yazar. Araç kimlikleri süreç başına eşsiz
+let wfN = 0;
+async function writeFileTurn(t) {
+  const [, name, text] = t.match(/^dosyaya yaz: (\S+) (.*)$/s);
+  const file = require('path').join(process.cwd(), name);
+  const id = 'wf' + process.pid + '-' + ++wfN;
+  asst([{ type: 'tool_use', id, name: 'Write', input: { file_path: file, content: text + '\n' } }]);
+  writeTracked(file, text + '\n');
+  toolRes(id, 'File written successfully');
+  await streamText(`${name} yazıldı.`);
   finish('success');
 }
 // Ekli mesaj (içerik blok dizisi): gelen blokları günlüğe yazar, sayısını bildirir
@@ -584,7 +789,7 @@ async function rebirthNoteTurn(t) {
   log('DEVIR', sid, JSON.stringify(t));
   const p = require('path');
   const dir = p.join(process.env.CLAUDE_CONFIG_DIR || '', 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'));
-  const b = { sessionId: sid, cwd: process.cwd(), isSidechain: false, userType: 'external', version: '2.1.300' };
+  const b = { sessionId: sid, cwd: process.cwd(), isSidechain: false, userType: 'external', version: '2.1.310' };
   const u = require('crypto').randomUUID(), a = require('crypto').randomUUID();
   const reply = 'Devir notunu okudum: menü animasyonunda kaldık. Seni bekliyorum.';
   fs.mkdirSync(dir, { recursive: true });
@@ -849,5 +1054,8 @@ function png(w, h, [r, g, b]) {
 }
 function finish(subtype) {
   interrupted = false;
-  out({ type: 'result', subtype, is_error: subtype !== 'success', duration_ms: 4200, duration_api_ms: 3000, num_turns: 7, result: subtype === 'success' ? 'Bitti' : 'Durduruldu', stop_reason: 'end_turn', total_cost_usd: 0, usage: {}, modelUsage: {}, permission_denials: [], session_id: sid, uuid: uuid() });
+  turnRunning = false;
+  setImmediate(() => sessionState('idle')); // gerçek CLI gibi sonuçtan hemen sonra
+  // Hata sonucunda errors dizisi zorunlu (gerçek CLI hep verir; SDK errors.map ile okur, yoksa akış çöker)
+  out({ type: 'result', subtype, is_error: subtype !== 'success', ...(subtype !== 'success' ? { errors: [] } : {}), duration_ms: 4200, duration_api_ms: 3000, num_turns: 7, result: subtype === 'success' ? 'Bitti' : 'Durduruldu', stop_reason: 'end_turn', total_cost_usd: 0, usage: {}, modelUsage: {}, permission_denials: [], session_id: sid, uuid: uuid() });
 }
