@@ -2675,6 +2675,41 @@ async function waitUntil(fn, ms, msg) {
     assert.equal(await page.isHidden(C + '.reply-sel'), true, 'kullanıcı mesajında seçimde Yanıtla çıktı');
     await page.fill(C + '.composer-input', '');
 
+    step('Sağ tık: seçili metinde "Google\'da ara" ve "Kopyala", bağlantıda "tarayıcıda aç", yazma kutusunda düzenleme menüsü');
+    // Yerel menü açılmaz (testi kilitlerdi): popup kaydediciyle değişir, öğeler ana süreçte tıklanır
+    await app.evaluate(() => {
+      const cm = process.mainModule.require('./contextmenu.js');
+      global.__ctxMenus = [];
+      cm.popup = (menu) => global.__ctxMenus.push(menu);
+    });
+    const ctxMenu = async (sel, opts = {}) => {
+      const n = await app.evaluate(() => global.__ctxMenus.length);
+      await page.click(sel, { button: 'right', ...opts });
+      await waitUntil(() => app.evaluate(() => global.__ctxMenus.length).then((m) => m > n), 3000, 'sağ tık menüsü açılmadı: ' + sel);
+      return app.evaluate(() => global.__ctxMenus.at(-1).items.filter((i) => i.type !== 'separator' && i.label !== 'Öğeyi incele')
+        .map((i) => (i.enabled ? '' : '-') + i.label));
+    };
+    const ctxClick = (label) => app.evaluate((_e, label) => global.__ctxMenus.at(-1).items.find((i) => i.label.startsWith(label)).click(), label);
+    await replyP.click({ clickCount: 3 });
+    const selItems = await ctxMenu(C + '.msg-assistant:has-text("Devam etmek için") p >> nth=0');
+    assert.equal(selItems[0], `Google'da ara: “${replyText.length > 32 ? replyText.slice(0, 31) + '…' : replyText}”`, 'seçimde arama öğesi yok: ' + selItems);
+    assert.ok(selItems.includes('Kopyala'), 'seçimde Kopyala yok: ' + selItems);
+    fs.rmSync(OPEN_LOG, { force: true });
+    await ctxClick("Google'da ara");
+    await waitUntil(() => openLog().some((l) => l.how === 'external' && l.args[0] === 'https://www.google.com/search?q=' + encodeURIComponent(replyText)),
+      3000, 'Google araması açılmadı: ' + JSON.stringify(openLog()));
+    await app.evaluate(({ clipboard }) => clipboard.writeText(''));
+    await ctxClick('Kopyala');
+    await waitUntil(() => app.evaluate(({ clipboard }) => clipboard.readText()).then((t) => t.trim() === replyText), 3000, 'Kopyala seçimi panoya almadı');
+    const linkItems = await ctxMenu(C + '.msg-assistant a[href="https://example.com/"]');
+    assert.ok(linkItems.includes('Bağlantıyı tarayıcıda aç') && linkItems.includes('Bağlantıyı kopyala'), 'bağlantı menüsü yanlış: ' + linkItems);
+    await ctxClick('Bağlantıyı kopyala');
+    assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), 'https://example.com/', 'bağlantı kopyalanmadı');
+    await page.fill(C + '.composer-input', 'sağ tık');
+    const editItems = await ctxMenu(C + '.composer-input');
+    assert.ok(['Kes', 'Kopyala', 'Yapıştır', 'Tümünü seç'].every((l) => editItems.some((x) => x.replace(/^-/, '') === l)), 'yazma kutusunda düzenleme menüsü yok: ' + editItems);
+    await page.fill(C + '.composer-input', '');
+
     step('Sohbet: "+" ile dosya ve fotoğraf eklenir (görsel bloğu, metin içeriği, PDF yolu); bırakılan büyük fotoğraf küçültülür');
     const ATT = C + '.composer-attach > *';
     const attCount = (n) => page.waitForFunction(([s, n]) => document.querySelectorAll(s).length === n, [ATT, n], { timeout: 10000 });

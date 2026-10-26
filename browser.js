@@ -606,6 +606,8 @@ function configureContents(contents) {
   };
   contents.on('will-navigate', guard);
   contents.on('will-redirect', guard);
+  // Claude'un CDP ile sağ tıklaması da context-menu üretir; o sırada kullanıcının ekranında menü açılmaz
+  require('./contextmenu').attach(contents, { skip: () => byWc.get(contents.id)?.acting > 0 });
   const ses = contents.session;
   if (ses.__panelBrowser) return;
   ses.__panelBrowser = true;

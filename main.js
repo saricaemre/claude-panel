@@ -22,6 +22,7 @@ const sinav = require('./sinav');
 const dogus = require('./dogus');
 const danis = require('./danis');
 const alma = require('./alma');
+const contextMenu = require('./contextmenu');
 
 // Özel protokol app hazır olmadan kaydedilmeli
 artifacts.registerScheme();
@@ -424,6 +425,7 @@ function createWindow() {
     return { action: 'deny' };
   });
 
+  contextMenu.attach(win.webContents);
   win.on('focus', clearDockAlert);
 
   win.on('close', (e) => {
@@ -453,6 +455,8 @@ app.on('web-contents-created', (_e, contents) => {
   if (contents.getType() !== 'webview') return;
   // Tarayıcı bölmesi kendi kurallarıyla (browser.js): izinler kapalı, indirme yok, açılır pencere aynı bölmede
   if (browser.isBrowserSession(contents.session)) return browser.configureContents(contents);
+
+  contextMenu.attach(contents);
 
   // claude.ai içinden açılan dış linkler varsayılan tarayıcıda açılsın
   contents.setWindowOpenHandler(({ url }) => {

@@ -5,6 +5,14 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 
 ---
 
+## 2026-10-26 · Sağ tık menüsü
+
+- **İstek** (Emre): sohbette seçili bir bağlantıya sağ tıklayınca hiçbir şey çıkmıyordu; "Google'da aç", "Kopyala" gibi seçenekler istendi.
+- **Neden**: Electron varsayılan olarak sağ tık menüsü göstermez; panelde yalnız ahtapot kollarının kendi menüleri vardı.
+- **Yapılan**: `contextmenu.js` (`attach`, `template`, `popup`). Ana pencereye (sohbet, artifact ve görsel iframe'leri dahil), claude.ai Web görünümüne ve tarayıcı bölmesine bağlı. Öğeler duruma göre: seçili metinde "Google'da ara: “…”", "Sözlükte ara" (macOS), "Kopyala"; http(s)/mailto bağlantıda "Bağlantıyı tarayıcıda aç", "Bağlantıyı kopyala"; görselde "Görseli kopyala"; yazma alanlarında yazım önerileri, "Sözlüğe ekle", Geri al/Yinele, Kes/Kopyala/Yapıştır/Tümünü seç; geliştirirken (`npm start`) "Öğeyi incele". Boş yerde menü açılmaz. Kendi menüsü olan yerler (`openMenuAt`, `preventDefault`) etkilenmez. Tarayıcı bölmesinde Claude'un CDP ile sağ tıklaması da bu olayı ürettiği için o sırada (`page.acting`) menü açılmaz.
+- **Doğrulama**: `npm run check`; e2e'ye "Sağ tık" adımı (yerel menü yerine kaydedici; seçimde arama öğesi ve Google adresi `CLAUDE_PANEL_OPEN_LOG`'a, Kopyala ile pano, bağlantı menüsü ve kopyalama, yazma kutusunda düzenleme öğeleri). Ana penceredeki `attach` kapatılınca adım "sağ tık menüsü açılmadı" ile kırmızıya döndü; geri konunca `npm test` baştan sona geçti.
+- **Bekleyen**: yerel menünün kurulu uygulamada gözle denenmesi (`bash kur.sh`); claude.ai görünümünde ve tarayıcı bölmesinde e2e adımı yok.
+
 ## 2026-10-26 · Önizleme: onay aklama, denetim karakteri, fish kaçışı
 
 - **Kaynak**: push'tan sonra otomatik güvenlik incelemesi `preview.js`'te üç bulgu verdi; üçü de kodda doğrulandı.
