@@ -12,7 +12,8 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 - **Denetim karakteri** (yüksek): komut satırı pty'ye yazıldığı için değerdeki Ctrl-C/Ctrl-U/Esc satır düzenleyicide iş görür ve kartta görünmez. launch.json'daki komut, argüman, ortam değeri ve klasörde `\u0000-\u001f`, `\u007f-\u009f` reddedilir (yapılandırma menüde "Hatalı" görünür).
 - **fish** (orta): fish'te tek tırnak içinde `\'` kaçış; sonu `\` ile biten değer tırnağı açık bırakıp sonraki argümanı komut yapardı. fish'te `\\` ve `\'` kaçışla yazılır.
 - **Doğrulama**: `npm run check`; tuzaklı değerlerle (`a\`, `; echo KACTI #`, `it's`, `$HOME x`) üretilen satır bash ve zsh'te çalıştırıldı, hepsi tek argüman kaldı, `KACTI` çalışmadı; fish kurulu değil, satır yalnız gözle denetlendi. e2e'ye "önizlemeyi kandır" adımı eklendi (sahte CLI launch.json'u değiştirir, `start` kartsız, `restart` kart açmalı, reddedilince sunucu sürer); eski davranış tek satırla geri konunca adım "değişen komutun restart'ı kartsız geçti" ile kırmızıya döndü. `npm test` iki kez tarayıcı indirme adımında düştü (bilinen yarış: `/indir`'den hemen sonra okunan konsolda kayıt henüz yok; aynı koşuda commit'lenmiş hâl geçti), üçüncü koşu baştan sona geçti.
-- **Bekleyen**: commit + push Emre'nin onayıyla. Gerçek hesapla bir önizleme turu hâlâ bekliyor.
+- **Ek** (ikinci otomatik inceleme, orta): süzgeç yön değiştiren (U+202E…) ve görünmez biçim karakterlerini (U+200B, U+FEFF…) kapsamıyordu; kartta komut olduğundan başka görünebilirdi. Süzgeç `/[\p{Cc}\p{Cf}\u2028\u2029]/u` oldu. Node'da örneklerle denendi (bidi, sıfır genişlik, BOM, satır ayırıcı, Ctrl-C reddedildi; Türkçe harf ve emoji geçti), `npm test` geçti.
+- **Bekleyen**: gerçek hesapla bir önizleme turu.
 
 ## 2026-10-26 · Arkadaşlar GitHub'dan kurabilsin
 

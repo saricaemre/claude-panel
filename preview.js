@@ -67,10 +67,11 @@ function parseJsonc(text) {
 }
 
 // Komut satırı terminale (pty) yazılır: denetim karakterleri (Ctrl-C, Ctrl-U, Esc…) kabuk ayrıştırmadan önce satır düzenleyicide
-// iş görür ve izin kartında görünmez. Bu yüzden komutun, ortamın ve klasörün hiçbir parçasında kabul edilmez.
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+// iş görür ve izin kartında görünmez. Yön değiştiren (U+202E…) ve görünmez biçim karakterleri (U+200B…) de kartta komutu
+// olduğundan başka gösterebilir. Bu yüzden komutun, ortamın ve klasörün hiçbir parçasında kabul edilmez.
+const CONTROL = /[\p{Cc}\p{Cf}\u2028\u2029]/u;
 const noControl = (v, key) => {
-  if (CONTROL.test(v)) throw new Error(`${key} denetim karakteri içermemeli`);
+  if (CONTROL.test(v)) throw new Error(`${key} denetim ya da görünmez karakter içermemeli`);
   return v;
 };
 const strList = (v, key) => {
