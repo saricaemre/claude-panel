@@ -337,7 +337,7 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
         simulator.createTool(sdk, z, { cwd: dir, onAttach: () => send('sim:open', id) }),
         browser.createTool(sdk, z, { chatId: id, onOpen: () => send('browser:open', id) }),
         terminals.createTool(sdk, z, { chatId: id, accountId, cwd: dir, envId }),
-        preview.createTool(sdk, z, { chatId: id, openUrl: (url) => browser.openUrl(id, url, () => send('browser:open', id)) }),
+        preview.createTool(sdk, z, { chatId: id, bypass: () => chats.get(id)?.permissionMode === 'bypassPermissions', openUrl: (url) => browser.openUrl(id, url, () => send('browser:open', id)) }),
         changes.createTool(sdk, z, { chatId: id, cwd: dir }),
         sessions.createTool(sdk, z, { chatId: id, cwd: dir, getModels: () => chats.get(id)?.models || infoCache.get(accountId)?.models }),
         ...(asArm ? [] : [wrapup.createTool(sdk, z)]),
@@ -475,6 +475,8 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
               c.inTurn = true;
             }
           }
+          // Gerçek izin kipi (ayarlardaki defaultMode dahil): önizleme aracı "Tam yetki"de kartsız çalışır, öbür kiplerde onay ister (preview.js)
+          if (msg.type === 'system' && (msg.subtype === 'init' || msg.subtype === 'status') && msg.permissionMode) c.permissionMode = msg.permissionMode;
           // Claude Code'un kendiliğinden açtığı tur (arka plan görevi bitti): panel de meşgul sayar (uyanık tutma, geri sarma, kolun durumu)
           if (msg.type === 'system' && msg.subtype === 'session_state_changed' && msg.state === 'running' && !busy.has(id)) { sessions.noteBusy(id); setBusy(id, true); }
           // Sunucu adres kipindeki isteğin tamamlandığını bildirdi: kart hâlâ açıksa kabul sayılır (kullanıcı "Tamamladım"a basmadan bitirdi)

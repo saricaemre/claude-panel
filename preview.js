@@ -66,9 +66,17 @@ function parseJsonc(text) {
   return JSON.parse(out);
 }
 
+// Komut satırı terminale (pty) yazılır: denetim karakterleri (Ctrl-C, Ctrl-U, Esc…) kabuk ayrıştırmadan önce satır düzenleyicide
+// iş görür ve izin kartında görünmez. Bu yüzden komutun, ortamın ve klasörün hiçbir parçasında kabul edilmez.
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+const noControl = (v, key) => {
+  if (CONTROL.test(v)) throw new Error(`${key} denetim karakteri içermemeli`);
+  return v;
+};
 const strList = (v, key) => {
   if (v == null) return [];
   if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) throw new Error(`${key} metin listesi olmalı`);
+  v.forEach((x) => noControl(x, key));
   return v;
 };
 
@@ -94,8 +102,8 @@ function normalize(root, c, i, seen) {
       if (url.pathname !== '/' || url.search || url.hash) throw new Error('yerel url yalnız köken olmalı (yol ve sorgu yok)');
       if (urlPort !== port) throw new Error(`url'nin portu (${urlPort}) port ile (${port}) aynı olmalı`);
     }
-    const exe = typeof c.runtimeExecutable === 'string' && c.runtimeExecutable.trim() ? c.runtimeExecutable.trim() : null;
-    const program = typeof c.program === 'string' && c.program.trim() ? c.program.trim() : null;
+    const exe = typeof c.runtimeExecutable === 'string' && c.runtimeExecutable.trim() ? noControl(c.runtimeExecutable.trim(), 'runtimeExecutable') : null;
+    const program = typeof c.program === 'string' && c.program.trim() ? noControl(c.program.trim(), 'program') : null;
     const runtimeArgs = strList(c.runtimeArgs, 'runtimeArgs');
     const args = strList(c.args, 'args');
     // runtimeExecutable + runtimeArgs (npm run dev) ya da node + program + args (node server.js); ikisi birlikte de olur
@@ -103,7 +111,7 @@ function normalize(root, c, i, seen) {
     if (!argv && !url) throw new Error('runtimeExecutable, program ya da url gerekli');
     let cwd = root;
     if (c.cwd != null) {
-      cwd = path.resolve(root, String(c.cwd).replace(/\$\{workspaceFolder\}/g, root));
+      cwd = path.resolve(root, noControl(String(c.cwd), 'cwd').replace(/\$\{workspaceFolder\}/g, root));
       if (!fs.statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`cwd klasörü yok: ${c.cwd}`);
     }
     const env = {};
@@ -112,7 +120,7 @@ function normalize(root, c, i, seen) {
       for (const [k, v] of Object.entries(c.env)) {
         if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) throw new Error('env anahtarı geçersiz: ' + k);
         if (v == null || typeof v === 'object') throw new Error('env değeri metin olmalı: ' + k);
-        env[k] = String(v);
+        env[k] = noControl(String(v), 'env.' + k);
       }
     }
     const autoPort = c.autoPort === true ? true : c.autoPort === false ? false : null;
@@ -207,12 +215,15 @@ function urlFor(c, port) {
 
 // ---------- Komut ----------
 
-const quote = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${String(s).replace(/'/g, `'\\''`)}'`);
+// fish'te tek tırnağın içinde \\ ve \' kaçıştır (sonu \ ile biten değer tırnağı açık bırakırdı); bash/zsh'te hiçbir şey kaçış değildir
+const FISH = () => path.basename(process.env.SHELL || '') === 'fish';
+const quote = (s) => (/^[\w@%+=:,./-]+$/.test(s) ? s
+  : FISH() ? `'${String(s).replace(/[\\']/g, '\\$&')}'` : `'${String(s).replace(/'/g, `'\\''`)}'`);
 // Terminale yazılan satır: ortam önekleri + komut; sunucu kapanınca işaret satırı (çıkış kodu) basılır.
 // PORT her zaman atanan port (sunucu oradan okur).
 function commandLine(c, port) {
   const env = { ...c.env, PORT: String(port) };
-  const status = path.basename(process.env.SHELL || '') === 'fish' ? '$status' : '$?';
+  const status = FISH() ? '$status' : '$?';
   return [...Object.entries(env).map(([k, v]) => `${k}=${quote(v)}`), ...withPort(c.argv, port).map(quote)].join(' ') +
     `; printf '\\n${EXIT_MARK} (çıkış %s)\\n' ${status}`;
 }
@@ -279,28 +290,30 @@ async function closeTab(s) {
 }
 
 // Sunucuyu başlatır (çalışıyorsa onu verir). Aynı sunucuya aynı anda gelen ikinci istek (kullanıcı + Claude) ilkini bekler.
-// Dönen: { server, reused, moved }
+// Dönen: { server, reused, moved }. allow(c): çalışan sunucu kullanılmayacaksa, başlatmadan hemen önce o an okunan
+// yapılandırmayla sorulur (Claude'un aracı: onaylanan parmak izi mi; kart açıkken launch.json değişmiş olabilir)
 const locks = new Map(); // anahtar -> süren başlatma
-async function start(chatId, name) {
+async function start(chatId, name, allow = null) {
   const ch = chats.get(chatId);
   if (!ch) throw new Error('Sohbet bulunamadı');
   const c = pick(readLaunch(ch.root), name);
   const key = keyOf(ch, c.name);
   while (locks.has(key)) await locks.get(key).catch(() => {});
-  const p = startLocked(ch, c, key);
+  const p = startLocked(ch, c, key, allow);
   locks.set(key, p);
   try { return await p; } finally { if (locks.get(key) === p) locks.delete(key); }
 }
 
-async function startLocked(ch, c, key) {
+async function startLocked(ch, c, key, allow) {
   const old = servers.get(key);
   if (old && old.status === 'running') return { server: old, reused: true };
+  if (allow && !allow(c)) throw new Error(NOT_APPROVED);
   // Yalnız adres: kullanıcının kendi çalıştırdığı sunucu
   if (!c.argv) {
     const local = LOCAL.test(c.url.hostname);
     if (local && !(await listening(c.port))) throw new Error(`${c.url.origin} yanıt vermiyor; launch.json'da komut yok, sunucuyu siz başlatın`);
     const s = { key, accountId: ch.accountId, root: ch.root, name: c.name, port: c.port, url: c.url.href, status: local ? 'running' : 'external',
-      attached: true, ptyId: null, misses: 0 };
+      attached: true, ptyId: null, misses: 0, fp: c.fp };
     servers.set(key, s);
     send('preview:status', pub(s));
     if (local) ensurePoller();
@@ -420,7 +433,9 @@ function permission(chatId, input = {}) {
 
 // ---------- Claude'un aracı ----------
 
-function createTool(sdk, z, { chatId, openUrl }) {
+const NOT_APPROVED = 'Bu yapılandırma bu sohbette onaylanmadı ya da launch.json onaydan sonra değişti; preview start\'ı yeniden çağır, kullanıcıya sorulacak.';
+
+function createTool(sdk, z, { chatId, openUrl, bypass = () => false }) {
   return sdk.tool(
     'preview',
     'Projenin geliştirme sunucuları (.claude/launch.json; Claude masaüstü uygulamasıyla aynı biçim). list: yapılandırmalar ve durumları. ' +
@@ -452,10 +467,15 @@ function createTool(sdk, z, { chatId, openUrl }) {
           case 'start':
           case 'restart': {
             const c = pick(launch, a.name);
-            if (a.action === 'restart') await stop(keyOf(ch, c.name));
-            const r = await start(chatId, c.name);
+            // Onay yalnız izin kartında (permission → onAllow, kartta gösterilen parmak izi) ya da kullanıcının kendi başlatmasında
+            // verilir; araç onay eklemez. Yoksa çalışan sunucu yüzünden kartsız geçen bir start, değişmiş launch.json'u onaylatırdı.
+            const allow = (x) => bypass() || ch.approved.has(x.fp);
+            if (a.action === 'restart') {
+              if (!allow(c)) throw new Error(NOT_APPROVED);
+              await stop(keyOf(ch, c.name));
+            }
+            const r = await start(chatId, c.name, allow);
             const s = r.server;
-            ch.approved.add(c.fp); // buraya gelindiyse onaylı (kartla ya da "Tam yetki")
             const page = await openUrl(s.url);
             return ok(`${r.reused ? 'Sunucu zaten çalışıyordu' : 'Sunucu hazır'}: ${s.url}` +
               `${r.moved ? ` (${r.moved} portu kullanımda olduğu için ${s.port})` : ''}${s.ptyId != null ? ` · terminal sekmesi ${s.ptyId}` : ''}\n` +
@@ -501,9 +521,8 @@ function setup({ getWindow, getAutoVerify: gav }) {
   ipcMain.handle('preview:start', wrap(async (chatId, name) => {
     const ch = chats.get(chatId);
     if (!ch) throw new Error('Sohbet başlayınca kullanılabilir');
-    const c = pick(readLaunch(ch.root), name);
-    ch.approved.add(c.fp);
-    const r = await start(chatId, c.name);
+    const r = await start(chatId, pick(readLaunch(ch.root), name).name);
+    if (!r.reused) ch.approved.add(r.server.fp); // kullanıcının çalıştırdığı komut (o an okunan), sonradan değişen değil
     return { url: r.server.url, moved: r.moved || null, port: r.server.port, external: !LOCAL.test(new URL(r.server.url).hostname) };
   }));
   ipcMain.handle('preview:stop', wrap(async (chatId, name) => {
@@ -514,4 +533,4 @@ function setup({ getWindow, getAutoVerify: gav }) {
   }));
 }
 
-module.exports = { setup, bind, forget, createTool, permission, readLaunch, parseJsonc, VERIFY_PROMPT, VERIFY_TOOLS };
+module.exports = { setup, bind, forget, createTool, permission, readLaunch, parseJsonc, commandLine, VERIFY_PROMPT, VERIFY_TOOLS };

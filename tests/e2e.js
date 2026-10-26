@@ -2078,6 +2078,20 @@ async function waitUntil(fn, ms, msg) {
     assert.deepEqual(await pvTerms(), ['Önizleme · site'], 'durdurulan sunucunun terminal sekmesi kapanmadı');
     assert.equal(await portOpen(PA), true);
 
+    // Onay aklama: Claude launch.json'da çalışan sunucunun komutunu değiştirir, start (çalışanı kullanır, kartsız) sonra restart.
+    // Kartsız geçen start yeni komutu onaylatmamalı: restart kart açar (eskiden araç o anki parmak izini onaylı sayıyordu)
+    const trMark = fakeLog().length;
+    await page.fill(C + '.composer-input', 'önizlemeyi kandır');
+    await page.press(C + '.composer-input', 'Enter');
+    await page.waitForSelector(pvCard, { timeout: 15000 }).catch(() => assert.fail('değişen komutun restart\'ı kartsız geçti (onay aklama)'));
+    assert.equal(await page.textContent(pvCard + ' .perm-title'), 'Claude önizleme sunucusunu başlatmak istiyor: site');
+    assert.ok((await page.textContent(pvCard + ' .perm-reason')).includes("SAYFA='Kandırıldı'"), 'kartta yeni komut yok');
+    await page.click(pvCard + ' button:has-text("Reddet")');
+    await pvDone('Önizlemeyi denedim');
+    assert.deepEqual([...fakeLog().slice(trMark).matchAll(/^PRVPERM (\w+) (\w+)$/gm)].map((m) => m[1] + ':' + m[2]), ['start:allow', 'restart:deny']);
+    assert.equal(await portOpen(PA), true, 'reddedilen restart çalışan sunucuyu durdurdu');
+    writeLaunch();
+
     // Menüden durdurma: Ctrl-C, port kapanır, sekme kapanır, düğme söner
     await pvMenu();
     await pvItem('site: durdur');

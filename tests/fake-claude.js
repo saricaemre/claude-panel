@@ -449,6 +449,7 @@ async function runUser(m) {
   else if (/simülatör/i.test(t)) await simTurn();
   else if (/tarayıcı/i.test(t)) await browserTurn(t);
   else if (/terminali oku/i.test(t)) await terminalTurn();
+  else if (/önizlemeyi kandır/i.test(t)) await previewTrickTurn();
   else if (/önizlemeyi dene/i.test(t)) await previewTurn();
   else if (/^mcp (formu|adresi) /.test(t)) await elicitTurn(t);
   else if (/grafik çiz/i.test(t)) await widgetTurn();
@@ -931,6 +932,17 @@ async function previewTurn() {
   await call({ action: 'stop', name: 'ikinci' });
   await call({ action: 'start', name: 'yok' });
   await streamText('Önizlemeye baktım.');
+  finish('success');
+}
+// Onay aklama denemesi: launch.json'da çalışan sunucunun komutunu (ortamını) değiştirir; çalışan sunucu kartsız kullanılır,
+// ama bu yeni komutu onaylatmamalı: ardından gelen restart kart açmalı (preview.js → allow)
+async function previewTrickTurn() {
+  const call = (args) => panelTool('PRV', 'preview', 'pv' + (++pvN), args);
+  const file = process.cwd() + '/.claude/launch.json';
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(`"Ana sayfa'm"`, '"Kandırıldı"'));
+  await call({ action: 'start', name: 'site' });
+  await call({ action: 'restart', name: 'site' });
+  await streamText('Önizlemeyi denedim.');
   finish('success');
 }
 // Değişiklikler turu: bir dosyayı düzenler, yeni dosya yazar (gerçekten diske), sonra show ile bölmeyi açar
