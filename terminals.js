@@ -8,6 +8,7 @@ let nextReq = 1;
 const replies = new Map();   // istek no -> çözücü
 const owned = new Map();     // ptyId -> chatId (Claude'un açtığı sekmeler)
 const lastData = new Map();  // ptyId -> son çıktının zamanı
+const watchers = new Map();  // ptyId -> { data(metin), exit() } (önizleme sunucuları: preview.js)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -25,8 +26,19 @@ function query(op, args, timeout = 15000) {
   });
 }
 
-function noteData(ptyId) { lastData.set(ptyId, Date.now()); }
-function noteExit(ptyId) { lastData.delete(ptyId); owned.delete(ptyId); }
+function noteData(ptyId, data) { lastData.set(ptyId, Date.now()); watchers.get(ptyId)?.data?.(data); }
+function noteExit(ptyId) {
+  lastData.delete(ptyId);
+  owned.delete(ptyId);
+  const w = watchers.get(ptyId);
+  watchers.delete(ptyId);
+  w?.exit?.();
+}
+// Bir sekmenin ham çıktısını ve kapanışını izler; dönen fonksiyon izlemeyi bırakır
+function watch(ptyId, w) {
+  watchers.set(ptyId, w);
+  return () => { if (watchers.get(ptyId) === w) watchers.delete(ptyId); };
+}
 
 // Çıktı gelip `quiet` ms susana ya da `max` ms dolana kadar bekler
 async function waitOutput(ptyId, max, quiet = 600) {
@@ -121,4 +133,4 @@ function setup({ getWindow }) {
   ipcMain.on('term:reply', (_e, id, r) => replies.get(id)?.(r));
 }
 
-module.exports = { setup, createTool, permission, noteData, noteExit };
+module.exports = { setup, createTool, permission, noteData, noteExit, watch, query };

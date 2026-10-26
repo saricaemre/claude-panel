@@ -27,7 +27,14 @@ contextBridge.exposeInMainWorld('panel', {
   // Seçilen/bırakılan dosyanın diskteki yolu (Electron 32+'da File.path yok); panodan gelen görselde boş
   filePath: (file) => { try { return webUtils.getPathForFile(file) || ''; } catch { return ''; } },
   chatPermissionReply: (id, rid, reply) => ipcRenderer.send('chat:permissionReply', id, rid, reply),
-  chatInterrupt: (id) => ipcRenderer.invoke('chat:interrupt', id),
+  chatElicitationOpen: (id, rid) => ipcRenderer.invoke('chat:elicitationOpen', id, rid),
+  chatInterrupt: (id) => ipcRenderer.invoke('chat:interrupt', id), // { ok, cancelled: kuyruktan çekilen mesajların kimlikleri }
+  chatWithdraw: (id, uuid) => ipcRenderer.invoke('chat:withdraw', id, uuid), // kuyruktaki mesajı geri al: { ok, taken }
+  chatSendNow: (id, uuid) => ipcRenderer.invoke('chat:sendNow', id, uuid), // kuyruktaki mesajı hemen gönder: { ok, uuid: yeni kimlik, taken }
+  // "!" kabuk kipi (kabuk.js): komut sohbetin klasöründe çalışır, bitince Claude'a kayıt eki olarak gider: { ok, sent, code, ms, stopped… }
+  chatShell: (id, runId, cmd) => ipcRenderer.invoke('chat:shell', id, runId, cmd),
+  chatShellStop: (id, runId) => ipcRenderer.invoke('chat:shellStop', id, runId),
+  onChatShellData: (cb) => ipcRenderer.on('chat:shellData', (_e, id, runId, stream, text) => cb(id, runId, stream, text)),
   chatSetModel: (id, model) => ipcRenderer.invoke('chat:setModel', id, model),
   chatSetMode: (id, mode) => ipcRenderer.invoke('chat:setMode', id, mode),
   chatSetEffort: (id, level) => ipcRenderer.invoke('chat:setEffort', id, level),
@@ -47,7 +54,7 @@ contextBridge.exposeInMainWorld('panel', {
   onChatMsg: (cb) => ipcRenderer.on('chat:msg', (_e, id, msg) => cb(id, msg)),
   onChatEnd: (cb) => ipcRenderer.on('chat:end', (_e, id, err) => cb(id, err)),
   onChatPermission: (cb) => ipcRenderer.on('chat:permission', (_e, id, req) => cb(id, req)),
-  onChatPermissionDone: (cb) => ipcRenderer.on('chat:permissionDone', (_e, id, rid) => cb(id, rid)),
+  onChatPermissionDone: (cb) => ipcRenderer.on('chat:permissionDone', (_e, id, rid, why) => cb(id, rid, why)),
   onChatModels: (cb) => ipcRenderer.on('chat:models', (_e, id, models) => cb(id, models)),
   // Bağlam doluluğu ve otomatik sıkıştırma izni (compaction.js); kayıt saklama süresi önerisi
   onChatContext: (cb) => ipcRenderer.on('chat:context', (_e, id, u) => cb(id, u)),
@@ -93,6 +100,11 @@ contextBridge.exposeInMainWorld('panel', {
   browserScreenshot: (chatId) => ipcRenderer.invoke('browser:screenshot', chatId),
   onBrowserOpen: (cb) => ipcRenderer.on('browser:open', (_e, chatId) => cb(chatId)),
   onBrowserViewport: (cb) => ipcRenderer.on('browser:viewport', (_e, chatId, size, wcId) => cb(chatId, size, wcId)),
+  // Önizleme (preview.js): launch.json'daki sunucular; durum değişince bütün sekmelere
+  previewList: (chatId) => ipcRenderer.invoke('preview:list', chatId),
+  previewStart: (chatId, name) => ipcRenderer.invoke('preview:start', chatId, name),
+  previewStop: (chatId, name) => ipcRenderer.invoke('preview:stop', chatId, name),
+  onPreviewStatus: (cb) => ipcRenderer.on('preview:status', (_e, s) => cb(s)),
   // Yan oturumlar (sessions.js): ana süreç sekme açtırır / mesaj yazdırır; tur sonu bildirimi başlatan sohbete
   onSessionQuery: (cb) => ipcRenderer.on('session:query', (_e, id, op, args) => cb(id, op, args)),
   sessionReply: (id, reply) => ipcRenderer.send('session:reply', id, reply),
@@ -133,6 +145,7 @@ contextBridge.exposeInMainWorld('panel', {
   changesList: (cwd) => ipcRenderer.invoke('changes:list', cwd),
   changesDiff: (root, file) => ipcRenderer.invoke('changes:diff', root, file),
   fileRead: (file) => ipcRenderer.invoke('file:read', file),
+  filesMentionable: (cwd) => ipcRenderer.invoke('files:mentionable', cwd), // `@dosya` önerileri (renderer/mentions.js)
   fileOpen: (file, line) => ipcRenderer.invoke('file:open', file, line),
   editorList: () => ipcRenderer.invoke('editor:list'),
   fileReveal: (file) => ipcRenderer.send('file:reveal', file),

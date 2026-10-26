@@ -5,6 +5,206 @@ Kurallar, dosya haritası ve tuzaklar `CLAUDE.md`'de; bu dosya geçmişi tutar. 
 
 ---
 
+## 2026-10-26 · Arkadaşlar GitHub'dan kurabilsin
+
+- **İstek** (Emre): "arkadaşlarımın da github'dan çekip projeyi rahatça kullanabilmesini istiyorum."
+- **Durum**: ürün kodunda kişisel yol yok (yalnız `docs/octopus/olcum/betikler/` Emre'nin makinesine göre, ürün kodu değil); node-pty hazır derlenmiş geliyor, derleyici gerekmez; `kur.sh` klondan çalışıyor. Engeller: depo özel, son işler (36 dosya) commit'lenmemiş, README'de klonlama adımı yalnız "Geliştirme"de.
+- **Yapılan**: README → Kurulum bölümü klonlamayla başlıyor (`xcode-select --install`, `brew install node`, `git clone … ~/"Claude Panel"`, `bash kur.sh`), özel depo için davet notu, güncelleme (`git pull && bash kur.sh`) ve verinin güncellemede silinmediği.
+- **Doğrulama**: çalışma ağacı (`.gitignore`'a göre) dalı oynatmadan geçici bir commit nesnesine konup `/tmp`'deki temiz bir klasöre klonlandı (113 dosya; `docs/tanitim/out` ve müzik wav'ları girmiyor). Klonda `bash kur.sh --dmg` geçti (npm install, simülatör yardımcısı, paketleme, DMG 285 MB), `npm run check` 81 dosya temiz. Paketlenen uygulama ayrı `CLAUDE_PANEL_USER_DATA` ile açıldı: süreç ayakta, ilk açılış ayarı (`welcome: pending`) yazıldı, hata çıktısı boş. Ekran görüntüsü alınamadı (oturumun ekran kaydı izni yok). npm önbelleği sıcaktı; gerçekten temiz bir Mac'te (Node'suz, git'siz) denenmedi.
+- **Karar** (Emre): depo açık (public) yapıldı. Ölçüm verileri (`docs/octopus/olcum/`, Kızıl Elma soruları) ve GUNLUK.md de herkese açık; Emre bunu bilerek seçti. Lisans dosyası yok. README'deki "depo özel, davet isteyin" notu kaldırıldı.
+
+## 2026-10-26 · Sıkıştırma kartları kaldırıldı, 350 bin sınırı silindi
+
+- **İstek** (Emre): "zırt pırt bağlam doldu uyarısı geliyor… kaldır şunu öneri gelmesin. ben istersem sıkıştırırım. şu limiti de kaldır."
+- **Neden geliyordu**: panel Claude Code'un otomatik sıkıştırmasını `PreCompact`'ta engelleyip (İ1, `autoCompact: 'ask'`) kart açıyordu. Eşiğin üstünde engellenen Claude Code her istekten önce yeniden deniyor (bu oturumda %113–118'de görüldü); her denemede yeni kart ve "Sohbet özetleniyor…" notu düşüyordu. Eşik düşüktü: genel `~/.claude/settings.json`'da `"autoCompactWindow": 350000` vardı (panelin kodunda bu değeri yazan yer yok; kim yazdığı bilinmiyor).
+- **Yapılan**:
+  - `~/.claude/settings.json`'dan yalnız `autoCompactWindow` satırı silindi (yedek `/tmp/settings.json.yedek-1793013510`; dosya üç hesapta ortak, panel dışını da etkiler).
+  - renderer/compaction.js: %80 uyarı kartı ve engellenen sıkıştırmanın onay kartı kaldırıldı; engel sessiz. Claude Code'un "Compaction blocked by PreCompact hook" metni (`blockedCompactText`) ve engellenen denemenin "özetleniyor" notu çizilmiyor; not yalnız `/compact` gönderilince ya da otomatik sıkıştırmaya izin verildiyse. "Talimatla sıkıştır" ve ahtapotta "Yeniden doğ" halkanın menüsünde kaldı. Halka %80'de yine sararıyor.
+  - Engelin kendisi (ana süreçte `PreCompact` block) değişmedi: Claude Code yine sormadan sıkıştırmıyor.
+- **Doğrulama**: `npm run check` temiz. e2e: P2.2 adımı artık kart olmadığını, engellenen denemenin metninin çizilmediğini, sıkıştırmanın halkanın menüsünden gittiğini; P7.3 adımı yeniden doğuşun halkanın menüsünden başladığını denetliyor. `npm test` yeşil (tek koşu).
+- **Bekleyen**: panelin bu değişiklikle çalışması için `bash kur.sh` (Emre). Pencere 1M'ye tamamen dolunca Claude Code'un ne yaptığı ölçülmedi.
+
+## 2026-10-26 · Küçük kolaylıklar: önerilen istem, istem geçmişi, `!` kabuk kipi, sınırda otomatik devam
+
+- **İstek**: Claude Code eksikleri planının 10. (son) maddesi.
+- **Ölçüm** (yeni `docs/claude-code-eksikleri/olcum/kolayliklar.mjs`; gerçek CLI 2.1.310, sahte API, girişsiz geçici ayar klasörü, 0 token):
+  - `oneri`: ilk turda ve plan kipinde öneri isteği yok. 2. turdan itibaren `result`'tan sonra aynı modele ayrı istek (son blok `[SUGGESTION MODE: …`, araçlar ve düşünme ana konuşmanınki), sonra `prompt_suggestion`. Boş yanıt ve "Let me…" süzülüyor. Kayda yazılmıyor. Tur biter bitmez yeni mesaj gidince önceki turun önerisi o mesajdan sonra geliyor.
+  - `kabuk` (`shouldQuery: false`): API'ye gitmiyor, kayda kullanıcı satırı olarak yazılıyor, sonraki gerçek mesajla aynı kullanıcı mesajında birleşiyor. Boştayken kendi boş "turu": `session_state_changed` running (lifecycle'dan önce), queued → started, init, boş `result`, completed, idle. `UserPromptSubmit` çağrılmıyor, ardından öneri yok. Claude çalışırken kuyruktaki mesaj gibi araya giriyor. Checkpoint yok. Sonraki mesajın ebeveyni kabuk satırı; `resumeDropsTurn` olmadan geri sarma sorunsuz, verilince reddediyor.
+  - `sinir`: API anahtarıyla `rate_limit_event` hiç gelmedi (429 yalnız "API Error: Request rejected (429)"); sahte OAuth jetonuyla (`CLAUDE_CODE_OAUTH_TOKEN`) her istekte geldi. 429 rejected'da olay, sonra asistanın `error: 'rate_limit'` mesajı ("You've hit your session limit · resets 2:27pm (Europe/Istanbul)"), `result` success + `is_error`, lifecycle cancelled; mesaj kayıtta kalıyor, sonraki istekte birleşiyor. Yeniden deneme yok.
+- **Yapılan**:
+  - Yeni `kabuk.js` (komutu `$SHELL -c` ile sohbetin klasöründe ve ortamında, süreç grubunda çalıştırma, durdurma, Claude'a giden `<bash-input>`/`<bash-stdout>`/`<bash-stderr>` metni; ANSI ve `\r` temizliği, 30 bin karakter, etiket kaçışı, çıkış kodu notu). chat-main.js: `chat:shell` / `chat:shellStop`, `pushShell`, kabuğun boş turunu yutan `shellSwallows`, `promptSuggestions` seçeneği (ayar açıksa, yan oturumlar hariç). main.js: `promptSuggestions` ayarı.
+  - Yeni renderer/istem.js (istem geçmişi ↑/↓, kuyruktaki mesajı ↑ ile geri alma, Ctrl+R araması, önerilen istem ve Tab), renderer/kabuk.js (kip, çip, komut bloğu, canlı çıktı, Durdur, geçmişteki kabuk mesajları), renderer/sinir.js (uyarı pencere başına bir not, sınır kartı, otomatik devam). chat.js'te bağlantılar; Ayarlar → Genel'de "Önerilen istem".
+  - Sahte CLI: `promptSuggestions`, kabuk mesajı, "sınıra takıl", "sınıra yaklaş", araçsız "kısa yanıt" turu.
+- **Kararlar**: önerilen istemin varsayılanı kapalı (ayrı model isteği; Emre seçecek). Kabuk kipi yalnız klavyeden boş kutuya yazılan `!` ile açılır ve yalnız Enter/gönder düğmesiyle çalışır: tur özeti düğmesi ve görsellerin `sendPrompt` taslağı komut çalıştıramaz. Panel kabuk çıktısını tek mesajla yollar (CLI iki mesaj yazar; geçmişte ikisi de okunur). Otomatik devam sıfırlanmadan 60 sn sonra, kullanıcı yazınca kapanır, en çok 3 deneme; beklerken yan oturum/PR bildirimleri bekler. Eskiden her `rate_limit_event`'te not düşüyordu (OAuth'ta her istekte gelir); artık uyarı pencere başına bir kez.
+- **Doğrulama**:
+  - Ölçüm betiği üç kipte koşuldu (`sinir` iki kez: API anahtarı ve sahte OAuth); yukarıdaki her bulgu çıktısından.
+  - `npm run check` temiz. e2e'ye "Kolaylıklar (madde 10)" adımı: ayarın `initialize`'a gitmesi, ilk turda öneri yok, ikinci turda yer tutucu ve "Tab", Tab ile alma, eski önerinin atılması; ↑/↓ sırası, dolu kutuda ↑, kuyruktaki mesajı ↑ ile geri alma; Ctrl+R listesi, süzme, seçim; `!` kipi, komutun klasörde çalışması, stderr, çıkış kodu, Claude'a giden metin (`KABUK`), tur açılmaması, meşgul geçişi olmaması (MutationObserver), geçmişte kipiyle geri gelme, ⌫ ile çıkma, Durdur, kodla gelen metnin komut olmaması, yapıştırılan `!`, iki kabuk çıktısının sonraki mesajla birleşmesi (`KABUKBIRLESTI 2`), geçmişteki iki ayrı kabuk mesajının tek blok olması; sınır kartı (metin, "Durdu"/"Hata" yok), otomatik "Devam et.", kullanıcı yazınca kapanması, uyarının bir kez yazılması, sınır turundan sonra öneri olmaması.
+  - İlk koşu adımın ilk turunda takıldı: sahte CLI'nin varsayılan turu izin kartı açıyor; araçsız "kısa yanıt" turu eklendi. İkinci koşu yeşildi ama `6q-sinir.png`'de sınır kartının altında eski öneri duruyordu: 429 anında bittiği için önceki turun önerisi sınır turunun sonucundan sonra geliyordu. Öneri artık yalnız başarılı turun ardından kabul ediliyor (`tab.suggestOk`), adıma assert eklendi.
+  - Bilerek bozma: `shellSwallows` kapatılınca ilk assert (yalnız sonradan "meşgul değil") yine geçti; kabuğun boş turu sekmeyi bir an meşgul yapıyordu. Meşgul geçişlerini sayan assert eklendi; bozmayla "kabuk mesajının boş turu sohbeti meşgul göstermemeli" kırmızı, geri alınınca yeşil.
+  - Son düzeltmelerden sonra `npm test` yeşil (bütün adımlar, tek koşu).
+  - Ekran görüntüleri `6o-oneri.png`, `6p-kabuk-kipi.png`, `6q-sinir.png` görüldü.
+- **Bekleyen**: gerçek hesapla panelde bir tur (öneri açıkken birkaç tur; `!git status`; gerçek bir 429 olursa kart). Önerilen istemin varsayılanı Emre'nin kararı. Yeni dosyalar (`kabuk.js`, `renderer/istem.js`, `renderer/kabuk.js`, `renderer/sinir.js`) paketlemeye kendiliğinden girer; `bash kur.sh` Emre'de. Claude Code eksikleri planındaki bütün maddeler bitti.
+
+---
+
+## 2026-10-26 · MCP elicitation: sunucunun form / adres isteği
+
+- **İstek**: Claude Code eksikleri planının 8. maddesi. `onElicitation` verilmediği için SDK, MCP sunucularının kullanıcıdan form ya da adres isteklerini kendiliğinden reddediyordu.
+- **Ölçüm** (yeni `docs/claude-code-eksikleri/olcum/elicitation.mjs` ve deneme sunucusu `elic-sunucu.mjs`; gerçek CLI 2.1.310, sahte API, stdio MCP sunucusu, girişsiz geçici ayar klasörü, 0 token; 13 senaryo):
+  - Claude Code sunucuya `elicitation: { form: {}, url: {} }` bildiriyor. `onElicitation`'a `serverName, message, mode, requestedSchema` (adreste `url, elicitationId`; sunucunun `_meta['anthropic/permissionDisplay']`'inden `title, displayName, description`) geliyor; yanıt sunucuya olduğu gibi gidiyor. `onElicitation` yoksa `decline`.
+  - Şemaya uymayan içerik (eksik zorunlu alan, yanlış tür, `minLength`) Claude Code'da `-32602 … does not match requested schema` ile reddediliyor, araç hata dönüyor.
+  - "Durdur" ve sunucunun zaman aşımı `onElicitation`'ın sinyalini düşürüyor (araç sırasıyla "user doesn't want to proceed" ve `-32001`).
+  - Adres kipinde sunucu bitirince `system/elicitation_complete`. Aracın attığı `-32042` (UrlElicitationRequired) de adres kipinde `onElicitation`'a geliyor; her kabulde CLI aracı yeniden deniyor (3 kez).
+  - SDK callback'i olarak verilen `Elicitation` kancasının yanıtı `onElicitation`'ı atlatmadı.
+- **Yapılan**:
+  - chat-main.js: `onElicitation` → `openElicitation` (izin kartlarıyla aynı `pending` ve `chat:permission` yolu, `elicit` alanıyla), `elicitationRequest` (sunucunun alanlarını kısaltır), `elicitationResult` (yalnız şemadaki alanlar ve düz değerler), `elicitation_complete` açık kartı kabul sayar, `chat:elicitationOpen` (adres ana süreçte saklanan istekten, yalnız http/https). `chat:permissionDone` kapanışın nedenini taşır (`cancelled` / `complete`).
+  - Yeni renderer/elicitation.js: şemadan alanlar (metin ve biçimleri e-posta/adres/tarih, sayı/tam sayı ve sınırları, evet/hayır, tek seçim `enum`/`enumNames`/`oneOf`, çok seçim `items.enum`/`anyOf`, varsayılanlar, zorunlu), gönderim öncesi Türkçe hata; adres kipinde alan adı ve tam adres, "Tarayıcıda aç" + "Tamamladım"; Reddet / Vazgeç; yanıtsız kapanışta durum satırı. Sunucunun metinleri düz metin. Stiller styles.css'te (`.el-*`).
+  - Sahte CLI: ölçülen kontrol isteği, `control_cancel_request`, `elicitation_complete`, şema denetimi; beş tur.
+- **Kararlar**: "Tarayıcıda aç" yanıt vermiyor, kabul "Tamamladım"la gidiyor: `-32042`'de kabul aracın yeniden denenmesi demek. Adres sistem tarayıcısında açılıyor (OAuth girişleri kullanıcının tarayıcı oturumunu ister). Kartta "hep" seçeneği yok. Kanca kullanılmadı.
+- **Doğrulama**:
+  - Ölçüm betiği iki kez koşuldu (bir kez `ORT_ELIC_TIMEOUT=3000` ile); yukarıdaki her bulgu çıktısından.
+  - `npm run check` temiz. e2e'ye "MCP elicitation" adımı: başlık, düz metin mesaj (HTML çizilmez), alanların sırası/türü/zorunluluğu/varsayılanı, `enumNames`, "Onayınızı bekliyor", beş denetim hatası ve denetimden geçmeyen formun gitmemesi, tam yanıt (`ELICIT mf1 {…}`), Reddet → `decline`, adres kartı (alan adı, adres), "Tarayıcıda aç" → açma günlüğü ve henüz yanıt yok, "Tamamladım" → `accept`, sunucunun bildirimiyle kendiliğinden kabul, zaman aşımında kartın kapanması ve durum satırı.
+  - Tarayıcı adımındaki `.perm-card:has-text("tarayıcı")` sayımı adres kartının "Tarayıcıda aç"ını da saydı (has-text büyük/küçük harfe bakmıyor); `:not(.elicit)` ile daraltıldı.
+  - Bilerek bozma: zorunlu alan denetimi kapatılınca boş form gitti, adım hata satırını beklerken kırmızı; geri konunca yeşil.
+  - `npm test` yeşil (bütün adımlar, tek koşu). Önceki iki koşu üst üste binmişti: arka plan görevi "bitti" dediği hâlde süreç sürüyordu, ikinci koşu ilkiyle aynı anda başladı; ikisi de durdurulup tek koşu `nohup` ile, pid izlenerek yapıldı.
+  - Ekran görüntüleri `4e-mcp-form.png`, `4f-mcp-adres.png` görüldü; düzeltilen alanın hata yazısı gönderene kadar kalıyordu (artık yazınca kalkıyor), adres kutusundaki `code`'un kendi zemini kaldırıldı.
+- **Bekleyen**: gerçek hesapla gerçek bir MCP sunucusunda (form ya da adres) bir tur. Yeni dosya `renderer/elicitation.js` paketlemeye kendiliğinden girer; `bash kur.sh` Emre'de. Sıradaki iş: madde 10, küçük kolaylıklar.
+
+---
+
+## 2026-10-26 · `@dosya` önerileri
+
+- **İstek**: Claude Code eksikleri planının 7. maddesi. Yazma kutusunda `@` ile proje dosyası seçilemiyordu.
+- **Ölçüm** (yeni `docs/claude-code-eksikleri/olcum/dosya-anma.mjs`; gerçek CLI 2.1.310, sahte API, girişsiz geçici ayar klasörü, 0 token):
+  - `@yol`'u CLI açıyor: dosya `Read` sonucu gibi `<system-reminder>` blok olarak mesajın önüne, klasör `ls` çıktısıyla, görsel `image` bloğuyla. Büyük dosya (~390 KB) eklenmiyor, yalnız "parça parça oku" notu.
+  - Yalnız **son metin bloğu** açılıyor; satır başında ya da boşluktan sonra. E-posta, `x@a.js`, ters tırnak içi açılmıyor. Göreli, mutlak, proje dışı yol, Türkçe ad, `@"boşluklu ad"`, `#L2-3`, sondaki virgül çalışıyor; `\ ` kaçışı ve olmayan dosya düz metin kalıyor.
+  - Aynı dosya değişmeden yeniden anılırsa eklenmiyor (ilk koşuda bu yüzden üç senaryo yanlış "açılmıyor" göründü; ikinci koşu her senaryoya ayrı dosya verdi). Değişince yeniden ekleniyor.
+  - `client_composed: true` açılımı ve tur başındaki bütün ekleri kapatıyor.
+- **Yapılan**:
+  - changes.js: `mentionable(cwd)` / `files:mentionable`. Git'te `ls-files --cached --others --exclude-standard` (silinenler çıkarılır), git dışında yeni `scripts/files.js` ayrı süreçte genişlik öncelikli tarar (gizli klasör, `node_modules`, sembolik bağ hariç; 2 sn / 20 bin dosya). Klasörler yollardan çıkarılır. 30 sn önbellek.
+  - Yeni renderer/mentions.js: imlecin önündeki `@…` parçası, bulanık puan (ad > yol > harfler sırayla; küçük harf, `ı`→`i`, aksansız), "/" önerileriyle ortak kutu, klasöre inme, boşluklu yol `@"…"`. renderer/chat.js: kutu öğeleri `__pick` taşır; ↑/↓/Enter/Tab, tıklama, imleç hareketi, odak kaybı.
+- **Kararlar**: git dışı tarama ayrı süreçte: ilk denemede ev klasöründe `~/Library/CloudStorage` (Google Drive) `readdir`'de çekirdekte takıldı, Node süreci `process.exit`'te bile kapanmadı; ana süreçte bu libuv iş parçacığını kalıcı kilitlerdi. Panelin kendi ürettiği mesajlara `client_composed` verilmedi (tur başındaki ekleri de atlatıyor); risk CLAUDE.md §5/§7'de yazılı. Yeni sohbet ekranında öneri yok (yalnız açık sohbette).
+- **Doğrulama**:
+  - Ölçüm betiği üç kez koşuldu; yukarıdaki her bulgu çıktısından.
+  - `npm run check` temiz. e2e'ye "@dosya" adımı: liste (izlenmeyen var, silinen ve yok sayılan yok, klasörler), git dışı klasör (gizli klasör ve `node_modules` yok), `@uyg` → iki öneri ve sırası, bulanık `UYRJSX` → `src/bilesen/Uyari.jsx`, `@eski`/`@gizli` kutu yok, `@sr` + Enter → `@src/` ve içindekiler, ↓ + Enter, Tab ile boşluklu yol tırnakla, fareyle seçim, e-postada öneri yok, Esc; gönderilen metin sahte CLI'nin `IN` satırında aynen.
+  - İlk koşu bu adımda düştü: arayüz assert'leri geçti, ama sahte CLI'nin varsayılan turu izin kartında beklediği için yanıt beklemesi zaman aşımına uğradı; adım artık yalnız gönderilen satırı bekliyor.
+  - Bilerek bozma: `mentionToken`'dan `@`'den önce boşluk şartı kaldırılınca "e-posta adresinde öneri açıldı" ile kırmızı; geri konunca yeşil.
+  - `npm test` yeşil (bütün adımlar).
+  - Ekran görüntüsü `6n-dosya-onerisi.png` görüldü (ikonlu iki satır, ad ve soluk klasör yolu, yazma kutusunun üstünde).
+- **Bekleyen**: gerçek hesapla panelde bir tur (Claude'un eklenen dosyayı görmesi). Yeni dosyalar (`renderer/mentions.js`, `scripts/files.js`) paketlemeye kendiliğinden girer (`kur.sh` dışlama listesiyle çalışıyor); `bash kur.sh` Emre'de. Sıradaki iş: madde 8, MCP elicitation.
+
+---
+
+## 2026-10-26 · Kuyruk: sıradaki mesajı geri al, hemen gönder
+
+- **İstek**: Claude Code eksikleri planının 6. maddesi. Claude çalışırken giden mesaj soluk bir "sırada" balonuyla duruyordu; geri alma ve hemen gönderme yoktu, mesaj alınınca da "sırada" kalıyordu.
+- **Ölçüm** (yeni `docs/claude-code-eksikleri/olcum/kuyruk.mjs`, kipler düz / `hemen` / `durdur` / `replay`; gerçek CLI 2.1.310, sahte API, girişsiz geçici ayar klasörü, 0 token):
+  - Kimlikli her kullanıcı mesajına akışta `{ type: 'command_lifecycle', command_uuid, state }`: `queued` → `started` → `completed`, durdurulan turunki `cancelled`. Bayrak gerekmiyor, tiplerde yok. İkili CLI'de durumlar `queued | started | completed | cancelled | discarded | refused`. `--replay-user-messages` mesajı alındığı an ayrıca `isReplay` ile yansıtıyor.
+  - Araç sürerken giden mesaj araç sonucundan hemen sonra araya giriyor (metin araç sonucunun `<system-reminder>`'ında; kayıtta `attachment/queued_command` + `queue-operation remove absorbed_mid_turn`). **Araçsız turda tur bitince kendi turunda başlıyor**; `session_state_changed` arada `idle`'a düşmüyor. Panel bu turu boşta sanıyordu (Durdur düğmesi yok, uyanık tutma yok).
+  - `cancelAsyncMessage` alınmamış mesajda `true` (mesaj API'ye hiç gitmiyor), alınmışta ve bilinmeyende `false`. **İptal edilen kimlikle yeniden gönderilen mesaj sessizce düşüyor** (ilk "Hemen gönder" denemesinde aynı kimlikle gönderilen mesaj kayboldu).
+  - `priority`: `next` araya giriyor, `later` tur sonunu bekliyor, `now` süren Bash'i (görev olduktan sonra, ~2–3 sn) ve MCP aracını (hemen) arka plana alıp mesajı veriyor, araçsız yanıtı kesiyor (kesinti işaretsiz) ve mesajı kendi turunda gönderiyor.
+  - CLI'de `@internal` bir "Send now" var (`interrupt` + `send_now: true` + `message_uuid`, yetenek `interrupt_send_now_v1`): araçta aynısı, araçsızda kesinti işaretiyle. SDK'da yöntemi yok (`Query.request` ile ham istek gerekiyor); kullanılmadı.
+  - `interrupt()` kuyruktakileri bırakıyor (`still_queued`), durdurulan turun hemen ardından çalışıyorlar. `interrupt({ cancelQueued: true })` hepsini `cancelled` yapıyor, ardından tur açılmıyor.
+  - Kod checkpoint'i: araya giren mesajda yok ("No file checkpoint found"), kendi turunu açanda var.
+- **Yapılan**:
+  - chat-main.js: `c.queued` (alınmamış mesajlar), `command_lifecycle` → `started` turun ortasındaysa araya girdi (geri sarılamaz), değilse kendi turu (sohbet yeniden meşgul, ebeveyni o anki `c.lastChain`). `chat:withdraw`, `chat:sendNow` (iptal + yeni kimlikle `priority: 'now'`). `chat:interrupt` `cancelQueued` ile, çekilen kimlikleri döner.
+  - renderer/chat.js: sıradaki balon listenin sonunda, sabit görev kartından da sonra (`append` → `tailAnchor`); altında "Sırada · Geri al · Hemen gönder". Alınınca o anki yerine oturur, sonraki araçlar altında yeni grupta. "Geri al" ve Durdur'un çektikleri taslağıyla (metin, ekler, satır yorumları) yazma kutusuna döner; Claude almadan süreç kapanırsa da. Önceki sıradaki alınmadıysa yeni mesaj da sıraya girer; o sırada yan oturum ve PR bildirimleri bekler. Stil: kesik altın çerçeve, soluk içerik.
+  - Sahte CLI: kimlikli mesajlar ölçülen kuyruktan geçer (kimliksizler, ana süreçten turlar, eskisi gibi hemen), `cancel_async_message`, `interrupt` makbuzu ve `cancel_queued`, "adım adım çalış" turu, `now`'da kesilen "yavaş düşün". Oturum durumu artık yalnız değişince yollanıyor (gerçek CLI gibi); her turda `running` yollaması kendi turunu açan sıradaki mesajın meşgulünü arayüzde kendiliğinden düzeltip yeni kodu gizlerdi (bozma denemesi hazırlanırken fark edildi).
+- **Kararlar**: "Hemen gönder" tiplerdeki alanlarla (iptal + `priority: 'now'`), iç `send_now` değil. **Durdur kuyruktakileri de çeker** ve yazma kutusuna koyar: SDK belgesi arayüzün Durdur'u için bunu öneriyor; yoksa durdurulan turun hemen ardından sıradaki mesaj çalışırdı (Emre onayladı: "böyle kalsın").
+- **Doğrulama**:
+  - Ölçüm betiği dört kipte koşuldu; yukarıdaki her bulgu betiğin çıktısından.
+  - `npm run check` temiz. e2e'ye "Kuyruk" adımı (sahte CLI): araçsız turda sıradaki balon "Sırada · Geri al · Hemen gönder" ile listenin sonunda, Claude'un yanıtı onun üstüne çizilir, tur bitince kendi turunda başlar ve o turda Durdur düğmesi görünür, ana süreç uyanık tutar, konuşma ona geri sarılabilir; araç adımında araya girer (günlükte `ARAYA`), araç grubuyla Claude'un yanıtı arasına oturur, geri sarma nedeni `queued`; "Geri al" metni ve eki yazma kutusuna döndürür, `CANCEL … var`, mesaj Claude'a gitmez; "Hemen gönder" 2,5 sn'den kısa sürede alınır (adım 4 sn), yeni kimlik, `KUYRUK <yeni> sirada now` ve `ARAYA <yeni>`; Durdur kuyruktakini çeker (`KUYRUKDURDUR cekildi=1`), toast ve yazma kutusu, ardından tur açılmaz.
+  - İlk koşu "Hemen gönder"de düştü: `cancelled` olayı `cancelAsyncMessage` yanıtından önce gelip kuyruk kaydını sildiği için içeriksiz mesaj gitti; mesaj beklemeden önce okunacak şekilde düzeltildi. İkinci koşuda kuyruk adımı geçti, danışma adımı "danışma sürerken tarama yapıldı" ile düştü (yanında bilinen `claude.ai/directory` konsol hatası). Bu adım kuyruğa dokunmuyor (danışma mesajı kimliksiz, eski yoldan): baş açılınca `octopus.onChange` → `scanSoon` (2 sn) kuruluyor, danışmanın `hold`'u 2 sn içinde başlamazsa tarama araya giriyor; kararsızlık olarak §7'ye yazıldı.
+  - Bilerek bozma: arayüzde `started`'ın sohbeti meşgul yapan satırı kapatılınca "kendi turunu açan sıradaki mesajda sohbet meşgul görünmeli" ile kırmızı. İlk bozma koşusu başladıktan sonra sahte CLI'nin her turda `running` yolladığı, bu yüzden bozmanın yeşil kalacağı fark edildi; koşu durduruldu, sahte CLI düzeltildi, bozma yeniden koşuldu.
+  - `npm test` yeşil (99 adım). Ekran görüntüsü `6n-kuyruk.png` görüldü (kesik altın çerçeveli balon, altında düğmeler, Claude'un göstergesi altta).
+- **Bekleyen**: gerçek hesapla panelde bir tur (gerçek Bash/MCP aracında "Hemen gönder", Durdur). Boş yazma kutusunda ↑ ile geri alma yok (madde 10'daki istem geçmişiyle). Yeni ürün dosyası yok, paketleme değişmedi. Sıradaki iş: madde 7, `@dosya` tamamlama.
+
+---
+
+## 2026-10-26 · İzin retlerini göster (`permission_denied`)
+
+- **İstek**: Claude Code eksikleri planının 5. maddesi: "Otomatik" kipte (sınıflandırıcı) ya da bir kuralla kart açılmadan reddedilen araç çağrıları kullanıcıya görünsün. Claude bunu araç sonucundan biliyordu, kullanıcı yalnız kırmızı bir ✕ görüyordu.
+- **Ölçüm** (yeni `docs/claude-code-eksikleri/olcum/izin-reddi.mjs`; gerçek CLI 2.1.310, sahte API, girişsiz geçici ayar klasörü, 0 token; panelin yaptığı gibi `canUseTool` verildi):
+  - Bash ret kuralı (`Bash(rm:*)`) ve `disallowedTools` → `decision_reason_type: 'subcommandResults'` (tiplerdeki örnek `rule` değil), gerekçe yok; içeriğe bağlı kural (`WebFetch(domain:example.com)`) → `rule`; `dontAsk` → `mode`. Hepsinde `canUseTool` çağrılmadı, `message` hatalı araç sonucuyla aynı, ret `result.permission_denials`'ta.
+  - Otomatik kip: Sonnet 4.5'te init `default` dedi (kip sessizce düştü); Opus 5.5'te açıldı. Sınıflandırıcının isteği sahte API'ye geldi (`claude-sonnet-5`, akışsız, araçsız): 1. aşama `</severity>`'de duran 64 token, 2. aşama `<severity>N</severity><category>…</category>`. Biçim CLI ikilisindeki istem metninden bulundu. Uydurma yanıtta "Auto mode could not evaluate this action…" (yine `classifier`), `<severity>90` + kategoride gerçek ret: `decision_reason: "[Git Destructive]"`; `<severity>10`'da komut kartsız çalıştı.
+  - Alt ajanda olay `agent_id` ile ve alt ajanın araç çağrısı mesajından **önce** geldi.
+  - Yola bağlı `Read(./gizli.txt)` kuralı: olay yok, ama `permission_denials`'ta var. Aracın tamamını yasaklayan kural (`"WebFetch"`) aracı kaldırıyor ("No such tool available"), ret sayılmıyor.
+  - Opus 5.5'in isteğinde son mesaj `system` rollü olabiliyor: sahte API son kullanıcı mesajını rolle bulmalı (ilk koşuda anahtar kelime bulunamadı).
+- **Yapılan** (yalnız arayüz; SDK mesajları zaten iletiliyordu):
+  - renderer/chat.js: `permission_denied` → `tab.denials`; satırda "engellendi" çipi (title'da Türkçe gerekçe: Otomatik kip: <kural>, İzin kuralı, İzin kipi…), grup özetinde "N engellendi" (alt ajanınki dıştaki satırın grubuna). Satır henüz yoksa ret bekler, `toolCard` çizerken uygular.
+  - Tur sonunda (`settleDenials`): olayı gelmeyen retler `permission_denials`'tan eklenir; kapalı bir satır "Otomatik kip N işlemi engelledi" (hepsi sınıflandırıcıdansa) ya da "N işlem engellendi", açılınca liste; öğeye tıklayınca satır, grubu ve üst satırları açılır, oraya kaydırılır. Satır tur özeti kutusundan önce.
+  - Sahte CLI: izin kipini `--permission-mode` ve `set_permission_mode`'dan izler; "otomatik kip engellesin" turu ölçülen sırayla üç ret (sınıflandırıcı, alt ajanda kural reddi olay önce, yola bağlı Read yalnız `permission_denials`'ta). `finish(subtype, denials)`.
+- **Kararlar**: Tasarım plandaki öneri. "İzin kuralı ekle" düğmesi sonraya. Tur sonu satırı her ret türünde çıkar (yalnız otomatik kipte değil), başlık türe göre. Geçmişte retler işaretlenmez (olay kayıtta yok).
+- **Doğrulama**:
+  - Ölçüm betiği altı senaryoyu tek koşuda yeniden üretiyor (`kural`, `kural-web`, `kural-dosya`, `disallowed`, `dontask`, `oto`, `ajan`); sınıflandırıcı `ORT_SINIF=izin` ile izin yolunda da denendi.
+  - `npm run check` temiz. e2e'ye "İzin retleri" adımı: kip menüden "Otomatik"e alınır (`set_permission_mode` CLI'ye ulaşır), tur kart açmaz; üç satırda çip ve gerekçe (alt ajanınki iç içe), reddedilmeyen satırın başlığında çip yok, grup özetinde "3 engellendi", tur sonu satırı kapalı ve son yanıtın saatinden sonra, açılınca liste yazma kutusunun üstünde görünür, listeden alt ajanın satırına gidilir (grup ve üst satır açılır, vurgu); sonra kip geri alınır.
+  - Bilerek bozma iki kez: bekleyen reddi uygulayan satır kapatılınca "engellenen satırlar" (alt ajanın satırı eksik), açılışta kaydırma kapatılınca "açılan ret listesi yazma kutusunun altında kaldı" ile kırmızı. İki ara koşu test kodumun hatasıyla düştü (iç içe satırın çipini sayan seçici, `replace`'te `$$` → `$`), düzeltildi.
+  - `npm test` yeşil (98 adım), son koşu kaydırma eklendikten sonra. Ekran görüntüleri `4c-izin-reddi.png` (liste), `4d-izin-reddi-satir.png` (satıra gidiş) görüldü; ilk hâlinde açılan listenin yazma kutusunun altında kaldığı buradan fark edildi.
+- **Bekleyen**:
+  - Emre gerçek hesapla otomatik kipte denedi: retler görünüyor (2026-10-26). Gerçek sınıflandırıcının gerekçe metninin biçimi kaydedilmedi (title'da tam metin görünür). Paketlemeye dokunmadı (yeni ürün dosyası yok), `kur.sh` yalnız güncel sürüm için.
+  - Sıradaki iş: madde 6, kuyruk kontrolü (sıradaki mesajı geri al / hemen gönder).
+
+---
+
+## 2026-10-25 · Önizleme (`launch.json`) ve kendiliğinden doğrulama
+
+- **İstek**: Claude Code eksikleri planının 4. maddesi: masaüstündeki Browser/Preview gibi `.claude/launch.json`'daki geliştirme sunucusu tek tıkla açılsın, bölmede görünsün; "auto-verify" açıkken Claude düzenlemeden sonra sayfaya bakıp doğrulasın.
+- **Biçim** belgeden alındı (https://code.claude.com/docs/en/desktop, WebFetch): `version`, `autoVerify` (proje düzeyinde, masaüstünde varsayılan açık), `configurations[]` → `name`, `runtimeExecutable` + `runtimeArgs`, `program` + `args` (node ile), `port` (3000), `cwd` (`${workspaceFolder}`), `env`, `autoPort` (true: boş port; false: hata; verilmemiş: boş port, ama paket yöneticisi betiği portu sabit yazıyorsa durur), `url` (yerel adres yalnız köken ve aynı port; dış adres ilk açılışta sorulur; komutsuz `url` var olan sunucuya bağlanır). Yorumlu JSON.
+- **Yapılan**:
+  - Yeni `preview.js`: okuma ve denetim, port seçimi ve `--port`/`-p` yeniden yazımı, sunucuyu panelin terminal sekmesinde arka planda başlatma ("Önizleme · <ad>"; satır kabuğa ortam önekleriyle yazılır, sonunda çıkış kodunu basan işaret), port yoklaması (`127.0.0.1` ve `::1`), durdurma (Ctrl-C, port kapanınca sekme kapanır), eşzamanlı başlatmaları sıraya sokma.
+  - Claude'a `preview` aracı: `list`, `start` (çalışıyorsa dokunmaz; port dinleyince tarayıcı bölmesini o adreste açar), `restart`, `stop`, `logs`. Açıklamada launch.json örneği var: dosya yoksa Claude yazabilir.
+  - İzin: kullanıcının menüden başlatması kartsız; Claude'un `start`/`restart`'ı yapılandırmanın komutu (parmak izi: komut, klasör, env, port, url) o sohbette ilk kez çalışırken kartla, kartta komut ve klasör. launch.json değişince yeniden sorulur.
+  - Arayüz: üst çubukta Önizleme düğmesi (yalnız launch.json varken; çalışırken yeşil, başlarken sarı nabız), menüde yapılandırmalar (durum, adres, hatalının nedeni), "durdur", "terminal çıktısı", "Kendiliğinden doğrula", "launch.json'u düzenle". Ayarlar → Genel'de aynı anahtar.
+  - Kendiliğinden doğrulama: `config.json` → `autoVerify`. Açıksa ve projede geçerli yapılandırma varsa talimat (`VERIFY_PROMPT`) sistem istemine gider, `preview` ve `browser` yüklü olur. Sohbet sürerken ayar ya da launch.json değişirse `UserPromptSubmit` kancası bir kez söyler.
+  - `terminals.js` → `watch` (ham çıktı ve kapanış), terminal sorgularına `open`'da `title` ve `close`; `browser.js` → `openUrl`; tarayıcı bölmesi webview hazır olmadan istenen adresi bekletir (`t.pending`).
+- **Kararlar**:
+  - Sunucu ayrı bir gizli süreç değil, terminal sekmesi: kullanıcı çıktıyı görür, Ctrl-C ile durdurabilir, Claude `logs` ya da `terminal` ile okur. Bedeli: komut kabuğa yazılır (geçmişe girer) ve bitişi işaret satırıyla ve port yoklamasıyla anlaşılır.
+  - Sunucular sohbete değil hesap + klasör + ada bağlı: aynı klasördeki ikinci sohbet çalışanı kullanır; sohbet kapanınca sunucu sürer.
+  - Sekmeye sohbetin seçili ortamı gider (masaüstünde dev sunucuları kayıtlı ortamın değişkenlerini almıyor; panelde "Terminalde aç" ile aynı).
+  - İlk komutta kart: Claude `acceptEdits`'te launch.json'a sormadan yazabildiği için kart olmasa komut çalıştırma iznini atlatırdı.
+  - Kendiliğinden doğrulamanın varsayılanı **kapalı** (token harcar). Emre: "varsayılan olarak kapalı kalsın" (masaüstünde açık).
+  - SDK protokolüne dokunmadı (panelin MCP aracı ve var olan kanca yolu) → ölçüm yapılmadı.
+- **Doğrulama**:
+  - `npm run check` temiz; `preview.js`'in ayrıştırması düz Node'da yorumlu, sondaki virgüllü, hatalı yapılandırmalı bir dosyayla denendi.
+  - e2e'ye "Önizleme" adımı: launch.json olmayan projede düğme gizli; menü (üç yapılandırma, hatalının nedeni); menüden başlatma → sunucu arka plandaki terminal sekmesinde, ortam önekli komut, bölme `http://localhost:<port>/`'ta, sayfa metni `env` ve `PORT`'u gösteriyor, düğme yanık; Claude'un turu (çalışanı kartsız kullanır, ikinciyi kartla başlatır, dolu port taşınır ve bölme yeni adreste açılır, `restart` kartsız, `stop` portu ve sekmeyi kapatır, olmayan ad hata); menüden durdurma; kendiliğinden doğrulama (menüden açma, açık sohbete bir kez, yeni sohbette sistem istemi ve yüklü araçlar, projede `"autoVerify": false`, Ayarlar → Genel'den kapatma).
+  - İlk koşu gerçek bir hatayı yakaladı: yeni açılan tarayıcı bölmesi adresi almıyordu (webview hazır olmadan `src` değişimi yok sayılıyor). Düzeltildi. İkinci koşuda sonraki adım ("Editörde aç") düştü: Ayarlar penceresinin son açılan sekmesi Genel kalıyordu; adım sonunda Octopus sekmesine dönülüyor.
+  - `npm test` üçüncü koşuda yeşil (97 adım). UserPromptSubmit sağlayıcısı bilerek bozulunca adım "açık sohbete doğrulama talimatı gitmedi" ile kırmızıya döndü; geri alınınca son koşu yine yeşil (97 adım).
+  - Ekran görüntüleri `6n-onizleme-menu.png`, `6n2-onizleme.png` görüldü.
+- **Bekleyen**:
+  - Emre: `bash kur.sh` (yeni dosya `preview.js`; panel kapalıyken) ve gerçek bir geliştirme sunucusuyla (`npm run dev`) gerçek hesapla bir tur.
+  - Masaüstündeki sohbet içi sunucu kartı, "Keep cookies", launch.json'u kendiliğinden bulma yok.
+  - Sıradaki iş: madde 5, otomatik kipte reddedilenleri göstermek (`permission_denied`).
+
+## 2026-10-25 · Değişiklikler bölmesinden Claude'a satır yorumu
+
+- **İstek**: Claude Code eksikleri planının 3. maddesi: masaüstündeki diff yorumu gibi, diff'te bir satıra ya da aralığa yorum yazıp Claude'a göndermek (CLI'deki `/diff` → `ask`).
+- **Karar** (Emre): toplu mu, hemen mi sorusuna "ikisi de". Yorumlar birikir, sonraki mesajla gider; kutudaki "Hemen gönder" (⌘Enter) yalnız o yorumu ayrı mesaj olarak yollar, bekleyenler kalır.
+- **Yapılan** (renderer/changes.js; chat.js'te yalnız gönderim ve balon; styles.css):
+  - Diff'te (eklenen, silinen, bağlam satırları) ve dosya görünümünde satırın solunda üzerine gelince "+". Tıklayınca satırın altında kutu açılır. Aralık için basılı tutup sürüklenir ya da kutu açıkken ⇧ ile tıklanır. Kısayollar: Enter ekler, ⌘Enter hemen gönderir, Esc kapatır.
+  - Eklenen yorum satırın altında kart olur ("Düzenle", "Sil"), satırlar altın çizgiyle işaretlenir. Bölme yeniden çizilince kartlar satırın anahtarıyla (tür + eski/yeni numara) yerine konur.
+  - Yazma kutusunun başında "N satır yorumu" çipi. Tıklanınca liste açılır: yere gitme, tek tek ya da hepsini kaldırma.
+  - Gönderim: önce ekler, sonra yorumlar, sonra metin. Metin boşsa yalnız yorumlar gider.
+  - Claude'a giden blok `<satir-yorumu dosya="uygulama.js" satir="2-3">`, ardından çitli kod (diff'te `+`/`-`/boşluk önekli ```` ```diff ````), ardından yorum. Yalnız silinen satırlar seçildiyse `silinen-satir=` ve HEAD'in numaraları. Kod en çok 80 satır.
+  - Balonda blok yerine `dosya:satır` ve yorum gösterilir (geçmişte de).
+  - Ayrıca `submit` geri sarma sürerken yazma kutusunu boşaltmadan durur. Önce kutuyu boşaltıp sonra `sendMessage`'ın denetimine takılıyordu. Kodda bakıldı, denenmedi.
+- **Kararlar**:
+  - Yol sohbetin klasörüne göre göreli, dışındaysa tam yol (`~`'lı değil).
+  - Çit, koddaki en uzun ` dizisinden uzun; böylece kod çiti kapatamaz.
+  - Kod ve yorumdaki `<satir-yorumu` / `</satir-yorumu` `‹` ile bozulur (`fileSafe` ve `eventSafe` gibi).
+  - Yorumlar bellekte ve sekmeye bağlı; sekme kapanınca gider.
+  - Git dışı klasörün düzenleme görünümünde satır numarası olmadığı için yorum yok.
+  - SDK'ya dokunmadığı için ölçüm yapılmadı. Sahte CLI değişmedi: blok dizisini zaten `EKLER` satırına yazıyor.
+- **Doğrulama**:
+  - `npm run check` temiz.
+  - e2e'ye yeni adım "Satır yorumu" eklendi. Adım şunları deniyor: silinen satırdan ⇧ ile aralık (`Satır 2-3`, 3 satır seçili); tek satır yorum ve düzenleme; çip listesi; dosya görünümünden ⌘Enter ile hemen gönderme (yalnız o blok gidiyor, çipte 2 yorum kalıyor); diff'e dönünce kartların yeniden çizilmesi; toplu gönderimde üç bloğun tam metni; kaçış (`</satir-yorumu>` bir kez geçiyor); gönderimden sonra çipin ve kartların kalkması; balondaki yer ve metinler.
+  - `npm test` ilk koşuda yeşil (96 adım).
+  - `commentSafe` bilerek bozulunca test toplu gönderim assert'inde kırmızıya döndü. Geri alınınca yeniden koşuldu, yine yeşil (96 adım).
+  - Ekran görüntüleri: `6l-satir-yorumu.png` (kartlar, çip listesi) ve `6m-satir-yorumu-gitti.png` (balonlar) görüldü.
+- **Bekleyen**:
+  - Emre: `bash kur.sh` (panel kapalıyken) ve gerçek hesapla bir tur. Gerçek Claude bloğu düzeltme olarak ele alıyor mu, diff'teki "+" ve kartlar göze nasıl geliyor?
+  - Hunk geri alma ve yorumu GitHub'a gönderme yok.
+  - Sıradaki iş: madde 4, kendiliğinden doğrulama (`launch.json` önizleme).
+
 ## 2026-10-25 · Agent SDK 0.3.300 → 0.3.310 (CLI 2.1.310)
 
 - **İstek**: Claude Code eksikleri planının 9. maddesi (Emre'nin sırası: 5–8'in ölçümleri güncel CLI'de yapılsın).

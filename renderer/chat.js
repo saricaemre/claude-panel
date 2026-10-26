@@ -367,7 +367,7 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
     kind: 'chat', acctId, cwd, mode, title: '…', exited: false, activity: false, attention: false,
     chatId: null, sessionId: resumeId || null, continueOf, busy: false, models: [], model: '', effort: opts.effort ?? prefs.effort ?? '',
     modelChoice: opts.model ?? prefs.model ?? '', permissionMode: prefs.mode || '', envId: opts.envId ?? envOf(acctId)?.id ?? '',
-    toolCards: new Map(), live: new Map(), attachments: [], slash: [], pendingPerms: new Map(),
+    toolCards: new Map(), live: new Map(), attachments: [], slash: [], pendingPerms: new Map(), denials: new Map(), turnDenials: [],
     group: null, todos: [], started: false, parentId: opts.parentId || null, autoTurns: 0, pendingEvents: [], pr: null,
   };
 
@@ -390,12 +390,15 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
     tab.octoBtn = topBtn('octo-toggle', 'Ahtapot: yanda aç/kapat', () => toggleOctopusInChat(tab), icon('octopus', 16)),
     topBtn('changes-toggle', 'Değişiklikler: yanda aç/kapat (⌘⇧D)', () => toggleChangesInChat(tab),
       icon('code', 16), tab.changesBadge = h('span', { class: 'top-badge', hidden: true })),
+    // Projede .claude/launch.json varsa görünür (renderer/browser.js → refreshPreview)
+    tab.previewBtn = topBtn('preview-toggle', 'Önizleme: launch.json\'daki geliştirme sunucuları', (e) => previewMenu(tab, e.currentTarget), icon('play', 16)),
     topBtn('browser-toggle', 'Tarayıcı: yanda aç/kapat (⌘⇧B)', () => toggleBrowserInChat(tab), icon('globe', 16)),
     topBtn('sim-toggle', 'Simülatör: iOS simülatörünü yanda aç/kapat (⌘⇧S)', () => toggleSimulatorInChat(tab), icon('phone', 16)),
     topBtn('term-open', 'Terminal: bu oturumu terminalde aç', () => openInTerminal(tab), icon('terminal', 16)),
     h('button', { class: 'icon-btn chat-more', title: 'Sohbet menüsü', onclick: (e) => chatMenu(tab, e.currentTarget) }, icon('more', 16)),
     sideBtn);
   tab.octoBtn.hidden = true;
+  tab.previewBtn.hidden = true;
 
   // --- Mesaj listesi ve boş ekran
   const list = h('div', { class: 'chat-list' });
@@ -412,7 +415,7 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   const slashBox = h('div', { class: 'slash-box', hidden: true });
   const fileInput = h('input', { type: 'file', multiple: true, hidden: true,
     onchange: (e) => { addAttachments(tab.attachments, attach, [...e.target.files]); e.target.value = ''; } });
-  const sendBtn = h('button', { class: 'send-btn', title: 'Gönder (Enter)', onclick: () => submit(tab) }, icon('arrowUp', 17));
+  const sendBtn = h('button', { class: 'send-btn', title: 'Gönder (Enter)', onclick: () => submit(tab, true) }, icon('arrowUp', 17));
   const stopBtn = h('button', { class: 'stop-btn', title: 'Durdur (Esc)', hidden: true, onclick: () => interrupt(tab) }, h('span'));
   const modeSel = selectEl('meta-select', 'İzin modu (Shift+Tab)', MODES, (v) => changeMode(tab, v));
   const picker = modelPicker(acctId,
@@ -426,7 +429,11 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
       tab.tasksBar = tasksBar(), // arka plandaki görevler (renderer/activity.js)
       tab.planBar = planBar(),
       tab.composerBox = h('div', { class: 'composer-box' },
-        attach, input,
+        tab.commentsEl = h('div', { class: 'composer-comments', hidden: true }), // satır yorumları (renderer/changes.js)
+        attach,
+        tab.shellChip = shellChip(), // "!" kabuk kipi (renderer/kabuk.js)
+        input,
+        h('span', { class: 'suggest-hint', title: 'Önerilen istemi al' }, 'Tab'), // önerilen istem (renderer/istem.js)
         h('div', { class: 'composer-bar' },
           h('button', { class: 'plus-btn', title: 'Dosya veya fotoğraf ekle', onclick: () => fileInput.click() }, icon('plus', 17)),
           fileInput,
@@ -533,6 +540,7 @@ async function createChatTab(acctId, cwd, mode, resumeId, opts = {}) {
   chatsById.set(res.id, tab);
   tab.browserView?.register(); // sohbet başlamadan açılmış tarayıcı bölmesi
   refreshChanges(tab);
+  refreshPreview(tab);
   setStatus(tab, 'idle', '');
   renderTabs(acctId);
   renderSidebar();
@@ -590,11 +598,23 @@ function scrollDown(tab, force) {
 }
 function append(tab, el) {
   const stick = nearBottom(tab);
-  // İş sürerken görev kartı en altta kalır (renderer/wrapup.js → renderPlanCard)
-  const card = tab.planCard;
-  if (card && card !== el && card.classList.contains('pinned') && card.parentNode === tab.list) tab.list.insertBefore(el, card);
+  const anchor = el.classList?.contains('queued') ? null : tailAnchor(tab, el);
+  if (anchor) tab.list.insertBefore(el, anchor);
   else tab.list.append(el);
   if (stick) scrollDown(tab, true);
+  return el;
+}
+// Listenin kuyruğu: iş sürerken görev kartı en altta kalır (renderer/wrapup.js → renderPlanCard), Claude'un henüz almadığı
+// mesajlar (sırada) ondan da sonra; alınınca alındıkları yere otururlar (settleQueued)
+function tailAnchor(tab, el) {
+  const card = tab.planCard;
+  if (card && card !== el && card.classList.contains('pinned') && card.parentNode === tab.list) return card;
+  return [...tab.list.querySelectorAll(':scope > .msg-user.queued')].find((q) => q !== el) || null;
+}
+// Sıradaki mesajlar hariç son öğe
+function lastSettled(tab) {
+  let el = tab.list.lastElementChild;
+  while (el?.classList.contains('queued')) el = el.previousElementSibling;
   return el;
 }
 function note(tab, text, cls = '') {
@@ -621,6 +641,7 @@ function setStatus(tab, kind, text) {
 }
 function setBusy(tab, busy) {
   tab.busy = busy;
+  if (busy) clearSuggestion(tab); // renderer/istem.js
   if (busy) startActivity(tab); else stopActivity(tab); // renderer/activity.js
   tab.stopBtn.hidden = !busy;
   tab.sendBtn.hidden = busy && !tab.input.value.trim();
@@ -629,23 +650,37 @@ function setBusy(tab, busy) {
 }
 
 // uuid: mesajın Claude Code'daki kimliği (canlıda arayüz verir, geçmişte kayıttan gelir); varsa balonda "Geri sar" düğmesi
-function userBubble(tab, content, queued, uuid) {
+// queued: Claude çalışırken gitti; alınana kadar (command_lifecycle started) "Sırada", "Geri al" ve "Hemen gönder". draft: yazma
+// kutusundaki hâli (metin, ekler, satır yorumları); geri alınınca olduğu gibi döner
+function userBubble(tab, content, queued, uuid, draft) {
   const blocks = Array.isArray(content) ? content : [];
   const texts = typeof content === 'string' ? [content] : blocks.filter((b) => b.type === 'text').map((b) => b.text);
   const files = texts.map(parseFileBlock).filter(Boolean);
-  const text = texts.filter((t) => !parseFileBlock(t)).join('\n');
+  const comments = texts.map(parseCommentBlock).filter(Boolean); // satır yorumları (renderer/changes.js)
+  const text = texts.filter((t) => !parseFileBlock(t) && !parseCommentBlock(t)).join('\n');
   const imgs = blocks.filter((b) => b.type === 'image');
   // Sistem tarafından eklenen içerikleri (komut çıktıları, hatırlatmalar) gizle
-  if (!imgs.length && !files.length && /^\s*<(command-|local-command|system-reminder|bash-)/.test(text)) return null;
+  if (!imgs.length && !files.length && !comments.length && /^\s*<(command-|local-command|system-reminder|bash-)/.test(text)) return null;
   markStarted(tab);
   endGroup(tab);
+  queued = queued && !!uuid; // kimliksiz mesajın alındığı bilinmez (command_lifecycle kimliğe bağlı)
   const el = h('div', { class: 'msg-user' + (queued ? ' queued' : ''), 'data-uuid': uuid || null },
     imgs.length ? h('div', { class: 'user-imgs' }, imgs.map((b) => h('img', { src: `data:${b.source?.media_type};base64,${b.source?.data}` }))) : null,
     files.length ? h('div', { class: 'user-files' }, files.map((f) =>
       h('div', { class: 'attach-file', title: f.path || f.name }, fileChipBody(f.name, f.embedded ? 'İçerik eklendi' : 'Yol verildi')))) : null,
+    comments.length ? h('div', { class: 'user-comments' }, comments.map((c) => h('div', { class: 'uc-item' },
+      h('div', { class: 'uc-loc' }, icon('chat', 12), `${c.file}:${c.lines.replace('-', '–')}${c.old ? ' (silinen)' : ''}`),
+      h('div', { class: 'uc-text' }, c.text)))) : null,
     text ? h('div', { class: 'user-text' }, text) : null,
     uuid ? h('button', { class: 'mu-rewind', title: 'Bu mesaja geri sar (kod, konuşma ya da ikisi)', 'aria-label': 'Bu mesaja geri sar',
-      onclick: (e) => { e.stopPropagation(); openRewind(tab, el); } }, icon('history', 15)) : null);
+      onclick: (e) => { e.stopPropagation(); openRewind(tab, el); } }, icon('history', 15)) : null,
+    queued ? h('div', { class: 'mu-queue' },
+      h('span', { class: 'muq-label' }, 'Sırada'),
+      h('button', { class: 'muq-btn muq-withdraw', title: 'Kuyruktan çek; mesaj yazma kutusuna döner',
+        onclick: (e) => { e.stopPropagation(); withdrawQueued(tab, el); } }, 'Geri al'),
+      h('button', { class: 'muq-btn muq-now', title: 'Claude sonraki adımı beklemeden şimdi okusun (süren komut arka plana alınır, araçsız yanıt kesilir)',
+        onclick: (e) => { e.stopPropagation(); sendQueuedNow(tab, el); } }, 'Hemen gönder')) : null);
+  if (queued) el.__draft = draft || { text };
   if (!tab.titleSet && text) {
     tab.titleSet = true;
     tab.sessionTitle = text.slice(0, 80);
@@ -697,10 +732,11 @@ function currentGroup(tab) {
   const summaryText = h('span', { class: 'grp-text' });
   const spinner = h('span', { class: 'grp-spin' });
   const body = h('div', { class: 'grp-body' });
-  const el = h('details', { class: 'tool-group' }, h('summary', {}, spinner, summaryText, h('span', { class: 'grp-chev' }, '›')), body);
+  const deniedEl = h('span', { class: 'grp-denied', hidden: true });
+  const el = h('details', { class: 'tool-group' }, h('summary', {}, spinner, summaryText, deniedEl, h('span', { class: 'grp-chev' }, '›')), body);
   // Araçların döndürdüğü görseller grup kapalıyken de görünsün diye grubun hemen altına
   const shots = h('div', { class: 'grp-shots' });
-  const group = { el, body, shots, summaryText, spinner, counts: {}, running: new Set(), errors: 0, last: '' };
+  const group = { el, body, shots, summaryText, spinner, deniedEl, counts: {}, running: new Set(), errors: 0, denied: 0, last: '' };
   tab.group = group;
   append(tab, el);
   append(tab, shots);
@@ -725,6 +761,8 @@ function updateGroup(tab, group) {
   group.summaryText.textContent = text.charAt(0).toLocaleUpperCase('tr') + text.slice(1);
   group.spinner.className = 'grp-spin' + (group.running.size ? ' on' : group.errors ? ' err' : '');
   group.el.classList.toggle('running', group.running.size > 0);
+  group.deniedEl.hidden = !group.denied;
+  group.deniedEl.textContent = group.denied ? `${group.denied} engellendi` : '';
 }
 
 function toolCard(tab, block, parentCard) {
@@ -749,7 +787,7 @@ function toolCard(tab, block, parentCard) {
       h('span', { class: 'tool-arg' }, toolSummary(tab, name, input)),
       status),
     body);
-  const card = { el, status, body, sub, name, input, group: null };
+  const card = { el, status, body, sub, name, input, group: null, parent: parentCard || null };
   tab.toolCards.set(id, card);
 
   if (parentCard) {
@@ -766,6 +804,9 @@ function toolCard(tab, block, parentCard) {
     activityForTool(tab, name);
     if (nearBottom(tab)) scrollDown(tab, true);
   }
+  // Alt ajanda ret olayı araç çağrısından önce gelir (ölçüldü): bekleyen ret satır çizilince uygulanır
+  const denied = tab.denials.get(id);
+  if (denied) markDenied(tab, card, denied);
   if (name === 'TodoWrite') updateProgress(tab, input.todos);
   if (FILE_TOOLS.has(name) || name === 'NotebookEdit') recordEdit(tab, name, input);
   if (name === 'mcp__panel__show_widget') showWidget(tab, card, input);
@@ -816,6 +857,82 @@ function finishGroups(tab) {
     if (card.status.classList.contains('running')) card.status.className = 'tool-status done';
     if (card.group) { card.group.running.clear(); updateGroup(tab, card.group); }
   }
+}
+
+// ---------- İzin retleri (system/permission_denied) ----------
+// Claude Code kart açmadan reddettiği çağrıyı bildirir: otomatik kipin sınıflandırıcısı, ret kuralı, kip (gerçek CLI 2.1.310'da
+// ölçüldü, docs/claude-code-eksikleri/olcum/izin-reddi.mjs). Claude bunu araç sonucundan bilir, kullanıcı satırdaki çipten ve
+// tur sonundaki satırdan. Olay "en iyi çaba"dır; kesin kayıt result.permission_denials: olayı gelmeyen ret oradan eklenir.
+const DENY_REASONS = {
+  classifier: 'Otomatik kip', rule: 'İzin kuralı', subcommandResults: 'İzin kuralı', mode: 'İzin kipi',
+  asyncAgent: 'Arka plandaki ajan soramadı', hook: 'Kanca', workingDir: 'Çalışma klasörünün dışında',
+  safetyCheck: 'Güvenlik denetimi', sandboxOverride: 'Kum havuzu', permissionPromptTool: 'İzin aracı',
+};
+function denyReason(d) {
+  const base = DENY_REASONS[d.type] || 'Engellendi';
+  if (d.type !== 'classifier' || !d.reason) return base;
+  // Sınıflandırıcı kuralın adını köşeli parantezle verir ("[Git Destructive]"); yanıtı okunamazsa "could not evaluate"
+  const rule = /^\[([^\]]+)\]/.exec(d.reason)?.[1];
+  if (rule) return `${base}: ${rule}`;
+  return /could not evaluate/i.test(d.reason) ? `${base}: değerlendirilemedi` : base;
+}
+// title için: yalnız kuralın adından fazlasını söyleyen ham gerekçe (İngilizce, Claude Code'un metni)
+const denyTitle = (d) => [denyReason(d), /^\[[^\]]+\]$/.test(d.reason) ? '' : d.reason].filter(Boolean).join('\n');
+function permissionDenied(tab, msg) {
+  const id = msg.tool_use_id;
+  if (!id || tab.denials.has(id)) return;
+  const d = { id, name: msg.tool_name, type: msg.decision_reason_type || '', reason: msg.decision_reason || '', agent: msg.agent_id || null };
+  tab.denials.set(id, d);
+  tab.turnDenials.push(d);
+  const card = tab.toolCards.get(id);
+  if (card) markDenied(tab, card, d);
+}
+function markDenied(tab, card, d) {
+  if (card.denied) return;
+  card.denied = d;
+  card.el.classList.add('denied');
+  card.status.before(h('span', { class: 'tool-denied', title: denyTitle(d) }, 'engellendi'));
+  // Alt ajanın satırı iç içe: sayı en dıştaki satırın grubuna
+  let top = card;
+  while (top.parent) top = top.parent;
+  if (top.group) { top.group.denied++; updateGroup(tab, top.group); }
+}
+function settleDenials(tab, msg) {
+  const list = tab.turnDenials;
+  tab.turnDenials = [];
+  for (const p of msg.permission_denials || []) {
+    if (!p?.tool_use_id || tab.denials.has(p.tool_use_id)) continue;
+    const d = { id: p.tool_use_id, name: p.tool_name, input: p.tool_input, type: '', reason: '' };
+    tab.denials.set(d.id, d);
+    list.push(d);
+    const card = tab.toolCards.get(d.id);
+    if (card) markDenied(tab, card, d);
+  }
+  if (!list.length) return;
+  const n = list.length;
+  const head = list.every((d) => d.type === 'classifier') ? `Otomatik kip ${n} işlemi engelledi` : `${n} işlem engellendi`;
+  // Satır sohbetin sonunda durur: en alttayken açılırsa liste yazma kutusunun altında kalmasın
+  let stick = false;
+  const note = h('details', { class: 'deny-note', ontoggle: () => { if (note.open && stick) scrollDown(tab, true); } },
+    h('summary', { onclick: () => { stick = nearBottom(tab); } }, h('span', { class: 'dn-ic' }, icon('lock', 13)), head),
+    h('div', { class: 'dn-list' }, ...list.map((d) => {
+      const card = tab.toolCards.get(d.id);
+      const name = card?.name || d.name || '';
+      return h('div', { class: 'dn-item', 'data-id': d.id, title: card ? 'Satıra git' : null, onclick: () => revealTool(card) },
+        h('span', { class: 'dn-tool' }, toolLabel(name)),
+        h('span', { class: 'dn-arg' }, toolSummary(tab, name, card?.input || d.input || {})),
+        h('span', { class: 'dn-why', title: denyTitle(d) }, denyReason(d)));
+    })));
+  append(tab, note);
+}
+// Tur sonundaki listeden satıra: satırı (gerekçesi gövdesinde), grubunu ve alt ajandaysa üst satırları açar
+function revealTool(card) {
+  if (!card) return;
+  for (let c = card; c; c = c.parent) { c.el.open = true; if (c.group) c.group.el.open = true; }
+  card.el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  card.el.classList.remove('flash');
+  void card.el.offsetWidth;
+  card.el.classList.add('flash');
 }
 
 // ---------- Yan panel ----------
@@ -912,13 +1029,19 @@ function renderBlocks(tab, msg, fromHistory) {
     if (msg.error && !fromHistory) note(tab, 'Hata: ' + (typeof msg.error === 'string' ? msg.error : JSON.stringify(msg.error)), 'error');
   } else if (msg.type === 'user' || msg.message?.role === 'user') {
     if (typeof content === 'string') {
-      if (!parent && fromHistory) userBubble(tab, content, false, msg.uuid);
+      if (!parent && fromHistory && !shellFromHistory(tab, content)) historyBubble(tab, content, msg.uuid); // kabuk mesajı: renderer/kabuk.js
       return;
     }
     const results = (content || []).filter((b) => b.type === 'tool_result');
     for (const r of results) toolResult(tab, r);
-    if (!results.length && !parent && fromHistory) userBubble(tab, content, false, msg.uuid);
+    if (!results.length && !parent && fromHistory) historyBubble(tab, content, msg.uuid);
   }
+}
+// Geçmişin kullanıcı mesajı: balon, metni ↑ / Ctrl+R geçmişine (renderer/istem.js)
+function historyBubble(tab, content, uuid) {
+  const el = userBubble(tab, content, false, uuid);
+  const text = el?.querySelector?.('.user-text')?.textContent;
+  if (text) rememberPrompt(tab, text);
 }
 
 function renderHistoryMessage(tab, m) {
@@ -938,7 +1061,12 @@ function handleChatMsg(chatId, msg) {
       return handleSystem(tab, msg);
     case 'stream_event':
       return handleStream(tab, msg);
+    case 'command_lifecycle':
+      return handleLifecycle(tab, msg);
     case 'assistant': {
+      // Kullanım sınırı (429): metin ve "Hata" notu yerine sınır kartı (renderer/sinir.js)
+      if (msg.error === 'rate_limit' && !msg.parent_tool_use_id) { limitHit(tab, msg); markActivity(tab); return; }
+      if (blockedCompactText(tab, msg)) return; // engellenen otomatik sıkıştırma sessiz (renderer/compaction.js)
       const id = msg.message?.id;
       const types = new Set((msg.message?.content || []).map((b) => b.type));
       for (const [key, live] of tab.live) {
@@ -959,6 +1087,7 @@ function handleChatMsg(chatId, msg) {
       endGroup(tab);
       setBusy(tab, false);
       settlePlanCard(tab);
+      settleDenials(tab, msg); // tur özetinden önce: kutu en sonda kalır
       settleWrapUp(tab);
       stampLastReply(tab);
       updatePlanBar(tab);
@@ -966,9 +1095,15 @@ function handleChatMsg(chatId, msg) {
       offerRetention(tab); // renderer/compaction.js
       refreshUsageSoon(tab.acctId);
       refreshChanges(tab);
+      refreshPreview(tab); // Claude launch.json yazmış olabilir
       const secs = Math.round((msg.duration_ms || 0) / 1000);
       updateSession(tab, { lastTurn: secs >= 60 ? `${Math.floor(secs / 60)} dk ${secs % 60} sn` : `${secs} sn` });
-      if (msg.is_error || msg.subtype !== 'success') {
+      // Öneri yalnız başarılı turun ardından (CLI API hatasından sonra üretmez): 429 anında bittiği için önceki turun geç gelen
+      // önerisi bu sonuçtan sonra gelebiliyordu (e2e'de görüldü)
+      tab.suggestOk = !msg.is_error && msg.subtype === 'success';
+      const limited = tab.limitTurn; // sınır kartı çizildi: "Durdu" notu yinelemesin
+      tab.limitTurn = false;
+      if ((msg.is_error || msg.subtype !== 'success') && !limited) {
         const reason = msg.result || msg.errors?.join('\n') || msg.subtype;
         if (!/interrupt|error_during_execution/i.test(String(msg.subtype)) || msg.result) note(tab, 'Durdu: ' + reason + loginHint(reason), 'error');
         else note(tab, 'Durduruldu.', 'muted');
@@ -984,12 +1119,10 @@ function handleChatMsg(chatId, msg) {
     case 'auth_status':
       if (msg.error) note(tab, 'Giriş hatası: ' + msg.error + loginHint('login'), 'error');
       return;
-    case 'rate_limit_event': {
-      const info = msg.rate_limit_info || {};
-      refreshUsageSoon(tab.acctId);
-      if (info.status && info.status !== 'allowed') note(tab, 'Kullanım limiti: ' + (info.status === 'allowed_warning' ? 'limite yaklaşıldı' : 'limite ulaşıldı'), 'warn');
-      return;
-    }
+    case 'rate_limit_event':
+      return handleRateLimit(tab, msg); // renderer/sinir.js
+    case 'prompt_suggestion':
+      return handleSuggestion(tab, msg); // renderer/istem.js
     default:
       return;
   }
@@ -1047,6 +1180,9 @@ function handleSystem(tab, msg) {
     case 'informational':
     case 'notification':
       if (msg.content || msg.text) note(tab, msg.content || msg.text, msg.level === 'warning' ? 'warn' : 'muted');
+      return;
+    case 'permission_denied':
+      permissionDenied(tab, msg);
       return;
     case 'commands_changed':
       // Skill açılıp kapanınca ya da yeni skill bulununca Claude Code tam listeyi yollar (SDKCommandsChangedMessage.commands)
@@ -1125,6 +1261,7 @@ function handleChatEnd(chatId, err) {
   resetTasks(tab);
   tab.stopBtn.hidden = true;
   tab.sendBtn.hidden = false;
+  for (const el of tab.list.querySelectorAll(':scope > .msg-user.queued')) returnQueued(tab, el); // Claude almadan süreç kapandı
   finishGroups(tab);
   setStatus(tab, err ? 'error' : 'off', err ? 'Hata ile kapandı' : 'Kapandı');
   markStarted(tab);
@@ -1150,13 +1287,14 @@ function handlePermission(chatId, req) {
   markStarted(tab);
   const reply = (r) => {
     window.panel.chatPermissionReply(chatId, req.rid, r);
-    card.dataset.reply = r.behavior;
+    card.dataset.reply = r.behavior || r.action; // izin kartında allow/deny, MCP formunda accept/decline/cancel
     card.classList.add('answered');
     tab.octoView?.refresh();
   };
 
   let card;
-  if (req.toolName === 'AskUserQuestion') card = questionCard(tab, req, reply);
+  if (req.elicitation) card = elicitationCard(tab, req, reply); // MCP sunucusunun form/adres isteği (renderer/elicitation.js)
+  else if (req.toolName === 'AskUserQuestion') card = questionCard(tab, req, reply);
   else if (req.toolName === 'ExitPlanMode') card = planCard(tab, req, reply);
   else {
     const view = toolInputView(tab, req.toolName, req.input);
@@ -1179,7 +1317,7 @@ function handlePermission(chatId, req) {
   tab.octoView?.refresh();
   append(tab, card);
   scrollDown(tab, true);
-  if (!isVisible(tab) || !document.hasFocus()) flagAttention(tab, 'Claude onayınızı bekliyor');
+  if (!isVisible(tab) || !document.hasFocus()) flagAttention(tab, req.elicitation ? `${req.elicitation.displayName || req.elicitation.serverName} sizden bilgi istiyor` : 'Claude onayınızı bekliyor');
 }
 
 function questionCard(tab, req, reply) {
@@ -1219,13 +1357,14 @@ function planCard(tab, req, reply) {
       h('button', { class: 'ghost-btn', onclick: () => reply({ behavior: 'deny', message: 'Kullanıcı planı onaylamadı; planda kalmaya devam et ve ne değişmesi gerektiğini sor.' }) }, 'Planda kal')));
 }
 
-function handlePermissionDone(chatId, rid) {
+function handlePermissionDone(chatId, rid, why) {
   const tab = chatsById.get(chatId);
   const card = tab?.pendingPerms.get(rid);
   if (!card) return;
   tab.pendingPerms.delete(rid);
+  if (card.classList.contains('elicit')) elicitationClosed(card, why);
   card.classList.add('answered');
-  for (const b of card.querySelectorAll('button, input')) b.disabled = true;
+  for (const b of card.querySelectorAll('button, input, select')) b.disabled = true;
   if (!tab.pendingPerms.size && tab.attention && isVisible(tab)) clearFlags(tab);
   tab.octoView?.refresh();
 }
@@ -1306,20 +1445,30 @@ function wireComposer(tab) {
     if (tab.busy) tab.sendBtn.hidden = !input.value.trim();
   };
   tab.autosize = autosize;
-  input.addEventListener('input', () => { autosize(); updateSlash(tab); });
+  // "/" önerileri yalnız kutu "/…" iken; öbür durumda imlecin önündeki `@…` parçası (renderer/mentions.js)
+  // Ctrl+R araması açıksa kutu geçmişi süzer (renderer/istem.js)
+  const suggest = () => { if (tab.histSearch) return updateHistorySearch(tab); updateSlash(tab); if (tab.slashBox.hidden) updateMention(tab); };
+  input.addEventListener('beforeinput', (e) => shellBeforeInput(tab, e)); // boş kutuya "!": kabuk kipi (renderer/kabuk.js)
+  input.addEventListener('input', () => { promptTyped(tab); autosize(); suggest(); });
+  input.addEventListener('click', () => updateMention(tab));
+  input.addEventListener('keyup', (e) => { if (/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key)) updateMention(tab); });
+  input.addEventListener('blur', () => { if (tab.slashBox.classList.contains('mention')) tab.slashBox.hidden = true; closeHistorySearch(tab); });
   input.addEventListener('keydown', (e) => {
-    if (!tab.slashBox.hidden && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey))) {
-      const items = [...tab.slashBox.children];
+    if (!tab.slashBox.hidden && !e.isComposing && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey))) {
+      const items = [...tab.slashBox.children].filter((x) => x.__pick);
+      // Ctrl+R araması eşleşmesizken de açık kalır: Enter aranan metni göndermesin, yalnız kutuyu kapatsın
+      if (!items.length) { e.preventDefault(); if (e.key === 'Enter' || e.key === 'Tab') closeHistorySearch(tab); return; }
       let i = items.findIndex((x) => x.classList.contains('on'));
       if (e.key === 'ArrowDown') i = (i + 1) % items.length;
       else if (e.key === 'ArrowUp') i = (i - 1 + items.length) % items.length;
-      else { input.value = items[Math.max(i, 0)].dataset.cmd + ' '; tab.slashBox.hidden = true; e.preventDefault(); return; }
+      else { e.preventDefault(); items[Math.max(i, 0)].__pick(); return; }
       items.forEach((x, j) => x.classList.toggle('on', j === i));
       e.preventDefault();
       return;
     }
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(tab); }
-    else if (e.key === 'Escape') { if (!tab.slashBox.hidden) tab.slashBox.hidden = true; else if (tab.busy) interrupt(tab); }
+    if (shellKeys(tab, e) || promptKeys(tab, e)) return; // kabuk kipinden çıkma; geçmiş, Ctrl+R, önerilen istem
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(tab, true); }
+    else if (e.key === 'Escape') { if (!tab.slashBox.hidden) { tab.slashBox.hidden = true; closeHistorySearch(tab); } else if (tab.busy) interrupt(tab); }
     else if (e.key === 'Tab' && e.shiftKey) { e.preventDefault(); cycleMode(tab); }
   });
   input.addEventListener('paste', (e) => {
@@ -1379,15 +1528,19 @@ function updateSlash(tab) {
   const box = tab.slashBox;
   if (!/^\/[^\s]*$/.test(v) || !tab.slash.length) { box.hidden = true; return; }
   const matches = tab.slash.filter((c) => c.toLowerCase().startsWith(v.toLowerCase())).slice(0, 8);
+  box.classList.remove('mention');
   box.innerHTML = '';
+  const pick = (c) => { tab.input.value = c + ' '; box.hidden = true; tab.input.focus(); };
   matches.forEach((c, i) => {
     const info = tab.cmdInfo?.get(c);
-    box.append(h('div', {
+    const el = h('div', {
       class: 'slash-item' + (i === 0 ? ' on' : ''), 'data-cmd': c, title: info?.description || '',
-      onmousedown: (e) => { e.preventDefault(); tab.input.value = c + ' '; box.hidden = true; tab.input.focus(); },
+      onmousedown: (e) => { e.preventDefault(); pick(c); },
     }, h('span', { class: 'slash-name' }, c),
     info?.argumentHint ? h('span', { class: 'slash-hint' }, info.argumentHint) : null,
-    info?.description ? h('span', { class: 'slash-desc' }, info.description) : null));
+    info?.description ? h('span', { class: 'slash-desc' }, info.description) : null);
+    el.__pick = () => pick(c);
+    box.append(el);
   });
   box.hidden = !matches.length;
 }
@@ -1485,21 +1638,33 @@ function parseFileBlock(text) {
   return m && { name: xmlUnattr(m[1]), path: m[2] ? xmlUnattr(m[2]) : '', embedded: m[3].startsWith('\n') };
 }
 
-// Gönderilen içerik: ek yoksa düz metin, varsa önce ekler sonra metin (Claude uygulaması gibi)
-function messageContent(text, atts) {
-  if (!atts.length) return text;
+// Gönderilen içerik: ek yoksa düz metin, varsa önce ekler, sonra satır yorumları (renderer/changes.js), sonra metin (Claude uygulaması gibi)
+function messageContent(text, atts, comments = []) {
+  if (!atts.length && !comments.length) return text;
   return [
     ...atts.map((a) => (a.kind === 'image'
       ? { type: 'image', source: { type: 'base64', media_type: a.mediaType, data: a.data } }
       : { type: 'text', text: fileBlockText(a) })),
+    ...comments,
     ...(text ? [{ type: 'text', text }] : []),
   ];
 }
 
-function submit(tab) {
+// typed: kullanıcı yazma kutusunda Enter'a ya da gönder düğmesine bastı. Kabuk kipi yalnız o zaman komut çalıştırır; öbür yollar
+// (tur özeti düğmesi, yeni sohbet ekranı) kutuya kodla metin koyup buraya gelir, onların metni komut olarak çalışmaz.
+function submit(tab, typed = false) {
   const text = tab.input.value.trim();
-  if ((!text && !tab.attachments.length) || !tab.chatId) return;
+  if (tab.shellMode && typed) {
+    if (!text || !tab.chatId) return;
+    tab.slashBox.hidden = true;
+    return runShell(tab, text); // renderer/kabuk.js
+  }
+  if (tab.shellMode) setShellMode(tab, false);
+  if ((!text && !tab.attachments.length && !tab.lineComments?.length) || !tab.chatId) return;
   if (tab.reborning) return toast('Yeniden doğuş sürüyor; bitince yazabilirsiniz.'); // renderer/dogus.js
+  if (tab.rewinding) return toast('Geri sarma sürüyor; bitince yazabilirsiniz.'); // ekler ve yorumlar kaybolmasın
+  rememberPrompt(tab, text); // ↑ / Ctrl+R (renderer/istem.js)
+  limitUserSent(tab); // sınırda otomatik devam kapanır (renderer/sinir.js)
   if (text === '/clear' || text === '/new') {
     tab.input.value = '';
     const { acctId, cwd } = tab;
@@ -1507,23 +1672,30 @@ function submit(tab) {
     createChatTab(acctId, cwd, 'new');
     return;
   }
-  const content = messageContent(text, tab.attachments.splice(0));
+  const draft = { text, attachments: tab.attachments.slice(), comments: (tab.lineComments || []).slice() }; // sıradaysa geri alınabilir
+  const content = messageContent(text, tab.attachments.splice(0), takeLineComments(tab));
   tab.attach.innerHTML = '';
   tab.input.value = '';
   tab.autosize?.();
   tab.slashBox.hidden = true;
-  sendMessage(tab, content);
+  closeHistorySearch(tab);
+  sendMessage(tab, content, draft);
 }
 
 // Kullanıcının mesajı olarak gider (yazma alanından ya da bir karttaki düğmeden; yazma alanındaki taslak korunur)
-function sendMessage(tab, content) {
+// opts.auto: panelin kendisi gönderiyor (sınırda otomatik devam: renderer/sinir.js)
+function sendMessage(tab, content, draft, opts = {}) {
   if (!tab.chatId) return;
   if (tab.reborning) return toast('Yeniden doğuş sürüyor; bitince yazabilirsiniz.');
   if (tab.rewinding) return toast('Geri sarma sürüyor; bitince yazabilirsiniz.');
-  tab.autoTurns = 0; // kullanıcı yazdı: yan oturum ve PR bildirimleri yeniden kendiliğinden iletilebilir
+  if (!opts.auto) tab.autoTurns = 0; // kullanıcı yazdı: yan oturum ve PR bildirimleri yeniden kendiliğinden iletilebilir
+  tab.suggestOk = false; // önceki turun önerisi geç gelirse atılır (renderer/istem.js)
+  if (typeof content === 'string' && /^\/compact\b/.test(content)) tab.compactRequested = true; // "özetleniyor" notu (renderer/compaction.js)
+  clearSuggestion(tab);
   closeWrapBoxes(tab);
   const uuid = crypto.randomUUID(); // Claude Code kayda ve kod checkpoint'ine bu kimlikle yazar (geri sarma)
-  userBubble(tab, content, tab.busy, uuid);
+  // Claude çalışıyor ya da önceki sıradaki mesaj henüz alınmadı: bu da sıraya girer
+  userBubble(tab, content, tab.busy || !!tab.list.querySelector(':scope > .msg-user.queued'), uuid, draft);
   window.panel.chatSend(tab.chatId, content, uuid);
   tab.stick = true;
   scrollDown(tab, true);
@@ -1533,7 +1705,89 @@ function sendMessage(tab, content) {
 async function interrupt(tab) {
   if (!tab.chatId || !tab.busy) return;
   setStatus(tab, 'busy', 'Durduruluyor');
-  await window.panel.chatInterrupt(tab.chatId);
+  // "Durdur" kuyruktakileri de çeker (chat-main.js → chat:interrupt); cancelled olayı önce gelmediyse burada geri konur
+  const r = await window.panel.chatInterrupt(tab.chatId);
+  const ids = (r?.cancelled || []).filter((u) => tab.queueReturned?.has(u) || queuedBubble(tab, u));
+  for (const u of ids) { const el = queuedBubble(tab, u); if (el) returnQueued(tab, el); }
+  if (ids.length) toast(ids.length === 1 ? 'Sıradaki mesaj yazma kutusuna geri kondu.' : `Sıradaki ${ids.length} mesaj yazma kutusuna geri kondu.`);
+}
+
+// ---------- Kuyruk: Claude çalışırken giden mesajlar (chat-main.js → command_lifecycle, chat:withdraw, chat:sendNow) ----------
+// Claude Code mesajı sonraki araç adımında araya alır (araçsız turda tur bitince, kendi turunda). Alınana kadar balon listenin
+// sonunda "Sırada" durur (append → tailAnchor); alınınca o anki yerine oturur. "Geri al" yazma kutusuna döndürür, "Hemen gönder"
+// Claude'un şimdi okumasını ister (priority 'now'; yeni kimlikle, çünkü iptal edilen kimlik yeniden kullanılamıyor).
+function queuedBubble(tab, uuid) {
+  return [...tab.list.querySelectorAll(':scope > .msg-user.queued')].find((el) => el.dataset.uuid === uuid) || null;
+}
+function handleLifecycle(tab, msg) {
+  const u = msg.command_uuid;
+  if (typeof u !== 'string') return;
+  (tab.cmdStates ||= new Map()).set(u, msg.state);
+  if (tab.cmdStates.size > 300) tab.cmdStates.delete(tab.cmdStates.keys().next().value);
+  const el = queuedBubble(tab, u);
+  if (msg.state === 'started') {
+    if (el) settleQueued(tab, el);
+    if (!tab.busy) setBusy(tab, true); // tur bitmişken alındı: kendi turu başladı
+  } else if (el && !el.__pending && ['cancelled', 'discarded', 'refused'].includes(msg.state)) returnQueued(tab, el); // gitmeyecek: metin kaybolmasın
+}
+// Alındı: sıradaki balon, sıradakilerin ve sabit görev kartının önüne (Claude'un o anki yerine) oturur; sonraki araçlar altında yeni grupta
+function settleQueued(tab, el) {
+  if (!el.classList.contains('queued')) return;
+  el.classList.remove('queued', 'sending');
+  el.querySelector('.mu-queue')?.remove();
+  delete el.__draft;
+  endGroup(tab);
+  const stick = nearBottom(tab);
+  const anchor = tailAnchor(tab, el);
+  if (anchor) tab.list.insertBefore(el, anchor); else tab.list.append(el);
+  if (stick) scrollDown(tab, true);
+}
+// Gitmedi (geri alındı, Durdur çekti): balon kalkar, yazma kutusuna olduğu gibi döner (yazılmakta olanın arkasına)
+function returnQueued(tab, el) {
+  const d = el.__draft || { text: el.querySelector('.user-text')?.textContent || '' };
+  (tab.queueReturned ||= new Set()).add(el.dataset.uuid);
+  el.remove();
+  if (d.text) {
+    tab.input.value = [tab.input.value.trim(), d.text].filter(Boolean).join('\n\n');
+    tab.autosize?.();
+    tab.sendBtn.hidden = tab.busy && !tab.input.value.trim();
+  }
+  if (d.attachments?.length) { tab.attachments.push(...d.attachments); renderAttachments(tab.attachments, tab.attach); }
+  if (d.comments?.length) { tab.lineComments = [...(tab.lineComments || []), ...d.comments]; syncLineComments(tab); }
+  tab.input.focus();
+}
+async function withdrawQueued(tab, el) {
+  if (el.__pending || !tab.chatId) return;
+  el.__pending = true;
+  const r = await window.panel.chatWithdraw(tab.chatId, el.dataset.uuid);
+  el.__pending = false;
+  if (r?.ok) return returnQueued(tab, el);
+  if (r?.taken) {
+    if (tab.cmdStates?.get(el.dataset.uuid) === 'started') settleQueued(tab, el);
+    return toast('Claude mesajı az önce aldı; geri alınamadı.');
+  }
+  toast('Geri alınamadı: ' + (r?.error || 'bilinmeyen hata'));
+}
+async function sendQueuedNow(tab, el) {
+  if (el.__pending || !tab.chatId) return;
+  el.__pending = true;
+  el.classList.add('sending');
+  el.querySelector('.muq-label').textContent = 'Gönderiliyor';
+  const r = await window.panel.chatSendNow(tab.chatId, el.dataset.uuid);
+  el.__pending = false;
+  if (r?.ok) {
+    el.dataset.uuid = r.uuid; // alındığını yeni kimlik söyler
+    if (tab.cmdStates?.get(r.uuid) === 'started') settleQueued(tab, el);
+    return;
+  }
+  el.classList.remove('sending');
+  const label = el.querySelector('.muq-label');
+  if (label) label.textContent = 'Sırada';
+  if (r?.taken) {
+    if (tab.cmdStates?.get(el.dataset.uuid) === 'started') settleQueued(tab, el);
+    return toast('Claude mesajı az önce aldı.');
+  }
+  toast('Gönderilemedi: ' + (r?.error || 'bilinmeyen hata'));
 }
 
 // ---------- Geri sarma (Claude Code'un /rewind'i; ana süreç: chat-main.js → chat:rewindPreview / chat:rewind) ----------

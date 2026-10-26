@@ -61,6 +61,7 @@ function browserView(tab) {
     };
     wv.addEventListener('dom-ready', () => {
       if (!t.wcId) { t.wcId = wv.getWebContentsId(); if (t === cur) view.register(); }
+      if (t.pending) { const u = t.pending; t.pending = null; wv.loadURL(u).catch(() => {}); } // hazır olmadan istenen adres (go)
       refresh();
     });
     for (const ev of ['did-navigate', 'did-navigate-in-page', 'did-start-loading', 'did-stop-loading', 'did-fail-load', 'page-title-updated']) {
@@ -100,7 +101,8 @@ function browserView(tab) {
       const url = browserAddress(raw);
       if (!url) return toast('Geçersiz adres. Yalnız http ve https adresleri açılır.');
       userNav(url);
-      cur.wv.loadURL(url).catch(() => {});
+      // dom-ready'den önce loadURL hata verir, src değişimi de yok sayılır (bölme yeni açıldıysa: önizleme); adres ilk dom-ready'de yüklenir
+      if (cur.wcId) cur.wv.loadURL(url).catch(() => {}); else cur.pending = url;
       cur.wv.focus();
     },
     newTab() { view.select(makeTab()); },
@@ -216,3 +218,80 @@ function toggleBrowserInChat(tab) {
 window.panel.onBrowserOpen((chatId) => openBrowserInChat(chatsById.get(chatId), { focus: false }));
 window.panel.onBrowserViewport((chatId, size, wcId) => chatsById.get(chatId)?.browserView?.setViewport(size, wcId));
 window.panel.onBrowserDownload((_chatId, name) => toast(`İndirme engellendi: ${name || 'dosya'}`));
+
+// ---------- Önizleme (preview.js): .claude/launch.json'daki geliştirme sunucuları ----------
+const PREVIEW_STATUS = { starting: 'Başlatılıyor…', running: 'Çalışıyor', stopped: 'Kapalı', failed: 'Başlamadı', external: 'Dış adres' };
+
+// Üst çubuktaki düğme yalnız launch.json varken görünür; çalışan sunucu varken yanar, başlarken nabız atar
+async function refreshPreview(tab) {
+  if (!tab?.chatId || !tab.previewBtn) return null;
+  const r = await window.panel.previewList(tab.chatId);
+  const list = r.ok && r.exists ? r : null;
+  tab.preview = list;
+  tab.previewBtn.hidden = !list;
+  const st = list ? list.configs.map((c) => c.status) : [];
+  tab.previewBtn.classList.toggle('on', st.includes('running') || st.includes('external'));
+  tab.previewBtn.classList.toggle('starting', st.includes('starting'));
+  return list;
+}
+
+async function previewMenu(tab, anchor) {
+  const r = await refreshPreview(tab);
+  if (!r) return toast('Bu projede .claude/launch.json yok.');
+  const edit = () => window.panel.fileOpen(r.file);
+  const items = [{ header: 'Önizleme · launch.json' }];
+  if (r.error) items.push({ label: 'launch.json okunamadı', desc: r.error, onclick: edit });
+  for (const c of r.configs) {
+    if (c.error) { items.push({ label: c.name, desc: 'Hatalı: ' + c.error, onclick: edit }); continue; }
+    const live = c.status === 'running' || c.status === 'external';
+    const where = (c.url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+    items.push({ label: c.name, icon: live ? 'globe' : 'play', desc: `${PREVIEW_STATUS[c.status] || c.status} · ${where}${c.serverError ? ` · ${c.serverError}` : ''}`,
+      onclick: () => (live ? previewOpen(tab, c.url) : c.status === 'starting' ? toast(`${c.name} başlatılıyor…`) : previewStart(tab, c.name)) });
+    if (!c.attach && (c.status === 'running' || c.status === 'starting')) items.push({ label: `${c.name}: durdur`, icon: 'power', onclick: () => previewStop(tab, c.name) });
+    if (c.tab != null) items.push({ label: `${c.name}: terminal çıktısı`, icon: 'terminal', onclick: () => {
+      const term = tabsById.get(c.tab);
+      if (term) activateTab(tab.acctId, term); else toast('Terminal sekmesi kapanmış.');
+    } });
+  }
+  items.push('-');
+  const off = r.projectAutoVerify === false;
+  items.push({ label: 'Kendiliğinden doğrula', checked: r.autoVerify && !off,
+    desc: off ? 'Bu projede kapalı (launch.json → "autoVerify": false)' : 'Claude arayüzü düzenleyince sayfaya bakar; token harcar',
+    onclick: () => setAutoVerify(!r.autoVerify) });
+  items.push({ label: 'launch.json\'u düzenle', icon: 'pencil', onclick: edit });
+  openMenu(anchor, items, 'preview-menu');
+}
+
+// Kullanıcının başlatması: sunucu hazır olunca tarayıcı bölmesi o adreste açılır
+async function previewStart(tab, name) {
+  if (!tab.chatId) return toast('Sohbet başlayınca kullanılabilir.');
+  toast(`Önizleme başlatılıyor: ${name}`);
+  const r = await window.panel.previewStart(tab.chatId, name);
+  if (!r.ok) return toast('Önizleme başlamadı: ' + r.error, 8000);
+  if (r.moved) toast(`${r.moved} portu kullanımda; ${name} ${r.port} portunda açıldı.`, 5000);
+  if (r.external && !(await dialogModal({ title: 'Dış adres', body: `launch.json önizlemeyi ${r.url} adresinde açmak istiyor. Açılsın mı?`, okLabel: 'Aç' }))) return;
+  previewOpen(tab, r.url);
+}
+
+function previewOpen(tab, url) {
+  openBrowserInChat(tab, { focus: false });
+  tab.browserView.go(url);
+}
+
+async function previewStop(tab, name) {
+  const r = await window.panel.previewStop(tab.chatId, name);
+  if (!r.ok) toast('Durdurulamadı: ' + r.error);
+}
+
+// Panel geneli ayar (config.json → autoVerify, Ayarlar → Genel'de de). Açık sohbetlere sonraki mesajda bir kez söylenir (preview.js)
+async function setAutoVerify(on) {
+  state.cfg = await window.panel.saveConfig({ autoVerify: on });
+  const box = document.getElementById('autoVerify');
+  if (box) box.checked = on;
+  toast(on ? 'Kendiliğinden doğrulama açık: launch.json\'u olan projelerde Claude sonraki mesajdan itibaren düzenlemeden sonra sayfaya bakar.'
+    : 'Kendiliğinden doğrulama kapalı.', 5000);
+}
+
+window.panel.onPreviewStatus((s) => {
+  for (const t of chatsById.values()) if (t.acctId === s.accountId) refreshPreview(t);
+});

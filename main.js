@@ -9,6 +9,7 @@ const artifacts = require('./artifacts');
 const simulator = require('./simulator');
 const browser = require('./browser');
 const terminals = require('./terminals');
+const preview = require('./preview');
 const changes = require('./changes');
 const sessions = require('./sessions');
 const environments = require('./environments');
@@ -180,7 +181,7 @@ function createPty({ accountId, cwd, mode, resumeId, envId, cols, rows }) {
   terms.set(id, { proc, accountId });
 
   proc.onData((data) => {
-    terminals.noteData(id);
+    terminals.noteData(id, data);
     if (win && !win.isDestroyed()) win.webContents.send('pty:data', id, data);
   });
   proc.onExit(({ exitCode }) => {
@@ -223,6 +224,8 @@ ipcMain.handle('config:save', (_e, patch) => {
   if (patch.chatPrefs) cfg.chatPrefs = { ...(cfg.chatPrefs || {}), ...patch.chatPrefs };
   if (Array.isArray(patch.environments)) cfg.environments = environments.sanitize(patch.environments);
   if (typeof patch.keepAwake === 'boolean') cfg.keepAwake = patch.keepAwake;
+  if (typeof patch.autoVerify === 'boolean') cfg.autoVerify = patch.autoVerify; // önizlemeyle kendiliğinden doğrulama (preview.js)
+  if (typeof patch.promptSuggestions === 'boolean') cfg.promptSuggestions = patch.promptSuggestions; // önerilen istem (chat-main.js)
   if (typeof patch.sidebarHidden === 'boolean') cfg.sidebarHidden = patch.sidebarHidden;
   if (typeof patch.sidePanelOpen === 'boolean') cfg.sidePanelOpen = patch.sidePanelOpen; // sohbetin sağ yan paneli (yoksa kapalı)
   if (THEMES.includes(patch.theme)) cfg.theme = patch.theme;
@@ -480,10 +483,13 @@ app.whenReady().then(() => {
     getKeepAwake: () => loadConfig().keepAwake !== false,
     getAutoCompact: () => (loadConfig().autoCompact === 'allow' ? 'allow' : 'ask'),
     getAutoAllow: () => cleanMcpNames(loadConfig().autoAllowMcp),
+    getPromptSuggestions: () => loadConfig().promptSuggestions === true, // önerilen istem (varsayılan kapalı; yeni sohbetlerde geçerli)
   });
   simulator.setup({ getWindow: () => win, loginEnv: chat.loginEnv });
   browser.setup({ getWindow: () => win });
   terminals.setup({ getWindow: () => win });
+  // Önizleme (launch.json); kendiliğinden doğrulama config.json → autoVerify (varsayılan kapalı)
+  preview.setup({ getWindow: () => win, getAutoVerify: () => loadConfig().autoVerify === true });
   changes.setup({ getWindow: () => win });
   sessions.setup({ getWindow: () => win });
   prwatch.setup({ getWindow: () => win });

@@ -1,7 +1,7 @@
 // Değişiklikler bölmesi: sohbetin klasöründeki çalışma ağacı değişiklikleri (git) ve dosya görünümü.
 // Claude'un `show` aracı bölmeyi açar: değişiklik listesi ya da bir dosyanın belirli satırları.
 const { ipcMain } = require('electron');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -84,6 +84,72 @@ async function diff(root, file) {
   return out.length > MAX_DIFF ? { diff: out.slice(0, MAX_DIFF), truncated: true } : { diff: out };
 }
 
+// `@dosya` önerileri için klasördeki dosyalar (yazma kutusu, renderer/mentions.js). Yollar klasöre göre:
+// Claude Code `@yol`'u sohbetin klasörüne göre açar. Git deposunda izlenen + yok sayılmayan izlenmeyenler (silinenler hariç),
+// git dışında gizli klasörleri ve node_modules'u atlayan sınırlı bir tarama. Klasörler dosyalardan çıkarılır.
+const MENTION_MAX = 20000;
+const MENTION_TTL = 30 * 1000;
+const mentionCache = new Map(); // klasör → { at, promise }
+
+// Git dışı klasör: tarama ayrı süreçte (scripts/files.js; bulut klasörlerinde readdir takılabiliyor), en çok 2 sn ya da MENTION_MAX dosya
+function walk(cwd) {
+  return new Promise((resolve) => {
+    const p = spawn(process.execPath, [path.join(__dirname, 'scripts', 'files.js'), cwd],
+      { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'ignore'] });
+    let buf = '';
+    let files = [];
+    let done = false;
+    const finish = (truncated) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { p.kill('SIGKILL'); } catch {}
+      resolve({ files: files.slice(0, MENTION_MAX), truncated });
+    };
+    const timer = setTimeout(() => finish(true), 2000);
+    p.stdout.setEncoding('utf8');
+    p.stdout.on('data', (d) => {
+      buf += d;
+      const end = buf.endsWith('\0\0');
+      const parts = buf.split('\0');
+      buf = end ? '' : parts.pop();
+      files.push(...parts.filter(Boolean));
+      if (files.length >= MENTION_MAX) finish(true);
+      else if (end) finish(false);
+    });
+    p.on('error', () => finish(true));
+    p.on('close', () => finish(false));
+  });
+}
+
+async function listMentionable(cwd) {
+  if (!cwd || !fs.statSync(cwd).isDirectory()) throw new Error('Klasör yok: ' + cwd);
+  const inRepo = (await git(cwd, ['rev-parse', '--is-inside-work-tree'])).out.trim() === 'true';
+  let files, truncated = false;
+  if (inRepo) {
+    const [all, gone] = await Promise.all([
+      git(cwd, ['ls-files', '-z', '--cached', '--others', '--exclude-standard']),
+      git(cwd, ['ls-files', '-z', '--deleted']),
+    ]);
+    const deleted = new Set(gone.out.split('\0'));
+    files = [...new Set(all.out.split('\0'))].filter((f) => f && !deleted.has(f));
+    if (files.length > MENTION_MAX) { files.length = MENTION_MAX; truncated = true; }
+  } else ({ files, truncated } = await walk(cwd));
+  const dirs = new Set();
+  for (const f of files) for (let i = f.indexOf('/'); i > 0; i = f.indexOf('/', i + 1)) dirs.add(f.slice(0, i + 1));
+  return { git: inRepo, files, dirs: [...dirs], truncated };
+}
+
+function mentionable(cwd) {
+  const hit = mentionCache.get(cwd);
+  if (hit && Date.now() - hit.at < MENTION_TTL) return hit.promise;
+  const promise = listMentionable(cwd);
+  mentionCache.set(cwd, { at: Date.now(), promise });
+  promise.catch(() => mentionCache.delete(cwd));
+  if (mentionCache.size > 20) mentionCache.delete(mentionCache.keys().next().value);
+  return promise;
+}
+
 // Claude'un aracı: bölmeyi açar. İzin sormaz (yalnız kullanıcıya gösterir, Claude'a içerik dönmez).
 function createTool(sdk, z, { chatId, cwd }) {
   return sdk.tool(
@@ -128,7 +194,8 @@ function setup({ getWindow }) {
   ipcMain.handle('changes:list', wrap((cwd) => list(cwd)));
   ipcMain.handle('changes:diff', wrap((root, file) => diff(root, file)));
   ipcMain.handle('file:read', wrap((file) => ({ content: readText(file) })));
+  ipcMain.handle('files:mentionable', wrap((cwd) => mentionable(cwd)));
   // Editörde aç / Finder'da göster: opener.js
 }
 
-module.exports = { setup, createTool, list, diff };
+module.exports = { setup, createTool, list, diff, mentionable };

@@ -18,7 +18,6 @@ async function offerRebirth(tab) {
   if (open?.isConnected && !open.classList.contains('answered') && !open.classList.contains('running')) { open.scrollIntoView({ block: 'center' }); return; }
   const r = await window.panel.rebirthPlan(tab.chatId);
   if (!r?.ok) return toast('Yeniden doğulamıyor: ' + (r?.error || 'bilinmeyen hata'));
-  retireCompactCards(tab); // renderer/compaction.js
   markStarted(tab);
   endGroup(tab);
   const ctx = r.context != null ? `~${fmtTokens(r.context)} token` : 'ölçülemedi';

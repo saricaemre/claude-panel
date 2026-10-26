@@ -115,7 +115,7 @@ function renderPlanCard(tab) {
   // İş sürerken kart en altta durur; değilse (yeni bir tur) en alta taşınır
   if (!finished || !card.isConnected) {
     card.classList.add('pinned');
-    if (tab.list.lastElementChild !== card) append(tab, card);
+    if (lastSettled(tab) !== card) append(tab, card); // sıradaki mesajlar kartın altında kalır (renderer/chat.js → tailAnchor)
   }
 }
 

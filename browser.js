@@ -373,6 +373,14 @@ async function goTo(page, url) {
   return `${wc.getTitle() || '(başlıksız)'} — ${wc.getURL()}`;
 }
 
+// Önizleme (preview.js): Claude'un başlattığı sunucunun adresi bölmede açılır; gidiş Claude'un navigate'iyle aynı sayılır
+async function openUrl(chatId, url, onOpen) {
+  const page = await ensurePage(chatId, onOpen);
+  page.acting++;
+  page.tainted = true;
+  try { return await goTo(page, url); } finally { page.acting--; }
+}
+
 function createTool(sdk, z, { chatId, onOpen }) {
   return sdk.tool(
     'browser',
@@ -651,4 +659,4 @@ function setup({ getWindow }) {
   });
 }
 
-module.exports = { setup, createTool, permission, allowOrigin, forget, configureContents, isBrowserSession, normalizeUrl, ACTIONS };
+module.exports = { setup, createTool, openUrl, permission, allowOrigin, forget, configureContents, isBrowserSession, normalizeUrl, ACTIONS };

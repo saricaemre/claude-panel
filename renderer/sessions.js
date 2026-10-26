@@ -88,6 +88,8 @@ const SESSION_FOOTER = 'Bu, başlattığın yan oturumdan otomatik bir tur sonu 
 // Sıradaki bildirimler (yan oturum ve PR izleme: renderer/prwatch.js) tek mesajda iletilir: { text, footer, card }
 function deliverSessionEvents(tab) {
   if (!tab?.chatId || tab.busy || tab.reborning || !tab.pendingEvents?.length) return; // yeniden doğuş sürerken bekler (renderer/dogus.js)
+  if (tab.list.querySelector(':scope > .msg-user.queued')) return; // kullanıcının sıradaki mesajı önce gider (kendi turunda; sonunda yeniden denenir)
+  if (tab.limitAuto) return; // kullanım sınırı: sıfırlanınca otomatik devamla birlikte (renderer/sinir.js → limitDisarm)
   if (tab.autoTurns >= SESSION_AUTO_MAX) {
     for (const { card } of tab.pendingEvents) card.__status.textContent = 'bekliyor: siz yazınca iletilecek';
     return;

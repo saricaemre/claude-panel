@@ -18,13 +18,24 @@ Claude Code'u bu Mac'te, Claude masaüstü uygulamasına benzeyen bir sohbet pen
 
 ## Kurulum
 
-**Kaynaktan.** Proje klasöründe bir kez çalıştırın:
+**GitHub'dan.** Terminal'de bir kez:
 
 ```bash
-bash kur.sh
+xcode-select --install     # git yoksa (macOS sorar; varsa "already installed" der)
+brew install node          # Node.js yoksa ya da 22.12'den eskiyse (node -v)
+git clone https://github.com/saricaemre/claude-panel.git ~/"Claude Panel"
+bash ~/"Claude Panel"/kur.sh
 ```
 
-Komut paketleri kurar, uygulamayı oluşturur ve `~/Applications/Claude Panel.app` olarak koyar. Spotlight'tan açıp Dock'a sabitleyebilirsiniz. Güncellemek için aynı komutu yeniden çalıştırın. Çalıştırmadan önce paneli kapatın; açık Claude oturumları sonlanır.
+`kur.sh` paketleri kurar, uygulamayı oluşturur, `~/Applications/Claude Panel.app` olarak koyar ve açar (ilk seferde birkaç dakika). Spotlight'tan (⌘ Boşluk → "Claude Panel") açıp Dock'a sabitleyebilirsiniz. Uygulama sizin makinenizde derlendiği için macOS'un "imzasız uygulama" uyarısı çıkmaz. Homebrew yoksa Node'u https://nodejs.org adresinden kurun.
+
+**Güncellemek.** Paneli kapatın (açık Claude oturumları sonlanır), sonra:
+
+```bash
+cd ~/"Claude Panel" && git pull && bash kur.sh
+```
+
+Panelin ayarları, ahtapotları ve Claude Code'un oturumları güncellemede silinmez (uygulamanın dışında dururlar, aşağıda "Veri nerede durur").
 
 **Başka bir Mac'e vermek için** `bash kur.sh --dmg` çalıştırın: `dist/Claude-Panel-<sürüm>-arm64.dmg` oluşur. Uygulama Apple sertifikasıyla imzalı değil. İlk açılışta macOS engeller. Sistem Ayarları → Gizlilik ve Güvenlik → "Yine de Aç" deyin. DMG'nin içindeki "Önce oku.txt" adımları sayar.
 

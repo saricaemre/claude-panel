@@ -8,6 +8,7 @@ const fs = require('fs');
 const simulator = require('./simulator');
 const browser = require('./browser');
 const terminals = require('./terminals');
+const preview = require('./preview');
 const changes = require('./changes');
 const sessions = require('./sessions');
 const worktrees = require('./worktrees');
@@ -24,6 +25,7 @@ const danis = require('./danis');
 const sinav = require('./sinav');
 const dogus = require('./dogus');
 const skills = require('./skills');
+const kabuk = require('./kabuk');
 
 let sdkPromise;
 let helper = null; // scripts/sessions.mjs çalıştırıcısı (setup'ta); alma.js geçmiş oturumları bununla okur
@@ -146,10 +148,42 @@ function pushUser(id, c, content, uuid) {
     // Claude çalışırken giden mesaj turun ortasında araya girer, kendi kaydı ve checkpoint'i olmaz (at: false).
     // epoch: o ana kadarki sıkıştırma sayısı; sonradan sıkıştırılan mesaja konuşma geri sarılamaz
     c.forks.set(uuid, { at: busy.has(id) ? false : c.lastChain, epoch: c.epoch });
+    c.queued.set(uuid, msg); // Claude Code alana kadar (command_lifecycle started): geri alma ve hemen gönderme bundan
   }
   sessions.noteBusy(id);
   setBusy(id, true);
   c.queue.push(msg);
+}
+
+// Kabuk kipinin çıktısı (kabuk.js): shouldQuery: false ile Claude Code'un kaydına eklenir, tur açmaz ve API'ye gitmez; sonraki mesajla
+// birlikte okunur (2026-10-26'da gerçek CLI 2.1.310'da ölçüldü: olcum/kolayliklar.mjs kabuk). UserPromptSubmit kancası çağrılmaz (defter
+// satırı eklenmez), kod checkpoint'i yok (geri sarılamaz). Claude çalışırken gönderilirse kuyruktaki mesaj gibi sonraki araç adımında araya girer.
+function pushShell(c, text) {
+  const uuid = require('crypto').randomUUID();
+  c.shells.add(uuid);
+  c.queue.push({ type: 'user', uuid, message: { role: 'user', content: text }, parent_tool_use_id: null, shouldQuery: false, origin: { kind: 'human' } });
+}
+// Boştayken gelen kabuk mesajını Claude Code kendi "turunda" işler: session_state_changed running, lifecycle queued → started, init, boş
+// result, completed, idle (ölçüldü). Panel bunu tur saymaz: meşgul olmaz, tur sonu işleri (yan oturum bildirimi, sınav, ölçüm, tur özeti)
+// çalışmaz, arayüze gitmez. shellTurn: 'run' (sürüyor), 'after' (result geldi, idle bekleniyor); gerçek bir mesajın started'ı onu bitirir.
+function shellSwallows(c, msg) {
+  if (!c.shells.size && !c.shellTurn) return false;
+  const u = msg.type === 'command_lifecycle' ? msg.command_uuid : null;
+  if (u && c.shells.has(u)) {
+    if (msg.state === 'started' && !c.inTurn) c.shellTurn = 'run'; // c.inTurn: tur sürerken araya girdi (kendi turu yok)
+    if (msg.state !== 'queued' && msg.state !== 'started') c.shells.delete(u);
+    return true;
+  }
+  if (u && msg.state === 'started') { c.shellTurn = false; return false; }
+  if (msg.type === 'system' && msg.subtype === 'session_state_changed') {
+    if (msg.state === 'running' && !c.inTurn && !busy.has(c.id) && c.shells.size) { c.shellTurn = 'run'; return true; }
+    if (msg.state === 'idle' && c.shellTurn) { c.shellTurn = false; return true; }
+    return false;
+  }
+  if (c.shellTurn !== 'run') return false;
+  if (msg.type === 'system' && msg.subtype === 'init') return true;
+  if (msg.type === 'result') { c.shellTurn = 'after'; return true; }
+  return false;
 }
 
 // ---------- Sohbetler ----------
@@ -172,7 +206,7 @@ function updateAwake() {
 const setBusy = (id, on) => { on ? busy.add(id) : busy.delete(id); updateAwake(); };
 let nextReqId = 1;
 
-function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, getKeepAwake, getAutoCompact, getAutoAllow }) {
+function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, getKeepAwake, getAutoCompact, getAutoAllow, getPromptSuggestions }) {
   if (getAutoAllow) getAutoAllowMcp = getAutoAllow;
   send = (...args) => {
     const w = getWindow();
@@ -273,6 +307,22 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
           resolve({ behavior: 'deny', message: 'İptal edildi' });
         });
       });
+      // MCP elicitation (sunucu kullanıcıdan form ya da adres ister): aynı kart yolu, yanıt ElicitResult. Sinyal sunucunun zaman aşımında
+      // ve "Durdur"da düşer (2026-10-26'da gerçek CLI 2.1.310'da ölçüldü: docs/claude-code-eksikleri/olcum/elicitation.mjs)
+      const openElicitation = (request, signal) => new Promise((resolve) => {
+        const rid = nextReqId++;
+        const el = elicitationRequest(request);
+        pending.set(rid, { resolve, elicit: el });
+        sessions.noteWaiting(id, true, (el.mode === 'url' ? 'Adres: ' : 'Form: ') + el.serverName + ' · ' + el.message.slice(0, 120));
+        send('chat:permission', id, { rid, toolName: 'mcp__' + el.serverName, elicitation: el });
+        signal?.addEventListener('abort', () => {
+          if (!pending.has(rid)) return;
+          pending.delete(rid);
+          if (!pending.size) sessions.noteWaiting(id, false);
+          send('chat:permissionDone', id, rid, 'cancelled');
+          resolve({ action: 'cancel' });
+        });
+      });
       // Ahtapotun kolu (başın açtığı yan oturum): sistem istemine rapor biçimi (octopus.js → ARM_PROMPT) gider, wrap_up verilmez:
       // kolun okuru baştır, kutuyu (ve içindeki soruyu) baş görmez; rapor son mesajdır (sessions.js → turnEnded)
       // "Devam et" ile açılan kol da koldur (octopus.findArm): baş yeniden açılınca onu görür, bitirir, kapatır
@@ -287,6 +337,7 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
         simulator.createTool(sdk, z, { cwd: dir, onAttach: () => send('sim:open', id) }),
         browser.createTool(sdk, z, { chatId: id, onOpen: () => send('browser:open', id) }),
         terminals.createTool(sdk, z, { chatId: id, accountId, cwd: dir, envId }),
+        preview.createTool(sdk, z, { chatId: id, openUrl: (url) => browser.openUrl(id, url, () => send('browser:open', id)) }),
         changes.createTool(sdk, z, { chatId: id, cwd: dir }),
         sessions.createTool(sdk, z, { chatId: id, cwd: dir, getModels: () => chats.get(id)?.models || infoCache.get(accountId)?.models }),
         ...(asArm ? [] : [wrapup.createTool(sdk, z)]),
@@ -305,7 +356,9 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
       ];
       // Panelin araçlarından yalnız sık kullanılanlar yüklü, öbürleri araç aramasına ertelenir (artifacts.js → ALWAYS_LOAD);
       // başın sistem istemi kolları, hafızayı, defteri ve danışmayı andığı için başta onlar da yüklü
-      const load = wantOctopus && !worktree && !parentId ? HEAD_TOOLS : [];
+      // Kendiliğinden doğrulama (preview.js): ayar açık ve projede launch.json varsa talimat sistem istemine, andığı araçlar yüklü
+      const { verify } = preview.bind(id, { accountId, dir, envId });
+      const load = [...(wantOctopus && !worktree && !parentId ? HEAD_TOOLS : []), ...(verify ? preview.VERIFY_TOOLS : [])];
       const panelMcp = await artifacts.createMcpServer(sdk, { cwd: dir, accountId, getSessionId: () => sessionId, onArtifact, extraTools, load });
       // Ahtapotun başı (octopus.js): yeni ahtapot ('new') ya da "Devam et" ile açılan baş (ahtapot kimliği).
       // Ayrı kopyada açılmaz: kopya kapanınca silinir, baş oraya geri dönemezdi. Sistem istemi (hafıza talimatı) buna bağlı olduğu için
@@ -322,9 +375,10 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
         // Başa hafıza, görev ve defter talimatı (hafiza.js, octopus.js, defter.js → HEAD_PROMPT): bağlamda olmayanı önce hatirla ile arasın; işi kollara versin; ret, zevk, karar,
         // kural ve açık işi deftere yazsın. "Beyin yap" ile baş olan sohbet bunları ancak yeniden açılınca alır (sistem istemi süreç açılırken verilir).
         // Kola rapor biçimi (octopus.js → ARM_PROMPT).
-        // Her sohbete görev listesi talimatı (wrapup.js → PLAN_PROMPT), rolün talimatından sonra.
+        // Her sohbete görev listesi talimatı (wrapup.js → PLAN_PROMPT), rolün talimatından sonra; açıksa kendiliğinden doğrulama (preview.js).
         systemPrompt: { type: 'preset', preset: 'claude_code',
-          append: [...(octoId ? [hafiza.HEAD_PROMPT, octopus.HEAD_PROMPT, defter.HEAD_PROMPT] : asArm ? [octopus.ARM_PROMPT] : []), wrapup.PLAN_PROMPT].join('\n\n') },
+          append: [...(octoId ? [hafiza.HEAD_PROMPT, octopus.HEAD_PROMPT, defter.HEAD_PROMPT] : asArm ? [octopus.ARM_PROMPT] : []), wrapup.PLAN_PROMPT,
+            ...(verify ? [preview.VERIFY_PROMPT] : [])].join('\n\n') },
         settingSources: ['user', 'project', 'local'], // CLAUDE.md, hook'lar, izinler, skill'ler
         mcpServers: { panel: panelMcp },
         allowedTools: ['mcp__panel__publish_artifact', 'mcp__panel__show', 'mcp__panel__show_widget', 'mcp__panel__wrap_up', 'mcp__panel__plan', 'mcp__panel__open',
@@ -337,6 +391,10 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
         // Arka plan görevlerini arayüz tek tek durdurur (chat:stopTask): "Durdur" yalnız turu keser, arka plandaki alt ajanlar sürer.
         // Bildirilmezse "Durdur" arka plandaki alt ajanları da öldürür (ölçüldü; arka plan Bash'i öldürmüyor)
         perTaskStopAffordance: true,
+        // Önerilen istem (config.json → promptSuggestions, varsayılan kapalı): 2. turdan itibaren her tur sonunda (result'tan sonra)
+        // prompt_suggestion. Claude Code bunu aynı modele, ana konuşmanın önbelleğiyle ayrı bir istekle üretir (2026-10-26'da gerçek CLI
+        // 2.1.310'da ölçüldü: olcum/kolayliklar.mjs oneri); ilk turda, plan kipinde ve kabuk mesajından sonra istek yok. Yan oturumlara verilmez.
+        ...(getPromptSuggestions?.() && !parentId ? { promptSuggestions: true } : {}),
         hooks: hooks.create({ chatId: id, accountId }), // Claude Code kancaları (hooks.js): günlük, otomatik sıkıştırma izni (compaction.js), defteri masaya koyma (defter.js)
         allowDangerouslySkipPermissions: true, // "Tam yetki" moduna sonradan geçebilmek için
         stderr: (d) => { stderrTail = (stderrTail + d).slice(-4000); },
@@ -350,15 +408,19 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
           // Terminal: okumak sormadan; komut çalıştırmak her seferinde, Claude'un açmadığı sekmeyi durdurmak kartla (terminals.js)
           // PR: bakmak ve izlemek sormadan; otomatik düzeltmeyi açmak kartla (prwatch.js)
           let site = null;
-          const RULES = { mcp__panel__browser: browser, mcp__panel__terminal: terminals, mcp__panel__sessions: sessions, mcp__panel__pr: prwatch };
+          // Önizleme: listelemek, okumak, durdurmak sormadan; bir yapılandırmanın komutu bu sohbette ilk kez çalışırken kartla (preview.js)
+          const RULES = { mcp__panel__browser: browser, mcp__panel__terminal: terminals, mcp__panel__sessions: sessions, mcp__panel__pr: prwatch, mcp__panel__preview: preview };
           if (RULES[toolName]) {
             site = RULES[toolName].permission(id, input, { cwd: dir, project, models: chats.get(id)?.models || infoCache.get(accountId)?.models });
             if (!site) return Promise.resolve({ behavior: 'allow', updatedInput: input });
           }
           const suggestions = site ? undefined : o.suggestions;
-          return openCard({ toolName, input, title: site?.title || o.title, description: o.description, decisionReason: o.decisionReason,
-            blockedPath: o.blockedPath, suggestions, signal: o.signal, waitTitle: site?.title, onAllow: site?.origin ? () => browser.allowOrigin(id, site.origin) : null });
+          return openCard({ toolName, input, title: site?.title || o.title, description: o.description, decisionReason: site?.detail || o.decisionReason,
+            blockedPath: o.blockedPath, suggestions, signal: o.signal, waitTitle: site?.title,
+            onAllow: site?.onAllow || (site?.origin ? () => browser.allowOrigin(id, site.origin) : null) });
         },
+        // Verilmezse SDK her isteği kendiliğinden reddeder (decline); kancalar (Elicitation) önce çalışır
+        onElicitation: (request, o) => openElicitation(request, o.signal),
       };
       // Test için: sahte bir Claude Code çalıştırılabiliri verilebilir
       if (process.env.CLAUDE_PANEL_CLAUDE_BIN) options.pathToClaudeCodeExecutable = process.env.CLAUDE_PANEL_CLAUDE_BIN;
@@ -370,11 +432,15 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
 
       // Sohbetin kaydı. Beden (Claude Code süreci: q, queue) yeniden doğuşta (dogus.js) değişir; sohbet kimliği, sekme, kollar ve kartlar aynı kalır.
       const c = {
-        q: null, queue: null, pending, accountId, project, worktree, dir, parentId: parentId || null, getSessionId: () => sessionId,
+        id, q: null, queue: null, pending, accountId, project, worktree, dir, parentId: parentId || null, getSessionId: () => sessionId,
         body: 0, waiters: [], model: model || null, effort: effort || null, permissionMode: permissionMode || null, rebirthing: false,
         // Geri sarma: akışta görülen son zincir kaydı (yeni oturumda null: ilk mesajın öncesi yok; sürdürülende bilinmiyor) ve mesaj başına o anki değeri
         lastChain: mode === 'new' ? null : undefined, forks: new Map(), epoch: 0, rewinding: false,
+        // Kuyruk: Claude Code'a gidip henüz alınmamış mesajlar (uuid → mesaj) ve bir turun sürüp sürmediği (araya girme / kendi turu ayrımı)
+        queued: new Map(), inTurn: false,
         bgTasks: 0, // arka planda süren görev sayısı (süreç başına; yeni bedende sıfır)
+        env, // kabuk kipi (kabuk.js) komutu Claude'un ortamıyla çalıştırır
+        shells: new Set(), shellTurn: false, // Claude Code'a gidip henüz işlenmemiş kabuk mesajları ve onların boş "turu" (pushShell)
         configDir: env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), // oturum kaydı burada (yalnız okunur)
       };
       chats.set(id, c);
@@ -391,10 +457,36 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
         let held = probe ? [] : null;
         const handle = (msg) => {
           if (msg.session_id && msg.session_id !== sessionId) { sessionId = msg.session_id; octopus.noteSession(id, sessionId); }
+          if (shellSwallows(c, msg)) return;
           // Zincirdeki son kayıt (Claude'un mesajı ya da araç sonucu; alt ajanınki sayılmaz): kayıttaki ebeveynle aynı kimlik (ölçüldü)
           if (msg.uuid && !msg.parent_tool_use_id && !msg.isReplay && (msg.type === 'assistant' || (msg.type === 'user' && Array.isArray(msg.message?.content)))) c.lastChain = msg.uuid;
+          if (msg.type === 'assistant' && !msg.parent_tool_use_id) c.inTurn = true;
+          // Kuyruk (2026-10-26'da gerçek CLI 2.1.310'da ölçüldü): kimlikli her mesaja command_lifecycle queued → started → completed ya da
+          // cancelled. started tur sürerken gelirse mesaj sonraki araç adımında araya girdi (kayıtta queued_command, kendi turu yok); tur
+          // bittikten sonra gelirse kendi turunu açtı (araçsız turda, priority 'later'da, "Durdur"dan sonra): o tur da meşgul sayılır,
+          // session_state_changed arada idle'a düşmediği için başka işaret yok. Geri sarmanın yeri de buna göre düzelir.
+          if (msg.type === 'command_lifecycle' && msg.command_uuid) {
+            const u = msg.command_uuid;
+            if (msg.state !== 'queued') c.queued.delete(u);
+            if (msg.state === 'started') {
+              const f = c.forks.get(u);
+              if (f) Object.assign(f, { at: c.inTurn ? false : c.lastChain, epoch: c.epoch });
+              if (!c.inTurn && !busy.has(id)) { sessions.noteBusy(id); setBusy(id, true); }
+              c.inTurn = true;
+            }
+          }
           // Claude Code'un kendiliğinden açtığı tur (arka plan görevi bitti): panel de meşgul sayar (uyanık tutma, geri sarma, kolun durumu)
           if (msg.type === 'system' && msg.subtype === 'session_state_changed' && msg.state === 'running' && !busy.has(id)) { sessions.noteBusy(id); setBusy(id, true); }
+          // Sunucu adres kipindeki isteğin tamamlandığını bildirdi: kart hâlâ açıksa kabul sayılır (kullanıcı "Tamamladım"a basmadan bitirdi)
+          if (msg.type === 'system' && msg.subtype === 'elicitation_complete') {
+            for (const [rid, p] of pending) {
+              if (p.elicit?.elicitationId !== msg.elicitation_id || p.elicit.serverName !== msg.mcp_server_name) continue;
+              pending.delete(rid);
+              if (!pending.size) sessions.noteWaiting(id, false);
+              p.resolve({ action: 'accept' });
+              send('chat:permissionDone', id, rid, 'complete');
+            }
+          }
           // Arka plandaki görevlerin tamamı (her değişimde yeniden): uyanık tutma ve geri sarma uyarısı bundan
           if (msg.type === 'system' && msg.subtype === 'background_tasks_changed') { c.bgTasks = (msg.tasks || []).filter((t) => !t.ambient).length; updateAwake(); }
           if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
@@ -414,6 +506,7 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
             if (todo) octopus.noteTodos(id, todo.input?.todos); // kolun ilerlemesi ahtapot kaydına
           }
           if (msg.type === 'result') {
+            c.inTurn = false;
             setBusy(id, false);
             sessions.turnEnded(id, msg.subtype === 'success');
             compaction.refresh(id, q).then((u) => { if (c.body === body) sinav.turnEnded(id, u); }); // sınavın tahmini bu ölçümden
@@ -436,12 +529,13 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
             send('chat:end', id, (err?.message || String(err)) + (detail ? '\n' + detail : ''));
           } finally {
             if (c.body === body && !held) {
-              for (const { resolve } of pending.values()) resolve({ behavior: 'deny', message: 'Oturum kapandı' });
+              for (const { resolve, elicit } of pending.values()) resolve(elicit ? { action: 'cancel' } : { behavior: 'deny', message: 'Oturum kapandı' });
               pending.clear();
               for (const w of c.waiters.splice(0)) w(null);
               chats.delete(id);
               setBusy(id, false);
               browser.forget(id);
+              preview.forget(id);
               sessions.closed(id);
               octopus.chatClosed(id);
               prwatch.forget(id);
@@ -450,6 +544,7 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
               defter.forget(id);
               sinav.forget(id);
               dogus.forget(id);
+              kabuk.forget(String(id));
             }
           }
         })();
@@ -567,6 +662,57 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
     pushUser(id, c, content, uuid);
   });
 
+  // ---------- Kabuk kipi: "!komut" (kabuk.js) ----------
+  // Komut sohbetin klasöründe ve ortamında çalışır, çıktı arayüze akar (chat:shellData); bitince Claude'a kayıt eki olarak gider.
+  // Sohbet bu arada kapandıysa ya da yeniden doğuş/geri sarma sürüyorsa gitmez (sent: false).
+  ipcMain.handle('chat:shell', async (_e, id, runId, cmd) => {
+    const c = chats.get(id);
+    if (!c?.queue) return { ok: false, error: 'Sohbet kapalı.' };
+    if (typeof cmd !== 'string' || !cmd.trim() || cmd.length > 20000 || !/^[\w-]{1,40}$/.test(String(runId))) return { ok: false, error: 'Geçersiz komut.' };
+    if (c.rebirthing || c.rewinding) return { ok: false, error: 'Yeniden doğuş ya da geri sarma sürüyor.' };
+    const r = await kabuk.run({ key: `${id}:${runId}`, cmd, cwd: c.dir, env: c.env, onData: (stream, text) => send('chat:shellData', id, runId, stream, text) }).done;
+    const cc = chats.get(id);
+    const sent = !!cc?.queue && cc === c && !c.rebirthing && !c.rewinding;
+    if (sent) pushShell(c, kabuk.message(cmd, r));
+    return { ok: true, sent, code: r.code, signal: r.signal, error: r.error, ms: r.ms, stopped: r.stopped, timedOut: r.timedOut, truncated: r.truncated };
+  });
+  ipcMain.handle('chat:shellStop', (_e, id, runId) => kabuk.stop(`${id}:${runId}`));
+
+  // ---------- Kuyruk: Claude çalışırken giden mesajı geri alma ve hemen gönderme (2026-10-26'da gerçek CLI 2.1.310'da ölçüldü) ----------
+  // cancelAsyncMessage alınmamış mesajda true (command_lifecycle cancelled, API'ye hiç gitmez), araya girmiş ya da bilinmeyende false döner.
+  // İptal edilen kimlikle yeniden gönderilen mesaj sessizce düşer (lifecycle bile gelmez): hemen gönderme yeni kimlik alır.
+  // priority 'now': süren aracı (Bash, MCP) arka plana alıp mesajı hemen verir; araçsız yanıtı keser (kesinti işareti yok), mesaj kendi
+  // turunda gider. CLI'nin iç "Send now"ı (interrupt + send_now) aynısını yapar ama SDK'da yok; bu yol yalnız tiplerdeki alanları kullanır.
+  const withdrawQueued = async (c, uuid) => {
+    const msg = c.queued.get(uuid); // beklemeden önce: cancelled olayı yanıttan önce gelir ve kaydı siler
+    if (!msg) return { ok: false, taken: true };
+    let ok;
+    try { ok = (await withTimeout(c.q.cancelAsyncMessage(uuid), 10000)) === true; } catch (err) { return { ok: false, error: err?.message || String(err) }; }
+    if (!ok) return { ok: false, taken: true }; // bu arada aldı (started yolda)
+    c.queued.delete(uuid);
+    c.forks.delete(uuid);
+    return { ok: true, msg };
+  };
+  ipcMain.handle('chat:withdraw', async (_e, id, uuid) => {
+    const c = chats.get(id);
+    if (!c?.q || typeof uuid !== 'string') return { ok: false, error: 'Sohbet kapalı.' };
+    const r = await withdrawQueued(c, uuid);
+    return { ok: r.ok, taken: r.taken, error: r.error };
+  });
+  ipcMain.handle('chat:sendNow', async (_e, id, uuid) => {
+    const c = chats.get(id);
+    if (!c?.q || typeof uuid !== 'string') return { ok: false, error: 'Sohbet kapalı.' };
+    if (c.rebirthing || c.rewinding) return { ok: false, error: 'Yeniden doğuş ya da geri sarma sürüyor.' }; // chat:send gibi
+    const r = await withdrawQueued(c, uuid);
+    if (!r.ok) return { ok: false, taken: r.taken, error: r.error };
+    const fresh = require('crypto').randomUUID();
+    const msg = { ...r.msg, uuid: fresh, priority: 'now' };
+    c.forks.set(fresh, { at: false, epoch: c.epoch }); // started gelince düzelir
+    c.queued.set(fresh, msg);
+    c.queue.push(msg);
+    return { ok: true, uuid: fresh };
+  });
+
   // ---------- Arka plan görevleri (Claude Code'un /tasks'ı ve Ctrl+B'si; 2026-10-25'te gerçek CLI 2.1.300'de ölçüldü) ----------
   // Tek görevi durdurur: task_notification 'stopped' gelir; durdurulan alt ajandan sonra Claude Code kendiliğinden tur açar, Bash'ten sonra açmaz
   const TASK_ID_RE = /^[\w-]{1,80}$/;
@@ -659,7 +805,8 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
     if (!p) return;
     c.pending.delete(rid);
     if (!c.pending.size) sessions.noteWaiting(id, false);
-    if (reply.behavior === 'allow') {
+    if (p.elicit) p.resolve(elicitationResult(p.elicit, reply));
+    else if (reply.behavior === 'allow') {
       const result = { behavior: 'allow', updatedInput: reply.updatedInput || p.input };
       if (reply.always && p.suggestions?.length) result.updatedPermissions = p.suggestions;
       p.resolve(result);
@@ -667,6 +814,14 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
       p.resolve({ behavior: 'deny', message: reply.message || 'Kullanıcı reddetti', interrupt: !!reply.interrupt });
     }
     send('chat:permissionDone', id, rid);
+  });
+  // Adres kipindeki elicitation: adres arayüzden değil, ana süreçte saklanan istekten açılır (yalnız http/https)
+  ipcMain.handle('chat:elicitationOpen', (_e, id, rid) => {
+    const url = chats.get(id)?.pending.get(rid)?.elicit?.url;
+    if (!/^https?:$/.test(safeUrl(url)?.protocol || '')) return { ok: false, error: 'Bu adres açılamaz (yalnız http ve https).' };
+    if (process.env.CLAUDE_PANEL_OPEN_LOG) fs.appendFileSync(process.env.CLAUDE_PANEL_OPEN_LOG, JSON.stringify({ how: 'external', args: [url] }) + '\n');
+    else require('electron').shell.openExternal(url);
+    return { ok: true };
   });
 
   // ---------- Hesap bilgisi: model listesi ve plan kullanımı ----------
@@ -946,8 +1101,17 @@ function setup({ getWindow, getAccount, getEnvironment, expandHome, artifacts, g
     }
   });
 
+  // "Durdur" her şeyi durdurur: kuyruktaki mesajlar da çekilir (cancelQueued; SDK belgesinin arayüz Durdur'u için önerdiği), yoksa
+  // durdurulan turun hemen ardından kendi turlarında çalışırlardı (ölçüldü). Çekilenlerin kimlikleri arayüze döner, yazma kutusuna geri konur.
+  // SDK'nın interrupt() tipi argüman almıyor ama gövdesi { cancelQueued } okuyor (0.3.310); cevaptaki cancelled tiplerde var.
   ipcMain.handle('chat:interrupt', async (_e, id) => {
-    try { await chats.get(id)?.q.interrupt(); return true; } catch { return false; }
+    const c = chats.get(id);
+    try {
+      const r = await c?.q.interrupt({ cancelQueued: true });
+      const cancelled = (r?.cancelled || []).filter((u) => typeof u === 'string');
+      for (const u of cancelled) { c.queued.delete(u); c.forks.delete(u); }
+      return { ok: true, cancelled };
+    } catch { return { ok: false, cancelled: [] }; }
   });
   ipcMain.handle('chat:setModel', async (_e, id, model) => {
     const c = chats.get(id);
@@ -1028,6 +1192,33 @@ function waitingSummary(toolName, input = {}, title) {
   return 'İzin: ' + toolName + (typeof input.command === 'string' ? ' · ' + input.command.slice(0, 120) : '');
 }
 
+// MCP sunucusunun elicitation isteği (SDK ElicitationRequest): metinler sunucunundur, arayüzde düz metin olarak çizilir.
+// Şema yalnız formda, adres yalnız adres kipinde.
+function elicitationRequest(r = {}) {
+  const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+  const mode = r.mode === 'url' ? 'url' : 'form';
+  const schema = mode === 'form' && r.requestedSchema && typeof r.requestedSchema === 'object' ? r.requestedSchema : null;
+  return {
+    serverName: str(r.serverName, 200) || 'MCP', message: str(r.message, 4000), mode,
+    url: mode === 'url' ? str(r.url, 4000) : '', elicitationId: str(r.elicitationId, 200) || null, requestedSchema: schema,
+    title: str(r.title, 200), displayName: str(r.displayName, 200), description: str(r.description, 1000),
+  };
+}
+// Arayüzün yanıtından ElicitResult. Formda yalnız şemadaki alanlar ve düz değerler geçer; şemaya uymayan içerik
+// Claude Code'da reddedilir (-32602 "does not match requested schema", araç hata döner; ölçüldü), arayüz bu yüzden önce denetler.
+function elicitationResult(el, reply = {}) {
+  const action = ['accept', 'decline', 'cancel'].includes(reply.action) ? reply.action : 'cancel';
+  if (action !== 'accept' || el.mode !== 'form') return { action };
+  const props = el.requestedSchema?.properties || {};
+  const content = {};
+  for (const [k, v] of Object.entries(reply.content || {})) {
+    if (!Object.hasOwn(props, k)) continue;
+    if (['string', 'number', 'boolean'].includes(typeof v) || (Array.isArray(v) && v.every((x) => typeof x === 'string'))) content[k] = v;
+  }
+  return { action, content };
+}
+const safeUrl = (u) => { try { return new URL(u); } catch { return null; } };
+
 // Sekme kapanınca (ya da panel kapanırken) çağrılır. Ayrı kopya temizse silinir, değilse korunur ve arayüze bildirilir.
 function closeChat(id) {
   const c = chats.get(id);
@@ -1045,6 +1236,7 @@ function closeChat(id) {
 
 function closeAll() {
   octopus.shutdown(); // panel kapanıyor: kapanan kollar "kesildi" sayılmaz
+  kabuk.forget(); // süren kabuk komutları (süreç grupları) panelle ölür
   for (const id of [...chats.keys()]) closeChat(id);
 }
 

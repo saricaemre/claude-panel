@@ -1,6 +1,6 @@
 /* Claude Panel — bağlam göstergesi ve sıkıştırma izni (ana süreç: compaction.js; docs/octopus/OCTOPUS-PLANI.md İ1, P2.2).
-   Yazma kutusunun çubuğunda bir halka ve yüzde (her tur sonunda getContextUsage), %80'de uyarı kartı.
-   Claude Code otomatik sıkıştırmak isteyince ana süreç bloklar, burada onay kartı açılır.
+   Yazma kutusunun çubuğunda bir halka ve yüzde (her tur sonunda getContextUsage); %80'de halka uyarı rengine döner, kart açılmaz.
+   Claude Code otomatik sıkıştırmak isteyince ana süreç sessizce bloklar; sıkıştırma yalnız kullanıcı isteyince.
    Ahtapotun başında bir kez: oturum kayıtlarının saklama süresi önerisi (cleanupPeriodDays). */
 
 // "Talimatla sıkıştır"ın /compact talimatı. Üst üste sıkıştırmada düşen bilgilere göre seçildi (OCTOPUS-PLANI.md §6.2).
@@ -46,73 +46,44 @@ function setContextUsage(tab, u) {
   btn.label.textContent = `%${pct}`;
   btn.title = `Bağlam penceresi: %${pct} dolu` + (u.totalTokens && u.maxTokens ? ` (${fmtTokens(u.totalTokens)} / ${fmtTokens(u.maxTokens)} token)` : '')
     + '\nTıklayın: talimatla sıkıştır' + (tab.octopusId ? ' ya da yeniden doğ' : '');
-  if (pct < CONTEXT_WARN) { tab.ctxWarned = false; return; }
-  if (tab.ctxWarned) return;
-  tab.ctxWarned = true; // eşik her aşılışında bir kez
-  const ask = state.cfg.autoCompact !== 'allow';
-  compactCard(tab, 'warn', `Bağlam %${pct} doldu`,
-    !u.autoCompact ? 'Otomatik sıkıştırma kapalı; pencere dolarsa Claude Code devam edemeyebilir.'
-      : ask ? 'Claude Code yakında kendiliğinden sıkıştırmak isteyecek; onayınız olmadan sıkıştırılmaz. Şimdi talimatla sıkıştırırsanız neyin korunacağını siz belirlersiniz.'
-        : 'Claude Code yakında kendiliğinden sıkıştıracak (Ayarlar → Octopus: İzin ver). Şimdi talimatla sıkıştırırsanız neyin korunacağını siz belirlersiniz.');
 }
 
-// ---------- Kartlar ----------
-
-// Açık kartlardan yalnız sonuncusu yanıt bekler; yenisi gelince ya da kullanıcı sıkıştırınca eskiler kapanır
-function retireCompactCards(tab) {
-  for (const c of tab.list.querySelectorAll('.compact-card.ctx:not(.answered)')) {
-    c.classList.add('answered');
-    for (const b of c.querySelectorAll('button')) b.disabled = true;
-  }
-}
-
-function compactCard(tab, kind, title, text) {
-  retireCompactCards(tab);
-  markStarted(tab);
-  endGroup(tab);
-  const card = h('div', { class: `compact-card ctx ${kind}` },
-    h('div', { class: 'perm-title' }, title),
-    h('div', { class: 'compact-text' }, text),
-    h('div', { class: 'compact-keep' }, 'Talimatla sıkıştırmada korunacaklar: retler ve gerekçeleri, zevk ve kalite çıtası alıntıları, oturumun ilk görevi, açık işler, karar kimlikleri.'),
-    h('div', { class: 'perm-actions' },
-      h('button', { class: 'primary-btn', onclick: () => compactNow(tab) }, 'Talimatla sıkıştır'),
-      // Ahtapotun başında: sıkıştırma yerine yeniden doğuş (renderer/dogus.js; önce bedeli gösterip onay ister)
-      tab.octopusId ? h('button', { class: 'ghost-btn rebirth-btn', onclick: () => offerRebirth(tab) }, 'Yeniden doğsun') : null,
-      h('button', { class: 'ghost-btn', onclick: () => {
-        retireCompactCards(tab);
-        if (kind === 'blocked') note(tab, 'Sıkıştırılmadı. Bağlam dolmaya devam ederse Claude Code yeniden sorar.', 'muted');
-      } }, 'Şimdilik devam')));
-  append(tab, card);
-  scrollDown(tab, true);
-  return card;
-}
+// Uyarı ya da onay kartı yok (Emre, 2026-10-26: "ben istersem sıkıştırırım"). Sıkıştırma yalnız kullanıcı isteyince: halkanın menüsündeki
+// "Talimatla sıkıştır" ya da /compact. Claude Code'un kendi otomatik sıkıştırması ana süreçte sessizce engellenir (compaction.js, İ1);
+// eşiğin üstünde Claude Code her istekten önce yeniden dener, eskiden her denemede kart açılıyordu.
 
 function compactNow(tab) {
   if (!tab.chatId) return toast('Sohbet açık değil.');
-  retireCompactCards(tab);
   sendMessage(tab, '/compact ' + COMPACT_TEMPLATE); // renderer/chat.js
 }
 
-function showCompactBlocked(tab, info) {
+function showCompactBlocked(tab) {
   tab.compactBlocked = true; // ardından gelen compact_result: 'failed' ayrıca not yazmaz
-  if (tab.reborning) return note(tab, 'Otomatik sıkıştırma atlandı: yeniden doğuş sürüyor.', 'muted'); // renderer/dogus.js
-  compactCard(tab, 'blocked', info?.percentage != null ? `Bağlam %${info.percentage} doldu` : 'Bağlam doldu',
-    'Claude Code şimdi kendiliğinden sıkıştıracaktı; onayınız olmadan sıkıştırılmaz.');
-  if (!isVisible(tab) || !document.hasFocus()) flagAttention(tab, 'Bağlam doldu: sıkıştırma onayınızı bekliyor');
+  tab.autoBlockedAt = Date.now(); // Claude Code'un "Compaction blocked…" metni de sohbete çizilmez (renderer/chat.js → blockedCompactText)
+}
+// Engellenen otomatik sıkıştırmanın Claude Code'un yazdığı metni (status'la aynı metin, bir asistan mesajı olarak)
+function blockedCompactText(tab, msg) {
+  if (!tab.autoBlockedAt || Date.now() - tab.autoBlockedAt > 10000) return false;
+  const text = (msg.message?.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  return /^Compaction blocked by PreCompact hook/.test(text);
 }
 
-// status mesajları: "özetleniyor" notu sıkıştırma bitince ya da atlanınca kalkar (eskiden atlanan sıkıştırmada kalıyordu)
+// status mesajları: "özetleniyor" notu sıkıştırma bitince ya da atlanınca kalkar (eskiden atlanan sıkıştırmada kalıyordu).
+// Not yalnız kullanıcının istediği sıkıştırmada (tab.compactRequested: /compact gönderildi) ya da otomatik sıkıştırmaya izin verildiyse:
+// engellenen her otomatik denemede de "compacting" geliyor, not bir an düşüp kalkıyordu.
 function compactStatus(tab, msg) {
   if (msg.status === 'compacting') {
+    if (!tab.compactRequested && state.cfg.autoCompact !== 'allow') return;
     tab.compactNote?.remove();
     tab.compactNote = note(tab, 'Sohbet özetleniyor…', 'muted');
     tab.compactBlocked = false;
     return;
   }
   if (!msg.compact_result) return;
+  tab.compactRequested = false;
   tab.compactNote?.remove();
   tab.compactNote = null;
-  // Kancanın atlattığı sıkıştırmayı Claude Code ayrıca bir mesajla bildirir; panelin bloku zaten kartta
+  // Kancanın atlattığı sıkıştırmayı Claude Code ayrıca bir mesajla bildirir; panelin bloku sessiz
   if (msg.compact_result === 'failed' && !tab.compactBlocked && !/^skipped/i.test(msg.compact_error || '')) {
     note(tab, 'Özetlenemedi: ' + (msg.compact_error || 'bilinmeyen hata'), 'error');
   }

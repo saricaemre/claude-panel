@@ -766,11 +766,19 @@ const TERM_QUERIES = {
     const tab = ownTerm(acctId, tabId);
     return { id: tab.ptyId, title: tab.title, cwd: tilde(tab.cwd), exited: tab.exited, text: termText(tab, lines) };
   },
-  async open({ acctId, cwd, envId, command }) {
+  // title: sekmenin adı (önizleme sunucusu: "Önizleme · web"); yoksa klasörün adı
+  async open({ acctId, cwd, envId, command, title }) {
     const tab = await launch(acctId, cwd, 'shell', null, envId || null, { background: true });
     if (!tab) throw new Error('Terminal açılamadı');
+    if (title) { tab.title = title; renderTabs(acctId); }
     window.panel.ptyWrite(tab.ptyId, command + '\r');
     return { id: tab.ptyId, title: tab.title };
+  },
+  // Önizleme sunucusunu durdurmak: sekme sorulmadan kapanır (pty ölür)
+  close({ acctId, tabId }) {
+    const tab = ownTerm(acctId, tabId);
+    closeTab(tab, true);
+    return {};
   },
   write({ acctId, tabId, data }) {
     const tab = ownTerm(acctId, tabId);
@@ -962,10 +970,22 @@ function openSettings(tab) {
   // Genel: uyanık tutma ve editör (Claude'un "editörde aç" aracı ve Değişiklikler bölmesindeki düğme, opener.js)
   const awake = h('input', { type: 'checkbox', id: 'keepAwake', onchange: (e) => save({ keepAwake: e.target.checked }) });
   awake.checked = state.cfg.keepAwake !== false;
+  // Önizleme (preview.js): launch.json'u olan projelerde Claude düzenlemeden sonra sayfaya bakar; açık sohbetlere sonraki mesajda söylenir
+  const verify = h('input', { type: 'checkbox', id: 'autoVerify', onchange: (e) => save({ autoVerify: e.target.checked }) });
+  verify.checked = state.cfg.autoVerify === true;
+  // Önerilen istem (chat-main.js → promptSuggestions): yeni sohbetlerde geçerli; Claude Code her turdan sonra ayrı bir istekle tahmin eder
+  const suggest = h('input', { type: 'checkbox', id: 'promptSuggestions', onchange: (e) => save({ promptSuggestions: e.target.checked }) });
+  suggest.checked = state.cfg.promptSuggestions === true;
   const editorSel = h('select', { id: 'editorChoice', onchange: (e) => save({ editor: e.target.value }) });
   $('#setGeneral').replaceChildren(
     h('label', { class: 'acct-form-opt' }, awake, h('span', {}, 'Claude çalışırken Mac uyumasın'),
       h('small', {}, 'Bir sohbette tur sürerken sistem uykusu engellenir; ekran yine kararabilir.')),
+    h('label', { class: 'acct-form-opt' }, verify, h('span', {}, 'Kendiliğinden doğrula (önizleme)'),
+      h('small', {}, 'Projede .claude/launch.json varsa Claude arayüzü etkileyen bir düzenlemeden sonra geliştirme sunucusunu açar, sayfaya bakar '
+        + '(ekran görüntüsü, konsol). Token harcar. Proje launch.json\'da "autoVerify": false ile kapatabilir.')),
+    h('label', { class: 'acct-form-opt' }, suggest, h('span', {}, 'Önerilen istem'),
+      h('small', {}, 'Her turdan sonra Claude Code bir sonraki mesajınızı tahmin eder; boş yazma kutusunda soluk görünür, Tab ile alınır. '
+        + 'Aynı modele ayrı bir istektir (konuşmanın önbelleğini kullanır, az da olsa kullanım harcar). Yeni sohbetlerde geçerli.')),
     h('label', { class: 'acct-form-opt acct-form-select' }, h('span', {}, 'Editör'), editorSel,
       h('small', {}, 'Claude bir dosyayı "editörde aç" dediğinde ve Değişiklikler bölmesinde kullanılır.')));
   window.panel.editorList().then((r) => {

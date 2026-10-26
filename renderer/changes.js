@@ -24,8 +24,8 @@ function statSpan(added, removed) {
     removed ? h('span', { class: 'ch-del' }, '−' + removed) : null);
 }
 
-// Birleşik diff → satır numaralı satırlar
-function unifiedView(text) {
+// Birleşik diff → satır numaralı satırlar; ctx ({ tab, abs }) verilirse satırlara yorum yazılır
+function unifiedView(text, ctx) {
   const box = h('div', { class: 'ch-diff' });
   const rows = [];
   let o = 0, n = 0, started = false;
@@ -44,8 +44,16 @@ function unifiedView(text) {
     else if (line.startsWith('\\')) rows.push(['note', '', '', line.slice(2)]);
   }
   if (!rows.length) return h('div', { class: 'ch-empty' }, /Binary files/.test(text) ? 'İkili dosya' : 'Gösterilecek satır yok');
-  const draw = (list) => box.append(...list.map(([k, a, b, t]) => h('div', { class: 'dl dl-' + k },
-    h('span', { class: 'ln' }, a), h('span', { class: 'ln' }, b), h('span', { class: 'lc' }, t))));
+  const draw = (list) => {
+    box.append(...list.map(([k, a, b, t]) => {
+      const row = h('div', { class: 'dl dl-' + k },
+        h('span', { class: 'ln' }, a), h('span', { class: 'ln' }, b), h('span', { class: 'lc' }, t));
+      if (ctx && (k === 'add' || k === 'del' || k === 'ctx')) commentRow(row, { k, o: a, n: b, t });
+      return row;
+    }));
+    if (ctx) drawLineComments(ctx.tab, box);
+  };
+  if (ctx) commentable(ctx.tab, box, ctx.abs, 'diff');
   draw(rows.slice(0, DIFF_LIMIT));
   if (rows.length > DIFF_LIMIT) {
     const more = h('button', { class: 'mini ch-more', onclick: () => { more.remove(); draw(rows.slice(DIFF_LIMIT)); } },
@@ -142,7 +150,7 @@ function changesView(tab) {
           loaded = true;
           const slot = d.querySelector('.ch-diff-slot');
           const dr = await window.panel.changesDiff(r.root, f.path);
-          slot.replaceChildren(dr.ok ? unifiedView(dr.diff) : h('div', { class: 'ch-empty err' }, dr.error),
+          slot.replaceChildren(dr.ok ? unifiedView(dr.diff, { tab, abs }) : h('div', { class: 'ch-empty err' }, dr.error),
             dr.truncated ? h('div', { class: 'ch-note' }, 'Diff çok büyük; kesildi.') : '');
         });
         body.append(d);
@@ -166,8 +174,10 @@ function changesView(tab) {
       const lines = r.content.split('\n');
       if (lines.length > 1 && lines.at(-1) === '') lines.pop();
       const box = h('div', { class: 'ch-diff ch-source' }, h('div', { class: 'ch-path' }, rel, fileActions(abs)),
-        ...lines.map((t, i) => h('div', { class: 'dl' + (i + 1 >= from && i + 1 <= to ? ' dl-mark' : '') },
-          h('span', { class: 'ln' }, i + 1), h('span', { class: 'lc' }, t))));
+        ...lines.map((t, i) => commentRow(h('div', { class: 'dl' + (i + 1 >= from && i + 1 <= to ? ' dl-mark' : '') },
+          h('span', { class: 'ln' }, i + 1), h('span', { class: 'lc' }, t)), { k: 'src', o: '', n: i + 1, t })));
+      commentable(tab, box, abs, 'source');
+      drawLineComments(tab, box);
       body.replaceChildren(box);
       box.querySelector('.dl-mark')?.scrollIntoView({ block: 'center' });
     },
@@ -215,6 +225,202 @@ function closeChangesInChat(tab) {
 
 function toggleChangesInChat(tab) {
   if (tab?.changesView) closeChangesInChat(tab); else openChangesInChat(tab);
+}
+
+// ---------- Satır yorumları (Claude Code masaüstündeki diff yorumu, CLI'deki /diff → ask) ----------
+// Satırın solundaki "+" ile yazılır; basılı sürükleyerek ya da kutu açıkken ⇧ ile tıklayarak aralık seçilir.
+// Yorumlar sekmede birikir (tab.lineComments), yazma alanındaki çipte sayılır ve sonraki mesajla toplu gider
+// (chat.js → submit, messageContent); kutudaki "Hemen gönder" (⌘Enter) yalnız o yorumu hemen yollar.
+// Claude'a <satir-yorumu dosya="…" satir="12-14"> bloğu olarak gider: seçilen satırların kodu (diff'te +/-/boşluk önekli) ve yorum.
+const COMMENT_CODE_MAX = 80; // blokta en çok bu kadar kod satırı
+let commentSeq = 0;
+
+// Kod ya da yorum bloğu kapatamasın: ardından gelen kısım Claude'a kullanıcının mesajı gibi görünürdü (chat.js → fileSafe gibi)
+const commentSafe = (s) => String(s).replace(/<(\/?satir-yorumu)/gi, '‹$1');
+const lineSpan = (a, b) => (a === b ? String(a) : `${a}-${b}`);
+const rowKey = (r) => `${r.__row.k}:${r.__row.o}:${r.__row.n}`;
+const lineRows = (box) => [...box.querySelectorAll(':scope > .dl')].filter((r) => r.__row);
+
+// Satırı yorumlanabilir yapar: k = add | del | ctx (diff) ya da src (dosya görünümü), o/n eski/yeni satır numarası
+function commentRow(row, data) {
+  row.__row = data;
+  row.prepend(h('button', { class: 'ln-add', tabindex: -1, title: 'Bu satıra yorum yaz (sürükleyerek ya da ⇧ ile aralık)', 'aria-label': 'Satıra yorum yaz' }, '+'));
+  return row;
+}
+
+function commentable(tab, box, abs, kind) {
+  box.dataset.path = abs;
+  box.dataset.kind = kind;
+  box.addEventListener('mousedown', (e) => {
+    const btn = e.target.closest('.ln-add');
+    if (!btn || e.button !== 0) return;
+    e.preventDefault(); // sürüklerken metin seçilmesin
+    const rows = lineRows(box);
+    const at = rows.indexOf(btn.parentElement);
+    const a = e.shiftKey && box.__sel ? box.__sel.a : at; // ⇧: açık kutunun ilk satırından buraya
+    let b = at;
+    const mark = () => {
+      const [i, j] = a <= b ? [a, b] : [b, a];
+      rows.forEach((r, k) => r.classList.toggle('dl-sel', k >= i && k <= j));
+    };
+    mark();
+    const over = (ev) => { const k = rows.indexOf(ev.target.closest?.('.dl')); if (k >= 0) { b = k; mark(); } };
+    const up = () => {
+      box.removeEventListener('mouseover', over);
+      window.removeEventListener('mouseup', up, true);
+      box.__sel = { a, b };
+      commentEditor(tab, box, rows.slice(Math.min(a, b), Math.max(a, b) + 1));
+    };
+    box.addEventListener('mouseover', over);
+    window.addEventListener('mouseup', up, true);
+  });
+}
+
+function makeComment(tab, box, range, text) {
+  const diff = box.dataset.kind === 'diff';
+  const news = range.map((r) => r.__row.n).filter(Boolean);
+  const old = !news.length; // yalnız silinen satırlar: numaralar eski dosyanın (HEAD)
+  const nums = old ? range.map((r) => r.__row.o).filter(Boolean) : news;
+  const abs = box.dataset.path;
+  return {
+    // Claude'a sohbetin klasörüne göre göreli, dışındaysa tam yol (relPath'in ~'lı yolu değil)
+    id: 'lc' + ++commentSeq, abs, file: abs.startsWith(tab.cwd + '/') ? abs.slice(tab.cwd.length + 1) : abs, kind: box.dataset.kind,
+    from: Math.min(...nums), to: Math.max(...nums), old, diff,
+    code: range.map((r) => (diff ? { add: '+', del: '-', ctx: ' ' }[r.__row.k] : '') + r.__row.t),
+    keys: [rowKey(range[0]), rowKey(range.at(-1))], // bölme yeniden çizilince satırları bulmak için
+    text,
+  };
+}
+
+const commentLabel = (c) => `${c.old ? 'Silinen satır' : 'Satır'} ${lineSpan(c.from, c.to)}`;
+
+// Tek açık kutu: yenisi açılınca eskisi kapanır (yeni yorumun yazısı taşınır). existing verilirse düzenleme.
+function commentEditor(tab, box, range, existing) {
+  const prev = box.querySelector(':scope > .lc-card.editing');
+  const carried = prev && !prev.__existing ? prev.__text() : '';
+  prev?.remove();
+  if (existing) box.__sel = null; // ⇧ ile aralık yalnız yeni yorumda
+  box.__editing = existing?.id || null;
+  box.querySelectorAll(':scope > .dl-sel').forEach((r) => r.classList.remove('dl-sel'));
+  for (const r of range) r.classList.add('dl-sel');
+  drawLineComments(tab, box);
+  const info = existing || makeComment(tab, box, range, '');
+  const input = h('textarea', { class: 'lc-input', rows: 3, placeholder: 'Claude\'a bu satırlar hakkında yazın…' });
+  input.value = existing ? existing.text : carried;
+  const close = () => {
+    card.remove();
+    box.__sel = null;
+    box.__editing = null;
+    box.querySelectorAll(':scope > .dl-sel').forEach((r) => r.classList.remove('dl-sel'));
+    drawLineComments(tab, box);
+  };
+  const save = (now) => {
+    const text = input.value.trim();
+    if (!text) return input.focus();
+    if (existing) { existing.text = text; close(); return syncLineComments(tab); }
+    const c = makeComment(tab, box, range, text);
+    close();
+    if (now && tab.chatId && !tab.exited && !tab.reborning && !tab.rewinding) return sendMessage(tab, [{ type: 'text', text: commentBlockText(c) }]);
+    if (now) toast('Şu an gönderilemiyor; yorum sonraki mesajla gidecek.');
+    (tab.lineComments ||= []).push(c);
+    syncLineComments(tab);
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); save(e.metaKey && !existing); }
+    else if (e.key === 'Escape') { e.stopPropagation(); close(); }
+  });
+  const card = h('div', { class: 'lc-card editing' },
+    h('div', { class: 'lc-head' }, icon('chat', 13), h('span', { class: 'lc-where' }, commentLabel(info))),
+    input,
+    h('div', { class: 'lc-actions' },
+      existing ? null : h('span', { class: 'lc-hint' }, 'Enter: sonraki mesajla · ⌘Enter: hemen'),
+      h('span', { class: 'spacer' }),
+      h('button', { class: 'mini', onclick: close }, 'İptal'),
+      existing ? null : h('button', { class: 'mini lc-now', title: 'Yalnız bu yorumu şimdi gönder (⌘Enter)', onclick: () => save(true) }, 'Hemen gönder'),
+      h('button', { class: 'mini main lc-save', title: 'Enter', onclick: () => save(false) }, existing ? 'Kaydet' : 'Yorum ekle')));
+  card.__existing = !!existing;
+  card.__text = () => input.value;
+  range.at(-1).after(card);
+  input.focus();
+}
+
+// Kutudaki bekleyen yorumlar: satırları işaretli, son satırın altında kart
+function drawLineComments(tab, box) {
+  box.querySelectorAll(':scope > .lc-card:not(.editing)').forEach((el) => el.remove());
+  box.querySelectorAll(':scope > .dl-cm').forEach((r) => r.classList.remove('dl-cm'));
+  const rows = lineRows(box);
+  const at = new Map(rows.map((r, i) => [rowKey(r), i]));
+  for (const c of tab.lineComments || []) {
+    if (c.abs !== box.dataset.path || c.kind !== box.dataset.kind || box.__editing === c.id) continue;
+    const i = at.get(c.keys[0]), j = at.get(c.keys[1]);
+    if (i == null || j == null || j < i) continue; // dosya değişti, satırlar yok: yorum çipte durur
+    const range = rows.slice(i, j + 1);
+    for (const r of range) r.classList.add('dl-cm');
+    range.at(-1).after(h('div', { class: 'lc-card', 'data-id': c.id },
+      h('div', { class: 'lc-head' }, icon('chat', 13), h('span', { class: 'lc-where' }, commentLabel(c) + ' · sonraki mesajla gidecek'),
+        h('span', { class: 'spacer' }),
+        h('button', { class: 'mini', onclick: () => commentEditor(tab, box, range, c) }, 'Düzenle'),
+        h('button', { class: 'mini lc-del', onclick: () => removeLineComment(tab, c.id) }, 'Sil')),
+      h('div', { class: 'lc-text' }, c.text)));
+  }
+}
+
+function syncLineComments(tab) {
+  renderCommentChip(tab);
+  for (const box of tab.changesView?.el.querySelectorAll('.ch-diff[data-path]') || []) drawLineComments(tab, box);
+}
+
+function removeLineComment(tab, id) {
+  tab.lineComments = (tab.lineComments || []).filter((c) => c.id !== id);
+  syncLineComments(tab);
+}
+
+function revealLineComment(tab, c) {
+  openChangesInChat(tab, c.kind === 'source' ? { mode: 'file', path: c.abs, line: c.from, endLine: c.to } : { path: c.abs });
+}
+
+// Yazma kutusunun başındaki çip: "N satır yorumu"; tıklanınca liste (yere git, tek tek ya da hepsini kaldır)
+function renderCommentChip(tab) {
+  const el = tab.commentsEl;
+  if (!el) return;
+  const list = tab.lineComments || [];
+  el.hidden = !list.length;
+  if (!list.length) tab.commentsOpen = false;
+  el.replaceChildren(...(list.length ? [
+    h('button', { class: 'cc-chip' + (tab.commentsOpen ? ' open' : ''), title: 'Yorumları göster', onclick: () => { tab.commentsOpen = !tab.commentsOpen; renderCommentChip(tab); } },
+      icon('chat', 14), h('span', { class: 'cc-count' }, `${list.length} satır yorumu`), h('small', {}, 'sonraki mesajla gider'), icon('chevronDown', 12)),
+    tab.commentsOpen ? h('div', { class: 'cc-list' },
+      ...list.map((c) => h('div', { class: 'cc-item', 'data-id': c.id },
+        h('button', { class: 'cc-go', title: 'Değişikliklerde göster', onclick: () => revealLineComment(tab, c) },
+          h('span', { class: 'cc-loc' }, `${c.file}:${lineSpan(c.from, c.to)}`), h('span', { class: 'cc-text' }, c.text)),
+        h('button', { class: 'icon-btn cc-x', title: 'Yorumu kaldır', onclick: () => removeLineComment(tab, c.id) }, icon('close', 12)))),
+      h('button', { class: 'mini cc-clear', onclick: () => { tab.lineComments = []; syncLineComments(tab); } }, 'Hepsini kaldır')) : null,
+  ].filter(Boolean) : []));
+}
+
+// Gönderilecek bloklar; bekleyen yorumlar boşalır
+function takeLineComments(tab) {
+  const list = tab.lineComments || [];
+  if (!list.length) return [];
+  tab.lineComments = [];
+  syncLineComments(tab);
+  return list.map((c) => ({ type: 'text', text: commentBlockText(c) }));
+}
+
+function commentBlockText(c) {
+  const code = c.code.slice(0, COMMENT_CODE_MAX);
+  // Çit koddaki en uzun ` dizisinden uzun: kod çiti kapatamaz
+  const run = Math.max(0, ...code.map((l) => Math.max(0, ...(l.match(/`+/g) || []).map((x) => x.length))));
+  const fence = '`'.repeat(Math.max(3, run + 1));
+  const cut = c.code.length > code.length ? `(Kodun ilk ${code.length} satırı; aralık ${c.code.length} satır.)\n` : '';
+  return `<satir-yorumu dosya="${xmlAttr(c.file)}" ${c.old ? 'silinen-satir' : 'satir'}="${lineSpan(c.from, c.to)}">\n`
+    + `${fence}${c.diff ? 'diff' : ''}\n${commentSafe(code.join('\n'))}\n${fence}\n${cut}${commentSafe(c.text)}\n</satir-yorumu>`;
+}
+
+// Balonda (renderer/chat.js → userBubble; geçmişte de) bloğun yerine dosya:satır ve yorum
+function parseCommentBlock(text) {
+  const m = /^<satir-yorumu dosya="([^"]*)" (satir|silinen-satir)="([^"]*)">\n(`{3,})[a-z]*\n[\s\S]*?\n\4\n([\s\S]*)\n<\/satir-yorumu>$/.exec(text);
+  return m && { file: xmlUnattr(m[1]), old: m[2] !== 'satir', lines: m[3], text: m[5].replace(/^\(Kodun ilk \d+ satırı; aralık \d+ satır\.\)\n/, '') };
 }
 
 window.panel.onChangesOpen((chatId, opts) => openChangesInChat(chatsById.get(chatId), opts || {}));
